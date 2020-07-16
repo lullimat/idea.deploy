@@ -1,6 +1,6 @@
 # Welcome to the idea.deploy project!
 
-Thanks for passing by! If you are visiting this repository it is likely because of the DSFD 2020 presentation I have given on July the 16$^th$ . As a first step I will posting here the code and the content of the paper about the higher order isotropy of the lattice pressure tensor for the Shan-Chen multi-phase model. This wil be available in a jupyter notebook format that will allow to reprdouce the various reults while displaying the content of the paper itself.
+Thanks for passing by! If you are visiting this repository it is likely because of the DSFD 2020 presentation I have given on July the 16th. As a first step I will posting here the code and the content of the paper about the higher order isotropy of the lattice pressure tensor for the Shan-Chen multi-phase model. This wil be available in a jupyter notebook format that will allow to reprdouce the various reults while displaying the content of the paper itself.
 
 However, this is only the first step.
 
@@ -11,3 +11,5 @@ The purpose of the idea.deploy project can be described in three points
 - To provide a unified open-source environment for scientific code for physics simulations
 - To assure the reproducibility of published numerical results (one of the fundamental features of the scientific method)
 - Acknowledgement of contributions
+
+Matteo Lulli, July 16th 2020
