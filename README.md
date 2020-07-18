@@ -12,5 +12,5 @@ The purpose of the idea.deploy project can be described in three points
 - To assure the reproducibility of published numerical results (one of the fundamental features of the scientific method)
 - Acknowledgement of contributions
 
-Matteo Lulli, July 16th 2020
+Matteo Lulli, July 19th 2020
 matteo.lulli@gmail.com
