@@ -13,4 +13,4 @@ The purpose of the idea.deploy project can be described in three points
 - Acknowledgement of contributions
 
 Matteo Lulli, July 16th 2020
-lulli@sustech.edu.cn
+matteo.lulli@gmail.com
