@@ -1,0 +1,15 @@
+wheel
+scipy
+numpy
+sympy
+matplotlib
+pybind11
+jupyter
+mako
+dill
+wheel
+h5py
+jupyter_contrib_nbextensions
+jupyter_nbextensions_configurator
+ipykernel
+sklearn
