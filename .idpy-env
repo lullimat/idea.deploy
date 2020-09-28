@@ -1,0 +1,40 @@
+# VENV variables
+VENV=${PWD}/idpy-env/
+VENV_SRC=${VENV}/src/
+VENV_BIN=${VENV}/bin/
+VENV_LIB=${VENV}/lib/
+
+# ALIASES
+LOAD_ALIAS_STRING="alias idpy-load='source ${VENV_BIN}/activate'"
+LOAD_ALIAS_STRING_SED=$(echo ${LOAD_ALIAS_STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
+GO_ALIAS_STRING="alias idpy-go='cd ${PWD}'"
+GO_ALIAS_STRING_SED=$(echo ${GO_ALIAS_STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
+JUPYTER_ALIAS_STRING="alias idpy-jupyter='jupyter notebook --port 4379 --no-browser'"
+JUPYTER_ALIAS_STRING_SED=$(echo ${JUPYTER_ALIAS_STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
+JUPYTER_FORWARD_ALIAS_STRING="alias idpy-jupyter-forward='ssh -N -f -L localhost:4379:localhost:4379'"
+JUPYTER_FORWARD_ALIAS_STRING_SED=$(echo ${JUPYTER_FORWARD_ALIAS_STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
+
+IDPY_ALIASES[0]="${LOAD_ALIAS_STRING}"
+IDPY_ALIASES[1]="${GO_ALIAS_STRING}"
+IDPY_ALIASES[2]="${JUPYTER_ALIAS_STRING}"
+IDPY_ALIASES[3]="${JUPYTER_FORWARD_ALIAS_STRING}"
+
+IDPY_ALIASES_SED[0]="${LOAD_ALIAS_STRING_SED}"
+IDPY_ALIASES_SED[1]="${GO_ALIAS_STRING_SED}"
+IDPY_ALIASES_SED[2]="${JUPYTER_ALIAS_STRING_SED}"
+IDPY_ALIASES_SED[3]="${JUPYTER_FORWARD_ALIAS_STRING_SED}"
+
+# CHECK SYSTEM
+# https://stackoverflow.com/questions/3466166/how-to-check-if-running-in-cygwin-mac-or-linux
+UNAME_OUT="$(uname -s)"
+case "${UNAME_OUT}" in
+    Linux*)     IDEP_OS="Linux";;
+    Darwin*)    IDEP_OS="MacOS";;
+    CYGWIN*)    IDEP_OS="Cygwin";;
+    MINGW*)     IDEP_OS="MinGw";;
+    *)          IDEP_OS="UNKNOWN:${UNAME_OUT}"
+esac
+
+IDPY=${PWD}/idpy/
+IDPY_TEST_STDOUT=${IDPY}/idpy_tests_stdout
+IDPY_TEST_STDERR=${IDPY}/idpy_tests_stderr
