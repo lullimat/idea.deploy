@@ -6,6 +6,24 @@ However, this is only the first step.
 
 The repository is at an early stage in this moment and will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
 
+## Installation
+### Install idea.deploy python virtual environment: idpy-env
+For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina.
+
+At the moment the main code base for the project is written in python and it heavily relies, among other modules, on PyCUDA [(https://documen.tician.de/pycuda/)](https://documen.tician.de/pycuda/), PyOpenCL [(https://documen.tician.de/pyopencl/)](https://documen.tician.de/pyopencl/) and numpy [(https://numpy.org)](https://numpy.org). In order to keep the user computer as clean as possible a python virtual environment is created through the script **idpy-init.sh** and the necessary dependencies downloaded and installed. PyCUDA and PyOpenCL are both compiled from source when possible. The python environment and the and the other optional system modifications (like new lines in the .bashrc) can be cleaned by using the script **idpy-clean.sh**. Since erasing filles must be taken with care, each "rm" command is executed only after the user reviews the files/directories that will be removed (please check the terms of the license). The purpose is to fully clean the changes performed by the use of **idpy-init.sh**
+
+### Typical usage for reproducing the results reported in a paper
+- Install the virtual environment: **bash idpy-init.sh**, reply to the questions and follow the prompted instructions
+- If you opted for installing the aliases either execute "source ~/.bashrc" or open a new terminal session and type "idpy-go" to reach the idea.deploy directory
+- Type "idpy-load" to load the python virtual environment
+- Go to the './papers' directory and execute "python idpy-papers.py" to list the available papers and select the one you wish to clone from its own git repository
+- "cd" into the cloned directory and launch the Jupyter server "idpy-jupyter"
+- copy and paste the url from the terminal in your browser to access and execute the notebook
+
+### Details
+- The alias "idpy-jupyter" launches a Jupyter notebook server (preferably) on the port 4379 with the "--no-browser" option
+- The alias "idpy-jupyter-forward remotehost" forwards to your computer the port 4379 (supposedly) used on the "remotehost" computer by the jupyter session opened within the idea.deploy python virtual environment
+
 ## Purpose of the project
 The purpose of the idea.deploy project can be described in three points
 - To provide a unified open-source environment for scientific code for physics simulations
@@ -29,24 +47,6 @@ Clearly, this is a grwoing computational project based on my work as a theoretic
 **idea.deploy** allows whoever is interested to pick up the work that is published through this platform exactly from the (edge) state at which it has been published, either on the arxiv, or after peer review in a journal. The main idea is that of serving the scientific community with reliable results which can be improved minimizing the cost of reproducing the results already obtained. Doing this implies much supplementary work on the side of those who publish their work through this platform (so far only myself) which is meant to be only for the sake of sparing people's time and give a possible way to implement reproducibility (a pillar of the scientific method) in computational physics. This is done as a "generous" act.
 
 Clearly, I am willing to collaborate with those reseachers who would like to port their code/work in this framework and use the idea.deploy project as a gateway for their own research. At the same time, researchers might be perfectly able to adapt the code themeselves in which case the only thing to do would be to interact for merging the code in the master branch and make it available. Moreover, the code could just be used, as it is, for other research outlets in which case citing the proper reference paper is highly recommended and appreciated.
-
-## Installation
-### Install idea.deploy python virtual environment: idpy-env
-For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina.
-
-At the moment the main code base for the project is written in python and it heavily relies, among other modules, on PyCUDA [(https://documen.tician.de/pycuda/)](https://documen.tician.de/pycuda/), PyOpenCL [(https://documen.tician.de/pyopencl/)](https://documen.tician.de/pyopencl/) and numpy [(https://numpy.org)](https://numpy.org). In order to keep the user computer as clean as possible a python virtual environment is created through the script **idpy-init.sh** and the necessary dependencies downloaded and installed. PyCUDA and PyOpenCL are both compiled from source when possible. The python environment and the and the other optional system modifications (like new lines in the .bashrc) can be cleaned by using the script **idpy-clean.sh**. Since erasing filles must be taken with care, each "rm" command is executed only after the user reviews the files/directories that will be removed (please check the terms of the license). The purpose is to fully clean the changes performed by the use of **idpy-init.sh**
-
-### Typical usage for reproducing the results reported in a paper
-- Install the virtual environment: **bash idpy-init.sh**, reply to the questions and follow the prompted instructions
-- If you opted for installing the aliases either execute "source ~/.bashrc" or open a new terminal session and type "idpy-go" to reach the idea.deploy directory
-- Type "idpy-load" to load the python virtual environment
-- Go to the './papers' directory and execute "python idpy-papers.py" to list the available papers and select the one you wish to clone from its own git repository
-- "cd" into the cloned directory and launch the Jupyter server "idpy-jupyter"
-- copy and paste the url from the terminal in your browser to access and execute the notebook
-
-### Details
-- The alias "idpy-jupyter" launches a Jupyter notebook server (preferably) on the port 4379 with the "--no-browser" option
-- The alias "idpy-jupyter-forward remotehost" forwards to your computer the port 4379 (supposedly) used on the "remotehost" computer by the jupyter session opened within the idea.deploy python virtual environment
 
 ## To do (short-term)
 At the moment the scripts can create a python virtual environment only for Linux and MacOS: no testing of the **idpy-init.sh** and **idpy-clean.sh** has been performed so far on Windows Linux Subsystem. Most probably the best approach will be to rewrite the above scripts in python so that they will be Os independent. However, quite a few implmentation details depend on the operative system, especially as far as compilers are concerned, e.g. escaping spaces when passing options flags and so on.
