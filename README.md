@@ -1,5 +1,7 @@
 # Welcome to the **idea.deploy** project!
 
+**During these first days of public exposure of this repository many changes are being pushed quite frequently. Please, keep on checking for updates. The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522) is now available!**
+
 Thanks for passing by! If you are visiting this repository it is likely because of the DSFD 2020 presentation I have given on July the 16th. This is the first version of the code base to be posted publicly on github. By tomorrow (Tuesday the 29th of September 2020) the code for reproducing the results of the Shan-Chen multi-phase pressure tensor isotropy paper will be available from the directory ./papers. Under this directory you will find a python script with the necessary information for pulling the Jupyter notebook.
 
 However, this is only the first step.
