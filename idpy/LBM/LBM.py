@@ -396,10 +396,9 @@ class RootLB(IdpySims):
         self.sims_idpy_memory['W_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['W_list'], tenet = tenet)
 
-    def DumpPopSnapshot(self, file_name = RootLB_Dump_def_name,
-                     custom_types = None):
+    def DumpPopSnapshot(self, file_name = RootLB_Dump_def_name):
         IdpySims.DumpSnapshot(self, file_name = file_name,
-                              custom_types = custom_types)
+                              custom_types = self.custom_types)
 
     def CleanAuxilliary(self):
         for key in self.aux_vars:
