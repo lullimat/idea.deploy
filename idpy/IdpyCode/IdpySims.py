@@ -34,9 +34,17 @@ class IdpySims(threading.Thread):
         threading.Thread.__init__(self)
         self.sims_vars = {}
         self.sims_idpy_memory = {}
+        self.daemon_flag = daemon_flag
+        '''
+        sims_dump_vars, sims_dump_idpy_memory:
+        lists contaiing the dictionary key to be dumped
+        if empty all key are dumped: these are to be set in the
+        child class: likely specified in a child class of a general
+        class
+        '''
         self.sims_dump_vars = []
         self.sims_dump_idpy_memory = []
-        self.daemon_flag = daemon_flag
+
 
     def DumpSnapshot(self, file_name = None, custom_types = None):
         if file_name is None:
@@ -68,7 +76,7 @@ class IdpySims(threading.Thread):
                 os.remove(file_name)
                 raise Exception("Cannot dump ", key, ": not allocated")
             else:
-                if len(self.sims_idpy_memory) == 0 or key in self.sims_dump_idpy_memory:
+                if len(self.sims_dump_idpy_memory) == 0 or key in self.sims_dump_idpy_memory:
                     _grp_idpy_memory.create_dataset(key, data = self.sims_idpy_memory[key].D2H())
 
         '''
@@ -81,3 +89,29 @@ class IdpySims(threading.Thread):
             
         _out_f.close()
 
+    def ReadSnapshotData(self, file_name = None, full_key = None):
+        if file_name is None:
+            raise Exception("Parameter file_name must not be None")
+        if full_key is None:
+            raise Exception("Parameter full_key must not be None")
+
+        _in_f = h5py.File(file_name, "r")
+        _sims_class_name = list(_in_f.keys())[0]
+        if  _sims_class_name != self.__class__.__name__:
+            print("File class: ", _sims_class_name)
+            print("Present class: ", self.__class__.__name__)
+            raise Exception("The file you are reading has been created by another class!")
+
+        if not full_key in _in_f:
+            raise Exception("Key", full_key, "cannot be found in", file_name)
+        _swap_data = np.array(_in_f.get(full_key))
+        _in_f.close()
+        return _swap_data
+        
+
+    def ReadSnapshotFull(self):
+        '''
+        ReadSnapshotFull:
+        the idea is to use the ReadSnapshotData applied to all cases
+        '''
+        pass
