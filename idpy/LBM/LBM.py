@@ -737,7 +737,7 @@ class ShanChenMultiPhase(RootLB):
         if 'optimizer_flag' in self.params_dict:
             self.optimizer_flag = self.params_dict['optimizer_flag']
         else:
-            self.optimizer_flag = False
+            self.optimizer_flag = True
 
         self.tenet = GetTenet(self.params_dict)
         if 'custom_types' in self.params_dict:
