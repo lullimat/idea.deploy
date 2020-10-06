@@ -42,8 +42,8 @@ class IdpySims(threading.Thread):
         child class: likely specified in a child class of a general
         class
         '''
-        self.sims_dump_vars = []
-        self.sims_dump_idpy_memory = []
+        self.sims_dump_vars, self.sims_dump_idpy_memory = [], []
+        self.sims_dump_vars_flag, self.sims_dump_idpy_memory_flag = True, True
 
 
     def DumpSnapshot(self, file_name = None, custom_types = None):
@@ -57,27 +57,29 @@ class IdpySims(threading.Thread):
         _grp  = _out_f.create_group(self.__class__.__name__)
 
         '''
+        dumping vars
+        '''
+        if self.sims_dump_vars_flag:
+            _grp_vars = _grp.create_group("vars")
+
+            for key in self.sims_vars:
+                if len(self.sims_dump_vars) == 0 or key in self.sims_dump_vars:
+                    _grp_vars.create_dataset(key, data = self.sims_vars[key])
+        
+        '''
         dumping idpy_memory
         '''
-        _grp_vars = _grp.create_group("vars")
-        
-        for key in self.sims_vars:
-            if len(self.sims_dump_vars) == 0 or key in self.sims_dump_vars:
-                _grp_vars.create_dataset(key, data = self.sims_vars[key])
-        
-        '''
-        dumping idpy_memory
-        '''
-        _grp_idpy_memory = _grp.create_group("idpy_memory")
-        
-        for key in self.sims_idpy_memory:
-            if self.sims_idpy_memory[key] is None:
-                _out_f.close()
-                os.remove(file_name)
-                raise Exception("Cannot dump ", key, ": not allocated")
-            else:
-                if len(self.sims_dump_idpy_memory) == 0 or key in self.sims_dump_idpy_memory:
-                    _grp_idpy_memory.create_dataset(key, data = self.sims_idpy_memory[key].D2H())
+        if self.sims_dump_idpy_memory_flag:
+            _grp_idpy_memory = _grp.create_group("idpy_memory")
+
+            for key in self.sims_idpy_memory:
+                if self.sims_idpy_memory[key] is None:
+                    _out_f.close()
+                    os.remove(file_name)
+                    raise Exception("Cannot dump ", key, ": not allocated")
+                else:
+                    if len(self.sims_dump_idpy_memory) == 0 or key in self.sims_dump_idpy_memory:
+                        _grp_idpy_memory.create_dataset(key, data = self.sims_idpy_memory[key].D2H())
 
         '''
         dumping custom_types
