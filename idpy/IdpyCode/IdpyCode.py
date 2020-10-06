@@ -107,6 +107,11 @@ class IdpyKernel:
         self.InitCodeFlags()
 
     def InitFunctions(self):
+        '''
+        need to manually insert a list of the needed functions:
+        need to double check that duting the declaration the require functions
+        are inserted
+        '''
         if len(self.functions) == 0:
             for f_class in self.f_classes:
                 self.functions.append(f_class(custom_types = self.custom_types))

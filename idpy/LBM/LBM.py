@@ -178,6 +178,20 @@ NPT = NpTypes()
 
 RootLB_Dump_def_name = 'RootLB_dump.hdf5'
 
+def IndexFromPos(pos, dim_strides):
+    index = pos[0]
+    for i in range(1, len(pos)):
+        index += pos[i] * dim_strides[i - 1]
+    return index
+
+def PosFromIndex(index, dim_strides): 
+    pos = [index%dim_strides[0]]
+    pos += [(index//dim_strides[stride_i]) % (dim_strides[stride_i + 1]//dim_strides[stride_i]) \
+            if stride_i < len(dim_strides) - 1 else \
+            index//dim_strides[stride_i] \
+            for stride_i in range(len(dim_strides))]
+    return tuple(pos)
+
 def ComputeCenterOfMass(lbm):
     first_flag = False
     if 'cm_coords' not in lbm.sims_idpy_memory:
@@ -396,10 +410,9 @@ class RootLB(IdpySims):
         self.sims_idpy_memory['W_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['W_list'], tenet = tenet)
 
-    def DumpPopSnapshot(self, file_name = RootLB_Dump_def_name,
-                     custom_types = None):
+    def DumpPopSnapshot(self, file_name = RootLB_Dump_def_name):
         IdpySims.DumpSnapshot(self, file_name = file_name,
-                              custom_types = custom_types)
+                              custom_types = self.custom_types)
 
     def CleanAuxilliary(self):
         for key in self.aux_vars:
@@ -523,6 +536,9 @@ class ShanChenMultiPhase(RootLB):
                      self.sims_idpy_memory['pop'],
                      self.sims_idpy_memory['XI_list'],
                      self.sims_idpy_memory['W_list']])
+
+        self.init_status['n'] = True
+        self.init_status['u'] = True
         
         
     def InitPopulations(self):
@@ -738,7 +754,7 @@ class ShanChenMultiPhase(RootLB):
         if 'optimizer_flag' in self.params_dict:
             self.optimizer_flag = self.params_dict['optimizer_flag']
         else:
-            self.optimizer_flag = False
+            self.optimizer_flag = True
 
         self.tenet = GetTenet(self.params_dict)
         if 'custom_types' in self.params_dict:
@@ -831,6 +847,26 @@ class F_PosFromIndex(IdpyFunction):
         pos[0] = index % dim_strides[0];
         for(int d=1; d<DIM; d++){
             pos[d] = (index / dim_strides[d - 1]) % dim_sizes[d];
+        }
+        return;
+        """
+
+class F_PosFromIndexDIM(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'void'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'SType * pos': [],
+                       'SType * dim_sizes': ['global', 'const'],
+                       'SType * dim_strides': ['global', 'const'],
+                       'unsigned int index': ['const'],
+                       'int dim': ['const']}
+
+        self.functions[IDPY_T] = """
+        if(dim == 1) pos[0] = index;
+        else{
+            pos[0] = index % dim_strides[0];
+            for(int d=1; d<dim; d++){
+                pos[d] = (index / dim_strides[d - 1]) % dim_sizes[d];
+            }
         }
         return;
         """
