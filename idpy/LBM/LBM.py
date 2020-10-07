@@ -600,6 +600,12 @@ class ShanChenMultiPhase(RootLB):
 
         
     def InitRadialInterface(self, n_g, n_l, R, full_flag = True):
+        '''
+        Record init values
+        '''
+        self.sims_vars['n_g'], self.sims_vars['n_l'] = n_g, n_l
+        self.sims_vars['R'] = R
+        
         _K_InitRadialInterface = \
             K_InitRadialInterface(custom_types = self.custom_types.Push(),
                                   constants = self.constants,
@@ -668,10 +674,17 @@ class ShanChenMultiPhase(RootLB):
 
 
     def InitVars(self):
+        '''
+        sims_vars
+        '''
         self.sims_vars['QE'], self.sims_vars['E_list'], self.sims_vars['EW_list'] = \
             InitFStencilWeights(f_stencil = self.params_dict['f_stencil'],
                                 custom_types = self.custom_types)
+        self.sims_vars['SC_G'] = self.params_dict['SC_G']
 
+        '''
+        constants
+        '''
         self.constants['QE'] = self.sims_vars['QE']
         self.constants['SC_G'] = self.params_dict['SC_G']
         self.constants['OMEGA'] = 1./self.params_dict['tau']
