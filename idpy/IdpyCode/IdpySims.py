@@ -29,12 +29,24 @@ import numpy as np
 import threading, h5py
 from collections import defaultdict
 
+from idpy.IdpyCode import GetParamsClean
+
 class IdpySims(threading.Thread):
-    def __init__(self, daemon_flag = False):
+    def __init__(self, *args, **kwargs):
+        if not hasattr(self, 'params_dict'):
+            self.params_dict = {}
+
+        self.kwargs = GetParamsClean(kwargs, [self.params_dict],
+                                     needed_params = ['daemon_flag'])
+        
+        if 'daemon_flag' in self.params_dict:
+            self.daemon_flag = self.params_dict['daemon_flag']
+        else:
+            self.daemon_flag = False
+        
         threading.Thread.__init__(self)
         self.sims_vars = {}
         self.sims_idpy_memory = {}
-        self.daemon_flag = daemon_flag
         '''
         sims_dump_vars, sims_dump_idpy_memory:
         lists contaiing the dictionary key to be dumped
