@@ -342,15 +342,23 @@ class RootLB(IdpySims):
     '''
     class RootLB:
     root LB class. I will try to use inheritance for the more complicated ones
+    This class is in some sense "virtual" since it cannot be declared,
+    and the methods cannot be used unless the variable custom_types is passed
+    from the child class
     '''
-    def __init__(self, dim_sizes, xi_stencil,
-                 *args, **kwargs):
+    def __init__(self, *args, **kwargs):
 
         if not hasattr(self, 'params_dict'):
             self.params_dict = {}
             
         self.kwargs = \
-            GetParamsClean(kwargs, [self.params_dict], needed_params = ['custom_types'])
+            GetParamsClean(kwargs, [self.params_dict],
+                           needed_params = ['custom_types', 'dim_sizes', 'xi_stencil'])
+
+        if 'dim_sizes' not in self.params_dict:
+            raise Exception("Missing parameter 'dim_sizes'")
+        if 'xi_stencil' not in self.params_dict:
+            raise Exception("Missing parameter 'xi_stencil'")
 
         custom_types = None
         if 'custom_types' in self.params_dict:
@@ -359,6 +367,8 @@ class RootLB(IdpySims):
             custom_types = LBMTypes
                 
         IdpySims.__init__(self, *args, **self.kwargs)
+
+        dim_sizes, xi_stencil = self.params_dict['dim_sizes'], self.params_dict['xi_stencil']
 
         self.sims_vars['DIM'], self.sims_vars['dim_sizes'], \
             self.sims_vars['dim_strides'], self.sims_vars['dim_center'], \
@@ -383,8 +393,6 @@ class RootLB(IdpySims):
                                  'dim_center': None,
                                  'XI_list': None,
                                  'W_list': None}
-
-        self.aux_idpy_memory, self.aux_vars = [], []
         
     def InitMemory(self, tenet, custom_types): 
         self.sims_idpy_memory['pop'] = \
@@ -413,15 +421,6 @@ class RootLB(IdpySims):
     def DumpPopSnapshot(self, file_name = RootLB_Dump_def_name):
         IdpySims.DumpSnapshot(self, file_name = file_name,
                               custom_types = self.custom_types)
-
-    def CleanAuxilliary(self):
-        for key in self.aux_vars:
-            if key in self.sims_vars:
-                del self.sims_vars[key]
-
-        for key in self.aux_idpy_memory:
-            if key in self.sims_idpy_memory:
-                del self.sims_idpy_memory[key]
 
 class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
@@ -495,8 +494,9 @@ class ShanChenMultiPhase(RootLB):
                         
                         (_K_StreamPeriodic(tenet = self.tenet,
                                            grid = self.sims_vars['grid'],
-                                           block = self.sims_vars['block']), ['pop_swap', 'pop', 'XI_list',
-                                                                              'dim_sizes', 'dim_strides']),
+                                           block = self.sims_vars['block']), ['pop_swap', 'pop',
+                                                                              'XI_list', 'dim_sizes',
+                                                                              'dim_strides']),
                         (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
                     ]
                 ]
@@ -1045,38 +1045,37 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
                 u[g_tid + V*d] = lu[d];
             }
 
-        // Compute square norm of Guo shifted velocity
-        UType u_dot_u = 0.;
-        for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d];}
+            // Compute square norm of Guo shifted velocity
+            UType u_dot_u = 0.;
+            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d];}
 
-        // Cycle over the populations: equilibrium + Guo
-        for(int q=0; q<Q; q++){
-            UType u_dot_xi = 0., F_dot_xi = 0., F_dot_u = 0.; 
-            for(int d=0; d<DIM; d++){
-                u_dot_xi += lu[d] * XI_list[d + q*DIM];
-                F_dot_xi += F[d] * XI_list[d + q*DIM];
-                F_dot_u  += F[d] * lu[d];
-            }
+            // Cycle over the populations: equilibrium + Guo
+            for(int q=0; q<Q; q++){
+                UType u_dot_xi = 0., F_dot_xi = 0., F_dot_u = 0.; 
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                    F_dot_xi += F[d] * XI_list[d + q*DIM];
+                    F_dot_u  += F[d] * lu[d];
+                }
 
-            PopType leq_pop = 1., lguo_pop = 0.;
+                PopType leq_pop = 1., lguo_pop = 0.;
 
-            // Equilibrium population
-            leq_pop += + u_dot_xi*CM2 + 0.5*u_dot_xi*u_dot_xi*CM4;
-            leq_pop += - 0.5*u_dot_u*CM2;
-            leq_pop = leq_pop * ln * W_list[q];
+                // Equilibrium population
+                leq_pop += + u_dot_xi*CM2 + 0.5*u_dot_xi*u_dot_xi*CM4;
+                leq_pop += - 0.5*u_dot_u*CM2;
+                leq_pop = leq_pop * ln * W_list[q];
 
-            // Guo population
-            lguo_pop += + F_dot_xi*CM2 + F_dot_xi*u_dot_xi*CM4;
-            lguo_pop += - F_dot_u*CM2;
-            lguo_pop = lguo_pop * W_list[q];
+                // Guo population
+                lguo_pop += + F_dot_xi*CM2 + F_dot_xi*u_dot_xi*CM4;
+                lguo_pop += - F_dot_u*CM2;
+                lguo_pop = lguo_pop * W_list[q];
 
-            pop[g_tid + q*V] = \
-                pop[g_tid + q*V]*(1. - OMEGA) + leq_pop*OMEGA + (1. - 0.5 * OMEGA) * lguo_pop;
+                pop[g_tid + q*V] = \
+                    pop[g_tid + q*V]*(1. - OMEGA) + leq_pop*OMEGA + (1. - 0.5 * OMEGA) * lguo_pop;
 
-         }
+             }
         }
         """
-        ##  + 0.5 * F[d]/ln //  + (1. - 0.5*OMEGA)*lguo_pop
 
 class K_ComputePsi(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [], psi_code = None,
