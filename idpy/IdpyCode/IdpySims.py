@@ -56,7 +56,16 @@ class IdpySims(threading.Thread):
         '''
         self.sims_dump_vars, self.sims_dump_idpy_memory = [], []
         self.sims_dump_vars_flag, self.sims_dump_idpy_memory_flag = True, True
+        self.aux_idpy_memory, self.aux_vars = [], []
+        
+    def CleanAuxilliary(self):
+        for key in self.aux_vars:
+            if key in self.sims_vars:
+                del self.sims_vars[key]
 
+        for key in self.aux_idpy_memory:
+            if key in self.sims_idpy_memory:
+                del self.sims_idpy_memory[key]
 
     def DumpSnapshot(self, file_name = None, custom_types = None):
         if file_name is None:
