@@ -192,7 +192,7 @@ def PosFromIndex(index, dim_strides):
             for stride_i in range(len(dim_strides))]
     return tuple(pos)
 
-def ComputeCenterOfMass(lbm):
+def ComputeCenterOfMass(lbm, c_i = ''):
     first_flag = False
     if 'cm_coords' not in lbm.sims_idpy_memory:
         lbm.sims_idpy_memory['cm_coords'] = \
@@ -202,7 +202,7 @@ def ComputeCenterOfMass(lbm):
         lbm.aux_idpy_memory.append('cm_coords')
         first_flag = True
 
-    _mass = IdpyMemory.Sum(lbm.sims_idpy_memory['n'])
+    _mass = IdpyMemory.Sum(lbm.sims_idpy_memory['n' + c_i])
         
     _K_CenterOfMass = K_CenterOfMass(custom_types = lbm.custom_types.Push(),
                                      constants = lbm.constants,
@@ -215,13 +215,13 @@ def ComputeCenterOfMass(lbm):
     _cm_coords = ()
     for direction in range(lbm.sims_vars['DIM']):        
         Idea.Deploy([lbm.sims_idpy_memory['cm_coords'],
-                     lbm.sims_idpy_memory['n'],
+                     lbm.sims_idpy_memory['n' + c_i],
                      lbm.sims_idpy_memory['dim_sizes'],
                      lbm.sims_idpy_memory['dim_strides'],
                      NPT.C[lbm.custom_types['SType']](direction)])
         _cm_coords += (IdpyMemory.Sum(lbm.sims_idpy_memory['cm_coords'])/_mass, )
 
-    print(_mass, _cm_coords)
+    return _mass, _cm_coords
 
 def CheckDeltaP(lbm):
     pass
