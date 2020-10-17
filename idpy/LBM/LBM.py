@@ -564,6 +564,13 @@ class ShanChenMultiPhase(RootLB):
 
     def InitCylinderInterface(self, n_g, n_l, R, direction = 0,
                               full_flag = True):
+        '''
+        Record init values
+        '''
+        self.sims_vars['init_type'] = 'cylinder'
+        self.sims_vars['n_g'], self.sims_vars['n_l'] = n_g, n_l
+        self.sims_vars['full_flag'], self.sims_vars['R'] = full_flag, R
+        self.sims_vars['direction'] = direction
         
         _K_InitCylinderInterface = \
             K_InitCylinderInterface(custom_types = self.custom_types.Push(),
@@ -603,8 +610,9 @@ class ShanChenMultiPhase(RootLB):
         '''
         Record init values
         '''
+        self.sims_vars['init_type'] = 'radial'
         self.sims_vars['n_g'], self.sims_vars['n_l'] = n_g, n_l
-        self.sims_vars['R'] = R
+        self.sims_vars['full_flag'], self.sims_vars['R'] = full_flag, R
         
         _K_InitRadialInterface = \
             K_InitRadialInterface(custom_types = self.custom_types.Push(),
@@ -640,6 +648,14 @@ class ShanChenMultiPhase(RootLB):
         
     def InitFlatInterface(self, n_g, n_l, width, direction = 0,
                           full_flag = True):
+        '''
+        Record init values
+        '''
+        self.sims_vars['init_type'] = 'flat'
+        self.sims_vars['n_g'], self.sims_vars['n_l'] = n_g, n_l
+        self.sims_vars['full_flag'] = full_flag
+        self.sims_vars['width'], self.sims_vars['direction'] = width, direction
+        
         _K_InitFlatInterface = \
             K_InitFlatInterface(custom_types = self.custom_types.Push(),
                                 constants = self.constants,
