@@ -56,14 +56,25 @@ class ManageData:
             raise Exception("Please insert valid data and key")
         self.data_dictionary[key] = data
 
+    def DelData(self, key = None):
+        if key is None:
+            raise Exception("Please insert a valid 'key' argument")
+        del self.data_dictionary[key]
+
     def WhichData(self):
         entries = []
         for elem in self.data_dictionary:
             entries.append(elem)
         return entries
 
+    def IsThereKey(self, key):
+        return key in self.data_dictionary
+
     def PullData(self, key):
-        return self.data_dictionary[key]
+        if key in self.WhichData():
+            return self.data_dictionary[key]
+        else:
+            raise Exception("key not present in the data base")
         
     def Dump(self):
         file_out = open(self.dump_file, 'wb')
