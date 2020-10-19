@@ -25,7 +25,9 @@ __maintainer__ = "Matteo Lulli"
 __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
+import warnings
 import numpy as np
+import sympy as sp
 import threading, h5py
 from collections import defaultdict
 
@@ -85,7 +87,11 @@ class IdpySims(threading.Thread):
 
             for key in self.sims_vars:
                 if len(self.sims_dump_vars) == 0 or key in self.sims_dump_vars:
-                    _grp_vars.create_dataset(key, data = self.sims_vars[key])
+                    _type = type(self.sims_vars[key]).__module__.split(".")[0]
+                    if _type != sp.__name__:
+                        _grp_vars.create_dataset(key, data = self.sims_vars[key])
+                    else:
+                        print("Key: ", key, "not builtin/numpy: not dumped!")
         
         '''
         dumping idpy_memory
@@ -99,8 +105,11 @@ class IdpySims(threading.Thread):
                     os.remove(file_name)
                     raise Exception("Cannot dump ", key, ": not allocated")
                 else:
-                    if len(self.sims_dump_idpy_memory) == 0 or key in self.sims_dump_idpy_memory:
-                        _grp_idpy_memory.create_dataset(key, data = self.sims_idpy_memory[key].D2H())
+                    if len(self.sims_dump_idpy_memory) == 0 or \
+                       key in self.sims_dump_idpy_memory:
+                        _grp_idpy_memory.create_dataset(
+                            key, data = self.sims_idpy_memory[key].D2H()
+                        )
 
         '''
         dumping custom_types
