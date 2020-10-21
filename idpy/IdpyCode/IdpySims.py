@@ -57,6 +57,7 @@ class IdpySims(threading.Thread):
         class
         '''
         self.sims_dump_vars, self.sims_dump_idpy_memory = [], []
+        self.sims_not_dump_vars, self.sims_not_dump_idpy_memory = [], []
         self.sims_dump_vars_flag, self.sims_dump_idpy_memory_flag = True, True
         self.aux_idpy_memory, self.aux_vars = [], []
         
@@ -86,9 +87,13 @@ class IdpySims(threading.Thread):
             _grp_vars = _grp.create_group("vars")
 
             for key in self.sims_vars:
-                if len(self.sims_dump_vars) == 0 or key in self.sims_dump_vars:
+                if (len(self.sims_dump_vars) == 0 and \
+                    len(self.sims_not_dump_vars) == 0) or \
+                   (key in self.sims_dump_vars and \
+                    key not in self.sims_not_dump_vars):
                     _type = type(self.sims_vars[key]).__module__.split(".")[0]
-                    if _type != sp.__name__:
+                    print(key, _type, len(self.sims_dump_vars), key not in self.sims_not_dump_vars)
+                    if _type == np.__name__ or _type == 'builtins':
                         _grp_vars.create_dataset(key, data = self.sims_vars[key])
                     else:
                         print("Key: ", key, "not builtin/numpy: not dumped!")
