@@ -33,6 +33,7 @@ from functools import reduce
 from collections import defaultdict
 import numpy as np
 import h5py
+import time
 
 from idpy.Utils.CustomTypes import CustomTypes
 from idpy.Utils.NpTypes import NpTypes
@@ -508,7 +509,11 @@ class ShanChenMultiPhase(RootLB):
         old_step = 0
         for step in time_steps:
             print(step, step - old_step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
             self._MainLoop.Run(range(step - old_step))
+            
             old_step = step
             if len(convergence_functions):
                 checks = []
@@ -697,6 +702,10 @@ class ShanChenMultiPhase(RootLB):
             InitFStencilWeights(f_stencil = self.params_dict['f_stencil'],
                                 custom_types = self.custom_types)
         self.sims_vars['SC_G'] = self.params_dict['SC_G']
+        if 'e2_val' not in self.params_dict:
+            self.sims_vars['e2_val'] = 1
+        else:
+            self.sims_vars['e2_val'] = self.params_dict['e2_val']
 
         '''
         constants
@@ -704,6 +713,7 @@ class ShanChenMultiPhase(RootLB):
         self.constants['QE'] = self.sims_vars['QE']
         self.constants['SC_G'] = self.params_dict['SC_G']
         self.constants['OMEGA'] = 1./self.params_dict['tau']
+
 
     def InitMemory(self):
         RootLB.InitMemory(self, tenet = self.tenet,
@@ -763,7 +773,7 @@ class ShanChenMultiPhase(RootLB):
                                      needed_params = ['lang', 'cl_kind', 'device',
                                                       'custom_types', 'block_size',
                                                       'f_stencil', 'psi_code', 'SC_G',
-                                                      'tau', 'optimizer_flag'])
+                                                      'tau', 'optimizer_flag', 'e2_val'])
 
         if 'f_stencil' not in self.params_dict:
             raise Exception("Missing 'f_stencil'")
