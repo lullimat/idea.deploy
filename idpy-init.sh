@@ -32,9 +32,15 @@ PY3_F=$(command -v python3 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p5_F=$(command -v python3.5 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p6_F=$(command -v python3.6 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p7_F=$(command -v python3.7 >/dev/null 2>&1 && echo 1 || echo 0)
+PY3p9_F=$(command -v python3.9 >/dev/null 2>&1 && echo 1 || echo 0)
 
 ##
-if ((${PY3p7_F}))
+if ((${PY3p9_F}))
+then
+    ID_PYTHON=python3.9
+    PY_PATH=$(which python3.9)
+    echo "Found ${PY_PATH}"
+elif ((${PY3p7_F}))
 then
     ID_PYTHON=python3.7
     PY_PATH=$(which python3.7)
@@ -171,6 +177,7 @@ if((VENV_F == 0))
 then
     echo "Pip installing requiremnts"
     pip install --upgrade pip
+    pip install wheel
     pip install -r ${VENV}/requirements.txt
     ## Install pycuda if cuda is found
     if ((CUDA_F && 0))
