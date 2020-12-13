@@ -87,12 +87,17 @@ class IdpySims(threading.Thread):
             _grp_vars = _grp.create_group("vars")
 
             for key in self.sims_vars:
+                '''
+                old logic: key in self.sims_dump_vars and \
+                '''
                 if (len(self.sims_dump_vars) == 0 and \
                     len(self.sims_not_dump_vars) == 0) or \
-                   (key in self.sims_dump_vars and \
-                    key not in self.sims_not_dump_vars):
+                   (key not in self.sims_not_dump_vars):
                     _type = type(self.sims_vars[key]).__module__.split(".")[0]
+                    '''
+                    Checking dump exclusion according to the data type
                     print(key, _type, len(self.sims_dump_vars), key not in self.sims_not_dump_vars)
+                    '''
                     if _type == np.__name__ or _type == 'builtins':
                         _grp_vars.create_dataset(key, data = self.sims_vars[key])
                     else:
@@ -144,7 +149,21 @@ class IdpySims(threading.Thread):
         _swap_data = np.array(_in_f.get(full_key))
         _in_f.close()
         return _swap_data
-        
+
+    def CheckSnapshotData(self, file_name = None, full_key = None):
+        if file_name is None:
+            raise Exception("Parameter file_name must not be None")
+        if full_key is None:
+            raise Exception("Parameter full_key must not be None")
+
+        _in_f = h5py.File(file_name, "r")
+        _sims_class_name = list(_in_f.keys())[0]
+        if _sims_class_name != self.__class__.__name__:
+            print("File class: ", _sims_class_name)
+            print("Present class: ", self.__class__.__name__)
+            raise Exception("The file you are reading has been created by another class!")
+
+        return full_key in _in_f
 
     def ReadSnapshotFull(self):
         '''
