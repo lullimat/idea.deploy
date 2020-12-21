@@ -434,7 +434,8 @@ class ShanChenMultiPhase(RootLB):
         for name in ['n', 'u']:
             self.sims_idpy_memory[name] = None
 
-        self.InitMemory()
+        if not self.params_dict['empty_sim']:
+            self.InitMemory()
 
         self.init_status = {'n': False,
                             'u': False,
@@ -773,7 +774,8 @@ class ShanChenMultiPhase(RootLB):
                                      needed_params = ['lang', 'cl_kind', 'device',
                                                       'custom_types', 'block_size',
                                                       'f_stencil', 'psi_code', 'SC_G',
-                                                      'tau', 'optimizer_flag', 'e2_val'])
+                                                      'tau', 'optimizer_flag', 'e2_val',
+                                                      'empty_sim'])
 
         if 'f_stencil' not in self.params_dict:
             raise Exception("Missing 'f_stencil'")
@@ -794,6 +796,9 @@ class ShanChenMultiPhase(RootLB):
             self.optimizer_flag = self.params_dict['optimizer_flag']
         else:
             self.optimizer_flag = True
+
+        if 'empty_sim' not in self.params_dict:
+            self.params_dict['empty_sim'] = False
 
         self.tenet = GetTenet(self.params_dict)
         if 'custom_types' in self.params_dict:
