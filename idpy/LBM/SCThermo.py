@@ -67,11 +67,9 @@ def FindZeroRanges(func, n_range, n_bins, n_delta,
             zero_ranges.append((n_range[0] + n_delta * (n_i - 1), 
                                 n_range[0] + n_delta * n_i))
             if stop_at_first:
-                print("First!")                
                 break
 
             if len(zero_ranges) == 1 and stop_at_second:
-                print("Second!")
                 break
             
         old_val = new_val
@@ -223,9 +221,7 @@ class ShanChen:
             
         def GuessDensitiesFlat(self, delta):
             target_values = []
-            print(self.SC.coexistence_range[0][0], delta)
             arg_init = self.SC.coexistence_range[0][0] + delta
-            print("Check!:", arg_init < self.SC.coexistence_range[1][0])
             
             func_init = self.SC.P_subs.subs(self.SC.n, arg_init)
             target_values.append((arg_init, func_init))
@@ -239,8 +235,6 @@ class ShanChen:
             
             zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta,
                                          stop_at_second = True)
-            print("zero_ranges:", zero_ranges)
-            print()
             # Always pick the last range for the stable solution: -1
             solution = bisect(delta_func_f, zero_ranges[-1][0], zero_ranges[-1][1])
             
@@ -583,7 +577,7 @@ class ShanChanEquilibriumCache(ManageData):
 
             _mech_eq_target = _shan_chen.FInterface.mech_eq_target
 
-            if True:
+            if False:
                 _sigma_f = \
                     _shan_chen.FInterface.SurfaceTension(_mech_eq_target)
             else:
