@@ -219,13 +219,13 @@ class ShanChen:
             self.maxwell_integral_delta = \
                 (lambda delta_: self.maxwell_integral(self.GuessDensitiesFlat(delta_)))
             
-        def GuessDensitiesFlat(self, delta):
+        def GuessDensitiesFlat(self, delta, _arg_bins = 2 ** 10):
             target_values = []
             arg_init = self.SC.coexistence_range[0][0] + delta
             
             func_init = self.SC.P_subs.subs(self.SC.n, arg_init)
             target_values.append((arg_init, func_init))
-            arg_range, arg_bins = [arg_init, self.SC.coexistence_range[1][0]], 1024
+            arg_range, arg_bins = [arg_init, self.SC.coexistence_range[1][0]], _arg_bins
             arg_delta = (arg_range[1] - arg_range[0])/arg_bins
             
             delta_func_f = (lambda delta_arg_: 
@@ -243,13 +243,14 @@ class ShanChen:
             target_values.append((arg_swap, func_swap))
             return target_values
 
-        def MechanicEquilibrium(self, n_bins = 256):
+        def MechanicEquilibrium(self, n_bins = 2 ** 8):
             # Need to find the zero of self.maxwell_integral_delta
             # Delta can vary between (0, and the difference between the gas maximum
             # and the beginning of the coexistence region
             search_range = \
                 [self.SC.n_eps,
                  self.SC.extrema[0][0] - self.SC.coexistence_range[0][0] - self.SC.n_eps]
+            print("search_range: ", search_range)
             search_delta = (search_range[1] - search_range[0])/n_bins
 
             
