@@ -98,13 +98,18 @@ class SCFStencils:
         self.m_iso = []
                 
         # Define Isotropy constants symbols
+        ## This does not work because equations above the highest
+        ## isotropy order turn out to be linearly dependent...double
+        ## check the determinant
+        ## _max_order = max(2*(len(self.w_sym_list) - 1), self.e_max)
+        _max_order = self.e_max
         self.e_sym = {}
-        for i in range(2, self.e_max + 2, 2):
+        for i in range(2, _max_order + 2, 2):
             #self.e_sym['e_{' + str(i) + '}'] = symbols('e_{' + str(i) + '}')
             self.e_sym[i] = symbols('e_{' + str(i) + '}')
 
         self.e_sym_list = [self.e_sym[i]
-                           for i in range(2, self.e_max + 2, 2)]
+                           for i in range(2, _max_order + 2, 2)]
 
     def PushStencil(self):
         _Es = tuple(elem
@@ -242,7 +247,8 @@ class SCFStencils:
         self.e_expr = {}
         self.B2q_expr, self.B2n_expr = {}, {}
         # A's or isotropy constants
-        for order in range(2, self.e_max + 2, 2):
+        _max_order = self.e_max
+        for order in range(2, _max_order + 2, 2):
             # Compute e_k
             e_coeffs = []
             for len_2 in self.len_2s:

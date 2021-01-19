@@ -54,34 +54,23 @@ def FindSingleZeroRange(func, x_init, delta_val):
     return (x_init - delta_val, x_init)
     
 
-def FindZeroRanges(func, n_range, n_bins, n_delta,
-                   stop_at_first = False, stop_at_second = False):
+def FindZeroRanges(func, n_range, n_bins, n_delta):
     zero_ranges = []
     old_val, new_val = 0, 0
     # Here I can use linspace
     for n_i in range(n_bins):
         #print(n_bins, n_i, n_range[0] + n_delta * n_i)
         new_val = func(n_range[0] + n_delta * n_i)
-        
         if n_i > 0 and old_val * new_val < 0:
             zero_ranges.append((n_range[0] + n_delta * (n_i - 1), 
                                 n_range[0] + n_delta * n_i))
-            if stop_at_first:
-                break
-
-            if len(zero_ranges) == 1 and stop_at_second:
-                break
-            
         old_val = new_val
     return zero_ranges
 
-def FindExtrema(func, f_arg, arg_range = (0.01,3.), arg_bins = 256,
-                stop_at_first = False, stop_at_second = False):
+def FindExtrema(func, f_arg, arg_range = (0.01,3.), arg_bins = 256):
     d_func = lambda f_arg_: diff(func,f_arg).subs(f_arg, f_arg_)
     arg_delta = (arg_range[1] - arg_range[0])/arg_bins
-    zero_ranges = FindZeroRanges(d_func, arg_range, arg_bins, arg_delta,
-                                 stop_at_first = stop_at_first,
-                                 stop_at_second = stop_at_second)
+    zero_ranges = FindZeroRanges(d_func, arg_range, arg_bins, arg_delta)
     
     extrema = []
     for z_range in zero_ranges:
@@ -100,7 +89,7 @@ class ShanChen:
     def __init__(self,
                  psi_f = None,
                  G_val = -3.6, theta_val = 1., e2_val = 1.,
-                 n_eps = 1e-6):
+                 n_eps = 0.01):
 
         # Variables Init
         self.psi_f = sympy_exp(-1/self.n) if psi_f is None else psi_f
@@ -121,31 +110,21 @@ class ShanChen:
         self.d_P = diff(P_subs_swap, self.n)
         self.dd_P = diff(self.d_P, self.n)
         #print([self.d_P, self.dd_P])
-        if True:
-            self.critical_point = solve([self.d_P, self.dd_P], [self.G, self.n])
+        self.critical_point = solve([self.d_P, self.dd_P], [self.G, self.n])
+        
+        self.G_c, self.n_c = float(self.critical_point[0][0]), float(self.critical_point[0][1])
+        self.P_c = P_subs_swap.subs(self.n, self.n_c).subs(self.G, self.G_c)
 
-            self.G_c, self.n_c = float(self.critical_point[0][0]), float(self.critical_point[0][1])
-            self.P_c = P_subs_swap.subs(self.n, self.n_c).subs(self.G, self.G_c)
-
-            print("Critical coupling:", self.G_c,
-                  "; Critical density:", self.n_c,
-                  "; Critical pressure:", self.P_c)
-            print()
-
-            print(self.G_c * self.e2_val >  self.G_val * self.e2_val, self.e2_val)
-
-            if self.G_val * self.e2_val > self.G_c * self.e2_val:
-                print("The value of G: %f is above the critical point G_c: %f for the chosen %s" % (self.G_val, self.G_c, str(self.psi) + " = " + str(self.psi_f)))
-                print("-> No phase separation")
-            else:
-                # Find Extrema
-                lambda_tmp = sp_lambdify(self.n, self.P_subs - self.P_c)
-                self.range_ext = FindSingleZeroRange(lambda_tmp, self.n_eps, self.n_eps)[1]
-                self.extrema = FindExtrema(self.P_subs, self.n,
-                                           arg_range = (self.n_eps, self.range_ext))
-                self.coexistence_range = self.FindCoexistenceRange()
-                print("Coexistence range (n, P): ", self.coexistence_range)
-                print()
+        if self.G_val > self.G_c:
+            print("The value of G: %f is above the critical point G_c: %f for the chosen %s" % (self.G_val, self.G_c, str(self.psi) + " = " + str(self.psi_f)))
+            print("-> No phase separation")
+        else:
+            # Find Extrema
+            lambda_tmp = sp_lambdify(self.n, self.P_subs - self.P_c)
+            self.range_ext = FindSingleZeroRange(lambda_tmp, self.n_eps, self.n_eps)[1]
+            self.extrema = FindExtrema(self.P_subs, self.n,
+                                       arg_range = (self.n_eps, self.range_ext))
+            self.coexistence_range = self.FindCoexistenceRange()
 
         ### Init Ends
         
@@ -184,12 +163,11 @@ class ShanChen:
                     PTensor.p_consts_wf['\epsilon'](self.PTensor.py_stencil.w_sol[which_sol])
             else:
                 self.eps_val = eps_val
-
+                
             self.beta_val = self.PTensor.p_consts_wf['\beta'](self.PTensor.py_stencil.w_sol[which_sol])
             self.sigma_c_val = self.PTensor.p_consts_wf['\sigma_c'](self.PTensor.py_stencil.w_sol[which_sol])
             self.tolman_c_val = self.PTensor.p_consts_wf['t_c'](self.PTensor.py_stencil.w_sol[which_sol])
             self.dndx = None
-            
             # defining symbols
             self.p_0, self.n_g, self.n_l, self.n_p, self.d_n = \
                 sp_symbols("p_0 n_g n_l n' \\frac{dn}{dr}")
@@ -201,7 +179,7 @@ class ShanChen:
             self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
             # Substituting \theta and e_2 and psi and eps and G
             self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
-            self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
+            self.integrand = self.integrand.subs(self.SC.e2, 1)
             self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
             self.integrand = self.integrand.subs(self.eps, self.eps_val)
             self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
@@ -219,50 +197,41 @@ class ShanChen:
             self.maxwell_integral_delta = \
                 (lambda delta_: self.maxwell_integral(self.GuessDensitiesFlat(delta_)))
             
-        def GuessDensitiesFlat(self, delta, _arg_bins = 2 ** 10):
+        def GuessDensitiesFlat(self, delta):
             target_values = []
+    
             arg_init = self.SC.coexistence_range[0][0] + delta
             
             func_init = self.SC.P_subs.subs(self.SC.n, arg_init)
             target_values.append((arg_init, func_init))
-            arg_range, arg_bins = [arg_init, self.SC.coexistence_range[1][0]], _arg_bins
+            arg_range, arg_bins = [arg_init, self.SC.coexistence_range[1][0]], 256
             arg_delta = (arg_range[1] - arg_range[0])/arg_bins
             
             delta_func_f = (lambda delta_arg_: 
                             (self.SC.P_subs.subs(self.SC.n, arg_range[0] + delta_arg_) - 
                              self.SC.P_subs.subs(self.SC.n, arg_range[0])))
-            delta_func_f.__name__ = 'samep'
             
-            zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta,
-                                         stop_at_second = True)
+            zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta)
+            
             # Always pick the last range for the stable solution: -1
             solution = bisect(delta_func_f, zero_ranges[-1][0], zero_ranges[-1][1])
             
             arg_swap = arg_init + solution
             func_swap = self.SC.P_subs.subs(self.SC.n, arg_swap)
             target_values.append((arg_swap, func_swap))
+            
             return target_values
 
-        def MechanicEquilibrium(self, n_bins = 2 ** 8):
+        def MechanicEquilibrium(self, n_bins = 32):
             # Need to find the zero of self.maxwell_integral_delta
             # Delta can vary between (0, and the difference between the gas maximum
             # and the beginning of the coexistence region
             search_range = \
                 [self.SC.n_eps,
                  self.SC.extrema[0][0] - self.SC.coexistence_range[0][0] - self.SC.n_eps]
-            print("search_range: ", search_range)
             search_delta = (search_range[1] - search_range[0])/n_bins
-
-            
             mech_eq_range = FindZeroRanges(self.maxwell_integral_delta,
-                                           search_range, n_bins, search_delta,
-                                           stop_at_first = True)
-            
-            '''
-            mech_eq_range = FindSingleZeroRange(self.maxwell_integral_delta, search_range[0], search_delta)
-            '''
-            
-            print("mech_eq_range: ", mech_eq_range, "search_range: ", search_range) 
+                                           search_range, n_bins, search_delta)
             
             mech_eq_delta = bisect(self.maxwell_integral_delta,
                                    mech_eq_range[0][0], mech_eq_range[0][1])
@@ -577,12 +546,9 @@ class ShanChanEquilibriumCache(ManageData):
             _shan_chen.FInterface.MechanicEquilibrium()
 
             _mech_eq_target = _shan_chen.FInterface.mech_eq_target
-
-            if False:
-                _sigma_f = \
-                    _shan_chen.FInterface.SurfaceTension(_mech_eq_target)
-            else:
-                _sigma_f = None
+            
+            _sigma_f = \
+                _shan_chen.FInterface.SurfaceTension(_mech_eq_target)
             
             _n_g = _shan_chen.FInterface.mech_eq_target[0][0]
             _n_l = _shan_chen.FInterface.mech_eq_target[1][0]
