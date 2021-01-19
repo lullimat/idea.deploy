@@ -163,6 +163,7 @@ class ShanChen:
                     PTensor.p_consts_wf['\epsilon'](self.PTensor.py_stencil.w_sol[which_sol])
             else:
                 self.eps_val = eps_val
+            print("eps_val: ", self.eps_val)
                 
             self.beta_val = self.PTensor.p_consts_wf['\beta'](self.PTensor.py_stencil.w_sol[which_sol])
             self.sigma_c_val = self.PTensor.p_consts_wf['\sigma_c'](self.PTensor.py_stencil.w_sol[which_sol])
@@ -358,13 +359,15 @@ class ShanChen:
             
             # alpha
             self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 2, 4, 4
+            self.alpha_c[9], self.alpha_c[10] = 12, 24
             # beta
             self.beta_c[1], self.beta_c[2], self.beta_c[4], self.beta_c[5], self.beta_c[8] = \
                 Rational("1/2"), 1, 6, 13, 12
+            self.beta_c[9], self.beta_c[10] = Rational(57, 2), 58
             # gamma
-            self.gamma_c[5], self.gamma_c[8] = 1, 4
+            self.gamma_c[5], self.gamma_c[8], self.gamma_c[10] = 1, 4, Rational(8, 3)
             # eta
-            self.eta_c[2], self.eta_c[5], self.eta_c[8] = 1, 7, 12
+            self.eta_c[2], self.eta_c[5], self.eta_c[8], self.eta_c[10] = 1, 7, 12, Rational(46,3)
             # kappa
             self.kappa_c[5], self.kappa_c[8] = 4, 8
             # lambda
@@ -524,10 +527,10 @@ class ShanChanEquilibriumCache(ManageData):
             self.eps_lambda = sp_lambdify([w_sym_list], _eps_expr)
 
             _e2_expr = stencil.e_expr[2]
-            self.e2_lambda = sp_lambdify([w_sym_list], _e2_expr)
+            self.e2_lambda = sp_lambdify([stencil.w_sym_list], _e2_expr)
 
             _weights_list = None
-            if len(stencil.w_sol[0]) != 5:
+            if len(stencil.w_sol[0]) != 5 and False:
                 len_diff = 5 - len(stencil.w_sol[0])
                 if len_diff < 0:
                     raise Exception("The number of weights must be 5 at most!")
