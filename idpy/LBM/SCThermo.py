@@ -374,6 +374,7 @@ class ShanChen:
             self.lambda_c[2], self.lambda_c[5], self.lambda_c[8] = 2, 12, 24
             # sigma_c
             self.sigma_c_c[1], self.sigma_c_c[4], self.sigma_c_c[5] = -6, -96, -108
+            self.sigma_c_c[9], self.sigma_c_c[10] = -486, -768
             # tolman_c
             self.tolman_c_c[1], self.tolman_c_c[4], self.tolman_c_c[5] = \
                 -Rational('1/2'), -6, -6
