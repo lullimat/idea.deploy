@@ -360,14 +360,18 @@ class ShanChen:
             # alpha
             self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 2, 4, 4
             self.alpha_c[9], self.alpha_c[10] = 12, 24
+            self.alpha_c[13], self.alpha_c[16], self.alpha_c[17] = Rational(88, 3), 40, 80            
             # beta
             self.beta_c[1], self.beta_c[2], self.beta_c[4], self.beta_c[5], self.beta_c[8] = \
                 Rational("1/2"), 1, 6, 13, 12
             self.beta_c[9], self.beta_c[10] = Rational(57, 2), 58
+            self.beta_c[13], self.beta_c[16], self.beta_c[17] = Rational(203, 3), 88, 177
             # gamma
             self.gamma_c[5], self.gamma_c[8], self.gamma_c[10] = 1, 4, Rational(8, 3)
+            self.gamma_c[13], self.gamma_c[17] = Rational(68, 3), 5
             # eta
             self.eta_c[2], self.eta_c[5], self.eta_c[8], self.eta_c[10] = 1, 7, 12, Rational(46,3)
+            self.eta_c[13], self.eta_c[17] = Rational(148, 3), 27
             # kappa
             self.kappa_c[5], self.kappa_c[8] = 4, 8
             # lambda
@@ -375,6 +379,7 @@ class ShanChen:
             # sigma_c
             self.sigma_c_c[1], self.sigma_c_c[4], self.sigma_c_c[5] = -6, -96, -108
             self.sigma_c_c[9], self.sigma_c_c[10] = -486, -768
+            self.sigma_c_c[13], self.sigma_c_c[16], self.sigma_c_c[17] = -300, -1536, 2700
             # tolman_c
             self.tolman_c_c[1], self.tolman_c_c[4], self.tolman_c_c[5] = \
                 -Rational('1/2'), -6, -6
