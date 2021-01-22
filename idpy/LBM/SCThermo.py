@@ -115,8 +115,9 @@ class ShanChen:
         self.G_c, self.n_c = float(self.critical_point[0][0]), float(self.critical_point[0][1])
         self.P_c = P_subs_swap.subs(self.n, self.n_c).subs(self.G, self.G_c)
 
-        if self.G_val > self.G_c:
-            print("The value of G: %f is above the critical point G_c: %f for the chosen %s" % (self.G_val, self.G_c, str(self.psi) + " = " + str(self.psi_f)))
+        if self.G_val * self.e2_val > self.G_c * self.e2_val:
+            print("The value of G: %f is above the critical point G_c: %f for the chosen %s"
+                  % (self.G_val, self.G_c, str(self.psi) + " = " + str(self.psi_f)))
             print("-> No phase separation")
         else:
             # Find Extrema
@@ -125,6 +126,9 @@ class ShanChen:
             self.extrema = FindExtrema(self.P_subs, self.n,
                                        arg_range = (self.n_eps, self.range_ext))
             self.coexistence_range = self.FindCoexistenceRange()
+            print("Coexistence range (n, P): ", self.coexistence_range)
+            print()
+            
 
         ### Init Ends
         
@@ -180,7 +184,7 @@ class ShanChen:
             self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
             # Substituting \theta and e_2 and psi and eps and G
             self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
-            self.integrand = self.integrand.subs(self.SC.e2, 1)
+            self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
             self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
             self.integrand = self.integrand.subs(self.eps, self.eps_val)
             self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
@@ -545,6 +549,7 @@ class ShanChanEquilibriumCache(ManageData):
                 _weights_list = stencil.w_sol[0]
 
 
+            print("The value of e_2:", self.e2_lambda(_weights_list))
             _shan_chen = \
                 ShanChen(psi_f = psi_f, G_val = G,
                          theta_val = c2,
