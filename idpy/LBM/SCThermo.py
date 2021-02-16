@@ -89,7 +89,7 @@ class ShanChen:
     def __init__(self,
                  psi_f = None,
                  G_val = -3.6, theta_val = 1., e2_val = 1.,
-                 n_eps = 0.01):
+                 n_eps = 1e-3):
 
         # Variables Init
         self.psi_f = sympy_exp(-1/self.n) if psi_f is None else psi_f
@@ -139,13 +139,22 @@ class ShanChen:
         self.FInterface = self.FlatInterface(self, self.PTensor, which_sol, eps_val)
             
     def FindCoexistenceRange(self):
+        print(self.extrema)
         coexistence_range = []
-        func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
-        # Looking for the LEFT limit starting from ZERO
-        # and ending after the first stationary point
-        arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0] + self.n_eps)
-        p_swap = self.P_subs.subs(self.n, arg_swap)
-        coexistence_range.append((arg_swap, p_swap))
+        '''
+        With this check we can manage values of the coupling for which one has
+        negative pressures
+        '''
+        if self.extrema[1][1] > 0:
+            func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
+            # Looking for the LEFT limit starting from ZERO
+            # and ending after the first stationary point
+            print(func_f(0), func_f(self.n_eps), func_f(self.extrema[0][0] + self.n_eps))
+            arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0] + self.n_eps)
+            p_swap = self.P_subs.subs(self.n, arg_swap)
+            coexistence_range.append((arg_swap, p_swap))
+        else:
+            coexistence_range.append((0, 0))
         # Looking for the RIGHT limit starting from the RIGHT extremum
         # that is certainly at the LEFT of the value we are looking for
         func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[0][1])
