@@ -44,3 +44,10 @@ class CustomTypes:
         for type_elem in self.types_dict:
             types_list.append(type_elem)
         return types_list
+
+    def Set(self, new_dict):
+        for key in new_dict:
+            self.types_dict[key] = new_dict[key]
+
+    def Pop(self, key):
+        del self.types_dict[key]
