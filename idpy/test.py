@@ -137,6 +137,7 @@ class TestNpTypes(unittest.TestCase):
         self.known_c_types = {'double': np.float64, 'float': np.float32,
                               'int': np.int32, 'unsigned int': np.uint32,
                               'long long int': np.int64,
+                              'unsigned long': np.uint64,
                               'unsigned long long int': np.uint64,
                               'char': np.byte, 'unsigned char': np.ubyte}
         self.known_np_types = {value: key for (key, value) in self.known_c_types.items()}
