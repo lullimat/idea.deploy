@@ -89,7 +89,7 @@ class ShanChen:
     def __init__(self,
                  psi_f = None,
                  G_val = -3.6, theta_val = 1., e2_val = 1.,
-                 n_eps = 1e-3):
+                 n_eps = 0.01):
 
         # Variables Init
         self.psi_f = sympy_exp(-1/self.n) if psi_f is None else psi_f
@@ -115,9 +115,8 @@ class ShanChen:
         self.G_c, self.n_c = float(self.critical_point[0][0]), float(self.critical_point[0][1])
         self.P_c = P_subs_swap.subs(self.n, self.n_c).subs(self.G, self.G_c)
 
-        if self.G_val * self.e2_val > self.G_c * self.e2_val:
-            print("The value of G: %f is above the critical point G_c: %f for the chosen %s"
-                  % (self.G_val, self.G_c, str(self.psi) + " = " + str(self.psi_f)))
+        if self.G_val > self.G_c:
+            print("The value of G: %f is above the critical point G_c: %f for the chosen %s" % (self.G_val, self.G_c, str(self.psi) + " = " + str(self.psi_f)))
             print("-> No phase separation")
         else:
             # Find Extrema
@@ -126,9 +125,6 @@ class ShanChen:
             self.extrema = FindExtrema(self.P_subs, self.n,
                                        arg_range = (self.n_eps, self.range_ext))
             self.coexistence_range = self.FindCoexistenceRange()
-            print("Coexistence range (n, P): ", self.coexistence_range)
-            print()
-            
 
         ### Init Ends
         
@@ -139,22 +135,13 @@ class ShanChen:
         self.FInterface = self.FlatInterface(self, self.PTensor, which_sol, eps_val)
             
     def FindCoexistenceRange(self):
-        print(self.extrema)
         coexistence_range = []
-        '''
-        With this check we can manage values of the coupling for which one has
-        negative pressures
-        '''
-        if self.extrema[1][1] > 0:
-            func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
-            # Looking for the LEFT limit starting from ZERO
-            # and ending after the first stationary point
-            print(func_f(0), func_f(self.n_eps), func_f(self.extrema[0][0] + self.n_eps))
-            arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0] + self.n_eps)
-            p_swap = self.P_subs.subs(self.n, arg_swap)
-            coexistence_range.append((arg_swap, p_swap))
-        else:
-            coexistence_range.append((0, 0))
+        func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
+        # Looking for the LEFT limit starting from ZERO
+        # and ending after the first stationary point
+        arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0] + self.n_eps)
+        p_swap = self.P_subs.subs(self.n, arg_swap)
+        coexistence_range.append((arg_swap, p_swap))
         # Looking for the RIGHT limit starting from the RIGHT extremum
         # that is certainly at the LEFT of the value we are looking for
         func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[0][1])
@@ -176,7 +163,6 @@ class ShanChen:
                     PTensor.p_consts_wf['\epsilon'](self.PTensor.py_stencil.w_sol[which_sol])
             else:
                 self.eps_val = eps_val
-            print("eps_val: ", self.eps_val)
                 
             self.beta_val = self.PTensor.p_consts_wf['\beta'](self.PTensor.py_stencil.w_sol[which_sol])
             self.sigma_c_val = self.PTensor.p_consts_wf['\sigma_c'](self.PTensor.py_stencil.w_sol[which_sol])
@@ -193,7 +179,7 @@ class ShanChen:
             self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
             # Substituting \theta and e_2 and psi and eps and G
             self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
-            self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
+            self.integrand = self.integrand.subs(self.SC.e2, 1)
             self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
             self.integrand = self.integrand.subs(self.eps, self.eps_val)
             self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
@@ -372,27 +358,19 @@ class ShanChen:
             
             # alpha
             self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 2, 4, 4
-            self.alpha_c[9], self.alpha_c[10] = 12, 24
-            self.alpha_c[13], self.alpha_c[16], self.alpha_c[17] = Rational(88, 3), 40, 80            
             # beta
             self.beta_c[1], self.beta_c[2], self.beta_c[4], self.beta_c[5], self.beta_c[8] = \
                 Rational("1/2"), 1, 6, 13, 12
-            self.beta_c[9], self.beta_c[10] = Rational(57, 2), 58
-            self.beta_c[13], self.beta_c[16], self.beta_c[17] = Rational(203, 3), 88, 177
             # gamma
-            self.gamma_c[5], self.gamma_c[8], self.gamma_c[10] = 1, 4, Rational(8, 3)
-            self.gamma_c[13], self.gamma_c[17] = Rational(68, 3), 5
+            self.gamma_c[5], self.gamma_c[8] = 1, 4
             # eta
-            self.eta_c[2], self.eta_c[5], self.eta_c[8], self.eta_c[10] = 1, 7, 12, Rational(46,3)
-            self.eta_c[13], self.eta_c[17] = Rational(148, 3), 27
+            self.eta_c[2], self.eta_c[5], self.eta_c[8] = 1, 7, 12
             # kappa
             self.kappa_c[5], self.kappa_c[8] = 4, 8
             # lambda
             self.lambda_c[2], self.lambda_c[5], self.lambda_c[8] = 2, 12, 24
             # sigma_c
             self.sigma_c_c[1], self.sigma_c_c[4], self.sigma_c_c[5] = -6, -96, -108
-            self.sigma_c_c[9], self.sigma_c_c[10] = -486, -768
-            self.sigma_c_c[13], self.sigma_c_c[16], self.sigma_c_c[17] = -300, -1536, 2700
             # tolman_c
             self.tolman_c_c[1], self.tolman_c_c[4], self.tolman_c_c[5] = \
                 -Rational('1/2'), -6, -6
@@ -546,10 +524,10 @@ class ShanChanEquilibriumCache(ManageData):
             self.eps_lambda = sp_lambdify([w_sym_list], _eps_expr)
 
             _e2_expr = stencil.e_expr[2]
-            self.e2_lambda = sp_lambdify([stencil.w_sym_list], _e2_expr)
+            self.e2_lambda = sp_lambdify([w_sym_list], _e2_expr)
 
             _weights_list = None
-            if len(stencil.w_sol[0]) != 5 and False:
+            if len(stencil.w_sol[0]) != 5:
                 len_diff = 5 - len(stencil.w_sol[0])
                 if len_diff < 0:
                     raise Exception("The number of weights must be 5 at most!")
@@ -558,7 +536,6 @@ class ShanChanEquilibriumCache(ManageData):
                 _weights_list = stencil.w_sol[0]
 
 
-            print("The value of e_2:", self.e2_lambda(_weights_list))
             _shan_chen = \
                 ShanChen(psi_f = psi_f, G_val = G,
                          theta_val = c2,

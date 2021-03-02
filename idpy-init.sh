@@ -4,8 +4,14 @@
 # Last revised 28/8/2020
 
 source .idpy-env
-WGET_PYOPENCL=https://files.pythonhosted.org/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
-WGET_PYCUDA=https://files.pythonhosted.org/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
+WGET_PYOPENCL_2020=https://files.pythonhosted.org/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
+WGET_PYOPENCL_2021=https://files.pythonhosted.org/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
+WGET_PYOPENCL=${WGET_PYOPENCL_2021}
+
+WGET_PYCUDA_2019=https://files.pythonhosted.org/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
+WGET_PYCUDA_2020=https://files.pythonhosted.org/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
+WGET_PYCUDA=${WGET_PYCUDA_2020}
+
 TAR_PYOPENCL=$(echo ${WGET_PYOPENCL} | tr '/' ' ' | awk '{print($NF)}')
 DIR_PYOPENCL=${TAR_PYOPENCL:0:${#TAR_PYOPENCL} - 7}
 TAR_PYCUDA=$(echo ${WGET_PYCUDA} | tr '/' ' ' | awk '{print($NF)}')
