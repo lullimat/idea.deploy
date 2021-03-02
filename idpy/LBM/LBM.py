@@ -273,10 +273,12 @@ def CheckUConvergence(lbm):
     lbm.sims_vars['u_conv'].append(u_conv)
     lbm.sims_vars['max_u'].append(max_u)
 
+    _u_threshold = 1e-12 if NPT.C[lbm.custom_types['UType']] == np.float64 else 1e-5
+
     print('u_conv: ', u_conv, 'max_u: ', max_u)
-    print("Conv!", u_conv < 1e-12, first_flag)
+    print("Conv!", u_conv < _u_threshold, first_flag)
     
-    if not first_flag and u_conv < 1e-12:
+    if not first_flag and u_conv < _u_threshold:
         break_f = True
     else:
         break_f = False
