@@ -63,6 +63,7 @@ if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
     import pyopencl.array as cl_array
     from idpy.OpenCL.OpenCL import Tenet as CLTenet
+    from idpy.OpenCL.OpenCL import OpenCL
 
 class IdpyKernel:
     '''
@@ -277,6 +278,11 @@ class IdpyKernel:
             '''
             
             grid = (block[0] * grid[0], block[1] * grid[1], block[2] * grid[2])
+            '''
+            Still not completely sure why I need to fall back on PyOpenCL automatic choice
+            of workgroup size when using CPUs, at least on MacOS
+            '''
+            block = block if tenet.kind == OpenCL.GPU_T else None 
 
             class Idea:
                 def __init__(self, k_dict = None):
@@ -289,6 +295,11 @@ class IdpyKernel:
                             _args_data.append(arg.data)
                         else:
                             _args_data.append(arg)
+
+                    '''
+                    print(self.k_dict['_kernel_function'].get_info(cl.kernel_info.FUNCTION_NAME))
+                    print(self.k_dict['_kernel_function'].get_work_group_info(cl.kernel_work_group_info.WORK_GROUP_SIZE, self.k_dict['tenet'].device))
+                    '''
 
                     self.k_dict['_kernel_function'].set_args(*_args_data)
                     return cl.enqueue_nd_range_kernel(self.k_dict['tenet'],
