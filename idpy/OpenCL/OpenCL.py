@@ -53,6 +53,9 @@ class Tenet(cl.CommandQueue):
     def End(self):
         return super().finish()
 
+    def SetKind(self, kind):
+        self.kind = kind
+
 class OpenCL:
     '''
     class OpenCL:
@@ -92,7 +95,9 @@ class OpenCL:
                                    cl.command_queue_properties.PROFILING_ENABLE)
 
     def GetTenet(self):
-        return Tenet.from_parent(self.GetQueue())
+        _tenet = Tenet.from_parent(self.GetQueue())
+        _tenet.SetKind(self.kind)
+        return _tenet
         
     def SetDevice(self, kind = GPU_T, device = 0):
         self.kind, self.device = kind, device
