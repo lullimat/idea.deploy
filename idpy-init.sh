@@ -202,6 +202,9 @@ then
     jupyter nbextension enable codefolding/main
     ## Jupyter Sections Management
     jupyter nbextension enable toc2/main
+    ## Further step to avoid toc and fodling disappear
+    ## https://github.com/jupyter/help/issues/186
+    jupyter nbextension enable --py widgetsnbextension
 
     ## Adding virtual environemtn to jupyter
     ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
