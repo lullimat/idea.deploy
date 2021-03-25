@@ -165,3 +165,44 @@ def GetParamsClean(kwargs, _a_params_dict, needed_params = None):
             del kwargs[var]
 
     return kwargs
+
+from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
+from idpy.IdpyCode import idpy_langs_sys, idpy_langs_list
+
+'''
+Methods: IdpyHardware
+'''
+
+def IdpyHardware():
+    if idpy_langs_sys[CUDA_T]:
+        from idpy.CUDA.CUDA import CUDA
+        print("CUDA Found!")
+        cuda = CUDA()
+        gpus_list = cuda.DiscoverGPUs()
+        for gpu_i in gpus_list:
+            print("\nCUDA GPU[" + str(gpu_i) + "]")
+            for key in gpus_list[gpu_i]:
+                print(key, ": ", gpus_list[gpu_i][key])
+            print()
+        del cuda
+
+
+    if idpy_langs_sys[OCL_T]:
+        from idpy.OpenCL.OpenCL import OpenCL
+        print("OpenCL Found!")
+        ocl = OpenCL()
+        gpus_list = ocl.DiscoverGPUs()
+        cpus_list = ocl.DiscoverCPUs()
+        print("\nListing GPUs:")
+        for gpu_i in gpus_list:
+            print("OpenCL GPU[" + str(gpu_i) + "]")
+            for key in gpus_list[gpu_i]:
+                print(key, ": ", gpus_list[gpu_i][key])
+            print()
+        print("\nListing CPUs:")
+        for cpu_i in cpus_list:
+            print("OpenCL CPU[" + str(cpu_i) + "]")
+            for key in cpus_list[cpu_i]:
+                print(key, ": ", cpus_list[cpu_i][key])
+            print()
+        del ocl
