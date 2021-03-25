@@ -54,13 +54,17 @@ def FindSingleZeroRange(func, x_init, delta_val):
     return (x_init - delta_val, x_init)
     
 
-def FindZeroRanges(func, n_range, n_bins, n_delta):
+def FindZeroRanges(func, n_range, n_bins, n_delta, debug_flag = False):
     zero_ranges = []
     old_val, new_val = 0, 0
     # Here I can use linspace
     for n_i in range(n_bins):
-        #print(n_bins, n_i, n_range[0] + n_delta * n_i)
         new_val = func(n_range[0] + n_delta * n_i)
+        if debug_flag:
+            print(n_bins, n_i, n_range[0] + n_delta * n_i, new_val, old_val)
+            print(n_i > 0, old_val * new_val < 0, n_i > 0 and old_val * new_val < 0)
+            print()
+        
         if n_i > 0 and old_val * new_val < 0:
             zero_ranges.append((n_range[0] + n_delta * (n_i - 1), 
                                 n_range[0] + n_delta * n_i))
@@ -71,6 +75,8 @@ def FindExtrema(func, f_arg, arg_range = (0.01,3.), arg_bins = 256):
     d_func = lambda f_arg_: diff(func,f_arg).subs(f_arg, f_arg_)
     arg_delta = (arg_range[1] - arg_range[0])/arg_bins
     zero_ranges = FindZeroRanges(d_func, arg_range, arg_bins, arg_delta)
+
+    print("zero_ranges: ", zero_ranges)
     
     extrema = []
     for z_range in zero_ranges:
@@ -103,6 +109,7 @@ class ShanChen:
         self.P_subs_lamb = sp_lambdify(self.n, self.P_subs)
 
         # Find Critical Point
+        ## This substitution leaves both n and G free
         P_subs_swap = self.P.subs(self.psi, self.psi_f)
         P_subs_swap = P_subs_swap.subs(self.theta, self.theta_val)
         P_subs_swap = P_subs_swap.subs(self.e2, self.e2_val)
@@ -121,7 +128,14 @@ class ShanChen:
         else:
             # Find Extrema
             lambda_tmp = sp_lambdify(self.n, self.P_subs - self.P_c)
+            ## Here I want to find the value of the density that correxpond to the critical
+            ## pressure because by construction this value of the density is larger than
+            ## any coexistence extreme, and there is only one
             self.range_ext = FindSingleZeroRange(lambda_tmp, self.n_eps, self.n_eps)[1]
+            ## Hence we can look for extrema starting from self.n_eps to self.range_ext
+            ## Cannot begin from zero because for some choices of \psi the derivative
+            ## might be singular
+            print("Extrema:", self.range_ext)
             self.extrema = FindExtrema(self.P_subs, self.n,
                                        arg_range = (self.n_eps, self.range_ext))
             self.coexistence_range = self.FindCoexistenceRange()
@@ -146,7 +160,7 @@ class ShanChen:
             func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
             # Looking for the LEFT limit starting from ZERO
             # and ending after the first stationary point
-            arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0] + self.n_eps)
+            arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0])
             p_swap = self.P_subs.subs(self.n, arg_swap)
             coexistence_range.append((arg_swap, p_swap))
         else:
@@ -215,19 +229,24 @@ class ShanChen:
             
             func_init = self.SC.P_subs.subs(self.SC.n, arg_init)
             target_values.append((arg_init, func_init))
-            arg_range, arg_bins = [arg_init, self.SC.coexistence_range[1][0]], 256
+            arg_range, arg_bins = [arg_init, self.SC.coexistence_range[1][0]], 2 ** 10
             arg_delta = (arg_range[1] - arg_range[0])/arg_bins
             
-            delta_func_f = (lambda delta_arg_: 
-                            (self.SC.P_subs.subs(self.SC.n, arg_range[0] + delta_arg_) - 
+            delta_func_f = (lambda arg_: 
+                            (self.SC.P_subs.subs(self.SC.n, arg_) - 
                              self.SC.P_subs.subs(self.SC.n, arg_range[0])))
             
-            zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta)
-            
+            zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta,
+                                         debug_flag = False)
+
             # Always pick the last range for the stable solution: -1
+            #print("zero_ranges:", zero_ranges)
+            #print(bisect(delta_func_f, zero_ranges[0][0], zero_ranges[0][1]))
+            #print(bisect(delta_func_f, zero_ranges[-1][0], zero_ranges[-1][1]))
+            
             solution = bisect(delta_func_f, zero_ranges[-1][0], zero_ranges[-1][1])
             
-            arg_swap = arg_init + solution
+            arg_swap = solution
             func_swap = self.SC.P_subs.subs(self.SC.n, arg_swap)
             target_values.append((arg_swap, func_swap))
             
@@ -237,19 +256,26 @@ class ShanChen:
             # Need to find the zero of self.maxwell_integral_delta
             # Delta can vary between (0, and the difference between the gas maximum
             # and the beginning of the coexistence region
+            '''
             search_range = \
                 [self.SC.n_eps,
                  self.SC.extrema[0][0] - self.SC.coexistence_range[0][0] - self.SC.n_eps]
+            '''
+            search_range = \
+                [self.SC.n_eps,
+                 self.SC.extrema[0][0] - self.SC.coexistence_range[0][0]]
+            
             search_delta = (search_range[1] - search_range[0])/n_bins
             mech_eq_range = FindZeroRanges(self.maxwell_integral_delta,
-                                           search_range, n_bins, search_delta)
+                                           search_range, n_bins, search_delta,
+                                           debug_flag = False)
             
             mech_eq_delta = bisect(self.maxwell_integral_delta,
                                    mech_eq_range[0][0], mech_eq_range[0][1])
 
             self.mech_eq_zero = self.maxwell_integral_delta(mech_eq_delta)
             self.mech_eq_target = self.GuessDensitiesFlat(mech_eq_delta)
-            ##print(self.mech_eq_target)
+            print(self.mech_eq_target)
 
         def DNDXLambda(self, rho_g):
             prefactor = 24 * ((self.SC.psi_f)**self.eps)/(self.beta * self.SC.G * (self.SC.d_psi_f)**2)
