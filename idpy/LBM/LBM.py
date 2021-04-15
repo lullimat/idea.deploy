@@ -385,7 +385,8 @@ class RootLB(IdpySims):
                           'Q': self.sims_vars['Q'],
                           'DIM': self.sims_vars['DIM'],
                           'CM2': 1/self.sims_vars['c2'],
-                          'CM4': 1/(self.sims_vars['c2'] ** 2)}
+                          'CM4': 1/(self.sims_vars['c2'] ** 2),
+                          'PI': np.pi}
 
         '''
         memory to be allocated
@@ -701,6 +702,7 @@ class ShanChenMultiPhase(RootLB):
         '''
         sims_vars
         '''
+        self.sims_vars['tau'] = self.params_dict['tau']
         self.sims_vars['QE'], self.sims_vars['E_list'], self.sims_vars['EW_list'] = \
             InitFStencilWeights(f_stencil = self.params_dict['f_stencil'],
                                 custom_types = self.custom_types)
