@@ -669,7 +669,7 @@ class ShanChenMultiPhase(RootLB):
             K_InitFlatInterface(custom_types = self.custom_types.Push(),
                                 constants = self.constants,
                                 f_classes = [F_PosFromIndex,
-                                             F_NFlatProfile],
+                                             F_NFlatProfilePeriodic],
                                 optimizer_flag = self.optimizer_flag)
 
         n_g = NPT.C[self.custom_types['NType']](n_g)
@@ -944,6 +944,50 @@ class F_NFlatProfile(IdpyFunction):
         return tanh((LengthType)(x - (x0 - 0.5 * w))) - tanh((LengthType)(x - (x0 + 0.5 * w)));
         """
 
+class F_NFlatProfilePeriodic(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'NType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'SType x': ['const'],
+                       'SType x0': ['const'],
+                       'LengthType w': ['const'],
+                       'SType d_size': ['const']}
+
+        self.functions[IDPY_T] = """
+        SType xm = d_size/2, xp = 0;
+        SType delta = x0 - xm;
+        if(delta >= 0){
+            if(x < x0 - xm) xp = x - (x0 - xm) + d_size;
+            else xp = x - (x0 - xm);
+        }else{
+            if(x < x0 + xm) xp = x - (x0 + xm) + d_size;
+            else xp = x - (x0 + xm);
+        }
+        return tanh((LengthType)(xp - (xm - 0.5 * w))) - tanh((LengthType)(xp - (xm + 0.5 * w)));
+        """
+
+class F_NFlatProfilePeriodicR(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'NType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'SType x': ['const'],
+                       'LengthType x0': ['const'],
+                       'LengthType w': ['const'],
+                       'SType d_size': ['const']}
+
+        self.functions[IDPY_T] = """
+        SType xm = d_size/2;
+        LengthType xp = 0;
+        SType delta = x0 - xm;
+        if(delta >= 0){
+            if(x < x0 - xm) xp = x - (x0 - xm) + d_size;
+            else xp = x - (x0 - xm);
+        }else{
+            if(x < x0 + xm) xp = x - (x0 + xm) + d_size;
+            else xp = x - (x0 + xm);
+        }
+        return tanh((LengthType)(xp - (xm - 0.5 * w))) - tanh((LengthType)(xp - (xm + 0.5 * w)));
+        """
+
+
 class F_PointDistanceCenterFirst(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'LengthType'):
         IdpyFunction.__init__(self, custom_types = custom_types,
@@ -1081,16 +1125,15 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
             }
 
             // Compute square norm of Guo shifted velocity
-            UType u_dot_u = 0.;
-            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d];}
+            UType u_dot_u = 0., F_dot_u = 0.;
+            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d]; F_dot_u  += F[d] * lu[d];}
 
             // Cycle over the populations: equilibrium + Guo
             for(int q=0; q<Q; q++){
-                UType u_dot_xi = 0., F_dot_xi = 0., F_dot_u = 0.; 
+                UType u_dot_xi = 0., F_dot_xi = 0.; 
                 for(int d=0; d<DIM; d++){
                     u_dot_xi += lu[d] * XI_list[d + q*DIM];
                     F_dot_xi += F[d] * XI_list[d + q*DIM];
-                    F_dot_u  += F[d] * lu[d];
                 }
 
                 PopType leq_pop = 1., lguo_pop = 0.;
@@ -1222,7 +1265,7 @@ class K_InitPopulations(IdpyKernel):
             UType lu[DIM], u_dot_u = 0.;
             // Copying the velocity
             for(int d=0; d<DIM; d++){
-                lu[d] = u[g_tid + d * V]; u_dot_u += lu[d];
+                lu[d] = u[g_tid + d * V]; u_dot_u += lu[d] * lu[d];
             }
 
             // Loop over the populations
@@ -1278,7 +1321,7 @@ class K_InitFlatInterface(IdpyKernel):
             NType delta_n = full_flag * (n_l - n_g) + (1 - full_flag) * (n_g - n_l);
 
             n[g_tid] = 0.5 * (n_g + n_l) + \
-            0.5 * delta_n * (F_NFlatProfile(dim_center[direction], g_tid_pos[direction], width) - 1.);
+            0.5 * delta_n * (F_NFlatProfilePeriodic(g_tid_pos[direction], dim_center[direction], width, dim_sizes[direction]) - 1.);
 
             for(int d=0; d<DIM; d++){
             u[g_tid + d * V] = 0.;
