@@ -138,6 +138,7 @@ class ShanChen:
             print("Extrema:", self.range_ext)
             self.extrema = FindExtrema(self.P_subs, self.n,
                                        arg_range = (self.n_eps, self.range_ext))
+
             self.coexistence_range = self.FindCoexistenceRange()
             print("Coexistence range (n, P): ", self.coexistence_range)
             print()            
@@ -252,7 +253,7 @@ class ShanChen:
             
             return target_values
 
-        def MechanicEquilibrium(self, n_bins = 32):
+        def MechanicEquilibrium(self, n_bins = 2 ** 5):
             # Need to find the zero of self.maxwell_integral_delta
             # Delta can vary between (0, and the difference between the gas maximum
             # and the beginning of the coexistence region
@@ -528,7 +529,7 @@ class ShanChanEquilibriumCache(ManageData):
     def __init__(self,
                  stencil = None,
                  G = None, c2 = None, psi_f = None,
-                 dump_file = 'SCEqCache'):
+                 dump_file = 'SCEqCache', n_eps = 1e-2):
         ManageData.__init__(self, dump_file = dump_file)
 
         if stencil is None:
@@ -542,6 +543,8 @@ class ShanChanEquilibriumCache(ManageData):
 
         if psi_f is None:
             raise Exception("Missing argument psi_f")
+
+        self.n_eps = n_eps
 
 
         '''
@@ -585,11 +588,11 @@ class ShanChanEquilibriumCache(ManageData):
             else:
                 _weights_list = stencil.w_sol[0]
 
-
             _shan_chen = \
                 ShanChen(psi_f = psi_f, G_val = G,
                          theta_val = c2,
-                         e2_val = self.e2_lambda(_weights_list))
+                         e2_val = self.e2_lambda(_weights_list),
+                         n_eps = self.n_eps)
 
             _shan_chen.PressureTensorInit(stencil)
             _shan_chen.FlatInterfaceProperties()
