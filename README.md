@@ -6,14 +6,16 @@ Thanks for passing by! If you are visiting this repository it is likely because 
 
 The repository is at an early stage in this moment and will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
 
+For reproducing the papers results please look below in the **Installation** Section and in **Typical usage for reproducing the results reported in a paper** Subsection.
+
 ## Available Peer-Reviewed Papers
 Will update this Section very soon!
 
 ## Available Preprints
-### (https://arxiv.org/abs/2105.08772)[https://arxiv.org/abs/2105.08772]
+### [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
 **A Mesoscale Perspective on the Tolman Length**
 
-### (https://arxiv.org/abs/2009.12522)[https://arxiv.org/abs/2009.12522]
+### [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522)
 **Structure and Isotropy of Lattice Pressure Tensors for Multi-range Potentials**
 
 ## Installation
