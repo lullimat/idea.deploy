@@ -12,11 +12,13 @@ For reproducing the papers results please look below in the **Installation** Sec
 Will update this Section very soon!
 
 ## Available Preprints
-### [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
-**A Mesoscale Perspective on the Tolman Length**
+### **A Mesoscale Perspective on the Tolman Length**
+- arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
+- github link: [https://github.com/lullimat/arXiv-2105.08772](https://github.com/lullimat/arXiv-2105.08772)
 
-### [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522)
-**Structure and Isotropy of Lattice Pressure Tensors for Multi-range Potentials**
+### **Structure and Isotropy of Lattice Pressure Tensors for Multi-range Potentials**
+- arXiv link: [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522)
+- github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
