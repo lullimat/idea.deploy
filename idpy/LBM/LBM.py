@@ -31,6 +31,7 @@ Provides the simulations classes fo the Lattice Boltzmann method
 
 from functools import reduce
 from collections import defaultdict
+import sympy as sp
 import numpy as np
 import h5py
 import time
@@ -224,8 +225,60 @@ def ComputeCenterOfMass(lbm, c_i = ''):
 
     return _mass, _cm_coords
 
-def CheckDeltaP(lbm):
-    pass
+
+def CheckCenterOfMassDeltaPConvergence(lbm):
+    _first_flag = False
+    if 'cm_conv' not in lbm.aux_vars:
+        lbm.sims_vars['cm_conv'] = []
+        lbm.aux_vars.append('cm_conv')
+
+        lbm.sims_vars['cm_coords'] = []
+        lbm.aux_vars.append('cm_coords')        
+
+        lbm.sims_vars['delta_p'] = []
+        lbm.aux_vars.append('delta_p')
+
+        lbm.sims_vars['p_in'], lbm.sims_vars['p_out'] = \
+                        [], []
+        lbm.aux_vars.append('p_out')
+        lbm.aux_vars.append('p_in')
+
+        lbm.sims_vars['is_centered_seq'] = []
+        lbm.aux_vars.append('is_centered_seq')
+        
+        _first_flag = True
+        
+    _p_in, _p_out, _delta_p = lbm.DeltaPLaplace()
+    print("p_in: ", _p_in, "p_out: ", _p_out, "delta_p: ", _delta_p)
+    print()
+
+    _chk, _break_f = [], False
+    if not _first_flag:
+        _delta_delta_p = _delta_p - lbm.sims_vars['delta_p'][-1]
+        _delta_p_in = _p_in - lbm.sims_vars['p_in'][-1]
+        _delta_p_out = _p_out - lbm.sims_vars['p_out'][-1]
+        
+        _chk += [not lbm.sims_vars['is_centered']]
+        _chk += [abs(_delta_p) < 1e-9]
+        _chk += [abs(_delta_delta_p / _delta_p) < 1e-5]
+
+        _break_f = OneTrue(_chk)        
+
+        print("Center of mass: ", lbm.sims_vars['cm_coords'])
+        print("delta delta_p: ", _delta_delta_p,
+              "delta p_in: ", _delta_p_in,
+              "delta p_out: ", _delta_p_out)
+        
+        print(_chk)
+        print()
+
+    lbm.sims_vars['cm_conv'].append(np.copy(lbm.sims_vars['cm_coords']))
+    lbm.sims_vars['delta_p'].append(_delta_p)
+    lbm.sims_vars['p_in'].append(_p_in)
+    lbm.sims_vars['p_out'].append(_p_out)
+    lbm.sims_vars['is_centered_seq'].append(lbm.sims_vars['is_centered'])
+    
+    return _break_f
 
 def CheckUConvergence(lbm):
     first_flag = False
@@ -430,7 +483,6 @@ class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
         self.SetupRoot(*args, **kwargs)
         
-
         self.InitVars()
         self.GridAndBlocks()
         
@@ -570,6 +622,87 @@ class ShanChenMultiPhase(RootLB):
                      self.sims_idpy_memory['W_list']])
         
         self.init_status['pop'] = True
+
+    def DeltaPLaplace(self, inside = None, outside = None):
+        if 'n_in_n_out' not in self.sims_idpy_memory:
+            self.sims_idpy_memory['n_in_n_out'] = \
+                IdpyMemory.Zeros(2, dtype = NPT.C[self.custom_types['NType']],
+                                 tenet = self.tenet)
+            self.aux_idpy_memory.append('n_in_n_out')
+
+        _K_NInNOut = K_NInNOut(custom_types = self.custom_types.Push(),
+                               constants = self.constants,
+                               f_classes = [],
+                               optimizer_flag = self.optimizer_flag)
+
+        if inside is None:
+            _mass, _inside = ComputeCenterOfMass(self)
+            _inside = list(_inside)
+            self.sims_vars['cm_coords'] = np.array(_inside)
+            self.sims_vars['mass'] = _mass
+
+            """
+            for i in range(len(_inside)):
+                _inside[i] = int(round(_inside[i]))
+            """
+                
+            '''
+            Check center
+            '''
+            _chk = False
+            for d in range(self.sims_vars['DIM']):
+                if abs(self.sims_vars['dim_center'][d] - _inside[d]) > 1e-3:
+                    _chk = _chk or True
+
+            self.sims_vars['is_centered'] = True
+            if _chk:
+                print("Center of mass: ", _inside,
+                      "; Center of the system: ", self.sims_vars['dim_center'])
+                self.sims_vars['is_centered'] = False
+
+            
+            _inside = IndexFromPos(self.sims_vars['dim_center'].tolist(),
+                                   self.sims_vars['dim_strides'])
+            _inside = NPT.C['unsigned int'](_inside)
+        else:
+            _inside = NPT.C['unsigned int'](inside)
+
+        if outside is None:
+            _outside = self.sims_vars['V'] - 1
+            _outside = NPT.C['unsigned int'](_outside)
+        else:
+            _outside = NPT.C['unsigned int'](outside)
+
+        
+        Idea = _K_NInNOut(tenet = self.tenet,
+                          grid = self.sims_vars['grid'],
+                          block = self.sims_vars['block'])
+            
+        Idea.Deploy([self.sims_idpy_memory['n_in_n_out'],
+                     self.sims_idpy_memory['n'],
+                     _inside, _outside])
+
+        _swap_innout = self.sims_idpy_memory['n_in_n_out'].D2H()
+
+        self.sims_vars['n_in_n_out'] = _swap_innout
+        
+        _p_in = self.PBulk(_swap_innout[0])
+        _p_out = self.PBulk(_swap_innout[1])
+
+        return _p_in, _p_out, _p_in - _p_out
+
+
+    def PBulk(self, n):
+        if 'psi_f' not in self.sims_vars:
+            self.sims_vars['psi_f'] = \
+                sp.lambdify(self.sims_vars['n_sym'], self.sims_vars['psi_sym'])
+            self.sims_not_dump_vars += ['psi_f']
+            
+        _p = (n * self.sims_vars['c2'] +
+              0.5 * self.sims_vars['SC_G'] * self.sims_vars['e2_val'] * (self.sims_vars['psi_f'](n)) ** 2)
+
+        return _p
+
 
     def InitCylinderInterface(self, n_g, n_l, R, direction = 0,
                               full_flag = True):
@@ -712,6 +845,9 @@ class ShanChenMultiPhase(RootLB):
         else:
             self.sims_vars['e2_val'] = self.params_dict['e2_val']
 
+        self.sims_vars['psi_sym'] = self.params_dict['psi_sym']
+        self.sims_vars['n_sym'] = sp.symbols('n')
+
         '''
         constants
         '''
@@ -779,7 +915,7 @@ class ShanChenMultiPhase(RootLB):
                                                       'custom_types', 'block_size',
                                                       'f_stencil', 'psi_code', 'SC_G',
                                                       'tau', 'optimizer_flag', 'e2_val',
-                                                      'empty_sim'])
+                                                      'psi_sym', 'empty_sim'])
 
         if 'f_stencil' not in self.params_dict:
             raise Exception("Missing 'f_stencil'")
@@ -795,6 +931,9 @@ class ShanChenMultiPhase(RootLB):
 
         if 'lang' not in self.params_dict:
             raise Exception("Param lang = CUDA_T | OCL_T is needed")
+
+        if 'psi_sym' not in self.params_dict:
+            raise Exception("Missing sympy expression for the pseudo-potential, parameter 'psi_sym'")
 
         if 'optimizer_flag' in self.params_dict:
             self.optimizer_flag = self.params_dict['optimizer_flag']
@@ -1440,6 +1579,26 @@ class K_SetPopulationSpike(IdpyKernel):
             }
         }
         """
+
+class K_NInNOut(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes)
+
+        self.SetCodeFlags('g_tid')
+        self.params = {'NType * n_in_n_out': ['global'],
+                       'NType * n': ['global', 'restrict', 'const'],
+                       'unsigned int inside': ['const'],
+                       'unsigned int outside': ['const']}
+
+        self.kernels[IDPY_T] = """ 
+        if(g_tid < V){
+            if(g_tid == inside) n_in_n_out[0] = n[inside];
+            if(g_tid == outside) n_in_n_out[1] = n[outside];
+        }
+        """
+
         
 '''
 IdpyMethods
@@ -1452,3 +1611,4 @@ class M_SwapPop(IdpyMethod):
         swap_list[0], swap_list[1] = swap_list[1], swap_list[0]
 
         return IdpyMethod.PassIdpyStream(self, idpy_stream = idpy_stream)
+

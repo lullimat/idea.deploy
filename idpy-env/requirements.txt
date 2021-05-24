@@ -11,3 +11,9 @@ jupyter_contrib_nbextensions
 jupyter_nbextensions_configurator
 ipykernel
 sklearn
+plotly
+psutil
+requests
+## Thanks!
+## https://stackoverflow.com/questions/58473837/plotly-missing-orca
+kaleido

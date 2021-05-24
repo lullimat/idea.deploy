@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -43,7 +43,7 @@ class IdpyPapers:
     def ShowPapers(self):
         print("The repositories related to these papers can be cloned")
         for key in self.arxiv_papers:
-            print("*", key, "*", self.arxiv_papers[key]["Title"])
+            print("['" + key +"']", self.arxiv_papers[key]["Title"])
             print()
 
     def SetPapers(self):
@@ -54,6 +54,13 @@ class IdpyPapers:
                          "Xiaowen Shan"],
              "doi": "",
              "git": "https://github.com/lullimat/arXiv-2009.12522.git"}
+        self.arxiv_papers['arXiv-2105.08772'] = \
+            {"Title": "A Mesoscale Perspective on the Tolman Length",
+             "Authors": ["Matteo Lulli", "Luca Biferale",
+                         "Giacomo Falcucci", "Mauro Sbragaglia",
+                         "Xiaowen Shan"],
+             "doi": "",
+             "git": "https://github.com/lullimat/arXiv-2105.08772.git"}
 
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
@@ -65,7 +72,7 @@ if __name__ == "__main__":
     print("")
     idpy_papers = IdpyPapers()
     idpy_papers.ShowPapers()
-    key = input("Choose the arXiv number: ")
+    key = input("Copy and paste the repository string: ")
     key = str(key)
     if key in idpy_papers.arxiv_papers:
         print("Cloning the repository...")

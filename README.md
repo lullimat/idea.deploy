@@ -1,12 +1,24 @@
 # Welcome to the **idea.deploy** project!
 
-**During these first days of public exposure of this repository many changes are being pushed quite frequently. Please, keep on checking for updates. The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522) is now available!**
+**Changes are being pushed quite frequently. Please, keep on checking for updates. The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772) "A Mesoscale Perspective on the Tolman Length" is ready!**
 
-Thanks for passing by! If you are visiting this repository it is likely because of the DSFD 2020 presentation I have given on July the 16th. This is the first version of the code base to be posted publicly on github. By tomorrow (Tuesday the 29th of September 2020) the code for reproducing the results of the Shan-Chen multi-phase pressure tensor isotropy paper will be available from the directory ./papers. Under this directory you will find a python script with the necessary information for pulling the Jupyter notebook.
-
-However, this is only the first step.
+Thanks for passing by! If you are visiting this repository it is likely because of the DSFD 2020 presentation I have given on July the 16th, or becuase of the first two preprints making use of it (see below).
 
 The repository is at an early stage in this moment and will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
+
+For reproducing the papers results please look below in the **Installation** Section and in **Typical usage for reproducing the results reported in a paper** Subsection.
+
+## Available Peer-Reviewed Papers
+Will update this Section very soon!
+
+## Available Preprints
+### **A Mesoscale Perspective on the Tolman Length**
+- arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
+- github link: [https://github.com/lullimat/arXiv-2105.08772](https://github.com/lullimat/arXiv-2105.08772)
+
+### **Structure and Isotropy of Lattice Pressure Tensors for Multi-range Potentials**
+- arXiv link: [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522)
+- github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
@@ -53,5 +65,5 @@ Clearly, I am willing to collaborate with those researchers who would like to po
 ## To do (short-term)
 At the moment the scripts can create a python virtual environment only for Linux and MacOS: no testing of the **idpy-init.sh** and **idpy-clean.sh** has been performed so far on Windows Linux Subsystem. Most probably the best approach will be to rewrite the above scripts in python so that they will be Os independent. However, quite a few implementation details depend on the operative system, especially as far as compilers are concerned, e.g. escaping spaces when passing options flags and so on.
 
-Matteo Lulli, September 28th 2020
+Matteo Lulli, May 24th 2021
 matteo.lulli@gmail.com
