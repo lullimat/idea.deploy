@@ -194,6 +194,8 @@ then
     if((MPICC_F))
     then
 	pip install mpi4py
+    else
+	echo "No MPI installation found (which mpicc did not return a path)"
     fi
     ## Jupyter nbextension
     jupyter contrib nbextension install --user
