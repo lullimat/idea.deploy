@@ -1,7 +1,7 @@
 # Script for initializing idea.deploy python virtual environment
-# Copyright (C) 2020 Matteo Lulli (matteo.lulli@gmail.com)
+# Copyright (C) 2020-2021 Matteo Lulli (matteo.lulli@gmail.com)
 # Permission to copy and modify is granted under the MIT license
-# Last revised 28/8/2020
+# Last revised 25/6/2021
 
 source .idpy-env
 WGET_PYOPENCL_2020=https://files.pythonhosted.org/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
@@ -175,6 +175,7 @@ fi
 
 #####################
 ## Checking OpenMpi
+#####################
 MPICC_F=$(which mpicc 1>/dev/null 2>/dev/null && echo 1 || echo 0)
 
 echo "Sourcing virtual environment"
@@ -207,6 +208,10 @@ then
     ## Further step to avoid toc and fodling disappear
     ## https://github.com/jupyter/help/issues/186
     jupyter nbextension enable --py widgetsnbextension
+    ## Adding ipyparallel
+    jupyter serverextension enable --py ipyparallel
+    jupyter nbextension install --py ipyparallel
+    jupyter nbextension enable --py ipyparallel
 
     ## Adding virtual environemtn to jupyter
     ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
