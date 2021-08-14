@@ -4,4 +4,6 @@
 *.ipynb_checkpoints
 *.pyc
 *slurm_engine.sbatch
+*.err
+*.out
 !.gitignore
