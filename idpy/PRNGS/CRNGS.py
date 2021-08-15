@@ -34,6 +34,10 @@ from idpy.Utils.CustomTypes import CustomTypes
 from idpy.IdpyCode import GetParamsClean, GetTenet
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
+from idpy.IdpyCode import idpy_langs_sys, idpy_tenet_types
+
+if idpy_langs_sys[OCL_T]:
+    import pyopencl as cl
 
 from idpy.IdpyCode.IdpySims import IdpySims
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyFunction, IdpyLoop
@@ -82,6 +86,7 @@ class CRNGS(IdpySims):
         Setting variables and constants
         '''
         self.sims_vars['kind'] = self.params_dict['kind']
+        self.sims_vars['fp64'] = self.params_dict['fp64']        
 
         '''
         Setting custom types: handling here the different
@@ -171,7 +176,7 @@ class CRNGS(IdpySims):
                 raise Exception("Missing Parameter \'" + _ + "\'")
                 
         if 'kind' not in self.params_dict:
-            self.params_dict['kind'] = 'MINSTD'
+            self.params_dict['kind'] = 'MINSTD'        
             
         if 'init_from' not in self.params_dict:
             self.params_dict['init_from'] = 'numpy'
@@ -196,6 +201,25 @@ class CRNGS(IdpySims):
             self.tenet = self.params_dict['tenet']
         else:
             self.tenet = GetTenet(self.params_dict)
+
+        '''
+        Check if OpenCL device supports 64-bits variables
+        The flag 'fp64' is set True by default because only OpenCL devices
+        might bring up the issue
+        '''
+        self.params_dict['fp64'] = True
+        
+        if idpy_langs_sys[OCL_T] and isinstance(self.tenet, idpy_tenet_types[OCL_T]):
+            if self.tenet.device.get_info(cl.device_info.DOUBLE_FP_CONFIG) == 0:
+                self.params_dict['fp64'] = False
+                
+                if self.params_dict['kind'] in ['MINSTD', 'MMIX']:
+                    print("The device",
+                          self.tenet.device.get_info(cl.device_info.NAME),
+                          "does not support 64-bits integers needed by",
+                          self.params_dict['kind'])
+                    print("Switching CRNG kind to 'NUMREC'")
+                    self.params_dict['kind'] = 'NUMREC'                    
 
         IdpySims.__init__(self, *args, **self.kwargs)
 
@@ -273,13 +297,23 @@ class CRNGS(IdpySims):
 
     def Norm(self, reps = 1, rand_type = None):
         '''
-        Setting the macro
+        Setting the type macro checking device architecture
         '''
         self.constants['F_CRNGFunction'] = 'F_Norm'
         if rand_type is None:
-            self.custom_types.Set({'RANDType': 'double'})
+            if self.sims_vars['fp64']:
+                self.custom_types.Set({'RANDType': 'double'})
+            else:
+                self.custom_types.Set({'RANDType': 'float'})
         else:
-            self.custom_types.Set(rand_type)
+            if rand_type['RANDType'] == 'double' and not self.sims_vars['fp64']:
+                print("The device",
+                      self.tenet.device.get_info(cl.device_info.NAME),
+                      "custom type RANDType demoted to float")
+                self.custom_types.Set({'RANDType': 'float'})
+            else:
+                self.custom_types.Set(rand_type)
+                
         '''
         Check output allocation
         '''
