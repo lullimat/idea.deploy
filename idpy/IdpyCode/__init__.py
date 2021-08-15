@@ -129,6 +129,7 @@ def GetTenet(params_dict):
 '''
 Method CheckOCLFP
 what about unsigned 64 bits integers?
+The question was good...see CRNGS
 '''
 from idpy.Utils.CustomTypes import CustomTypes
 def CheckOCLFP(tenet, custom_types):
@@ -142,6 +143,9 @@ def CheckOCLFP(tenet, custom_types):
             for key, value in custom_types.Push().items():
                 if value == 'double':
                     value = 'float'
+
+                if value == 'unsigned long':
+                    value = 'unsigned int'
                     
                 _swap_dict[key] = value
                 
