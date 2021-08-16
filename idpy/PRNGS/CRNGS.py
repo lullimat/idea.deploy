@@ -249,7 +249,6 @@ class CRNGS(IdpySims):
             _swap_seeds = np.random.randint(low = 1, high = self.sims_vars['ID_RANDMAX'],
                                             size = self.sims_vars['n_prngs'],
                                             dtype = NPT.C[self.custom_types['CRNGType']])
-            print(_swap_seeds.dtype)
             
         elif self.sims_vars['init_from'] == 'urandom':
             _swap_seeds = np.zeros(self.sims_vars['n_prngs'],
