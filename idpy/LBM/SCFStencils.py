@@ -85,11 +85,11 @@ class SCFStencils:
         if len_2s[-1] == 32:
             found = True
             self.e_max = 16
-            
+
         while not found:
             n_eq += self.n_eqs_order(self.e_max)
             #if n_eq == len(self.unique_groups_indices):
-            if n_eq == len(self.len_2s):
+            if n_eq >= len(self.len_2s):
                 found = True
             else:
                 self.e_max += 2
