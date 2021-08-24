@@ -210,3 +210,13 @@ def IdpyHardware():
                 print(key, ": ", cpus_list[cpu_i][key])
             print()
         del ocl
+
+'''
+Methods: GridAndBlocks
+'''
+def GridAndBlocks1D(_n_threads_min, _block_size = 128):
+    _grid = ((_n_threads_min + _block_size - 1)//_block_size, 1, 1)
+    _block = (_block_size, 1, 1)
+
+    return _grid, _block
+
