@@ -471,7 +471,7 @@ class IdpyLoop:
         else:
             raise Exception("List of arguments keys cannot be empty!")    
 
-    def Run(self, loop_range = None):
+    def Run(self, loop_range = None, profiling = False):
         '''
         Begin by setting up meta_streams and langs
         '''
