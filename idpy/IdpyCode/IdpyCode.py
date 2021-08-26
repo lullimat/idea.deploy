@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -35,6 +35,7 @@ and some alternative actions in OpenCL and Metal. This should be fine
 as long as the different meta-declarations are consistent
 '''
 
+import numpy as np
 from collections import defaultdict
 
 from idpy.IdpyCode.IdpyConsts import AddrQualif, KernQualif, FuncQualif
@@ -308,8 +309,27 @@ class IdpyKernel:
                                                       local_work_size = self.k_dict['block'],
                                                       wait_for = idpy_stream)
 
+                def DeployProfiling(self, args_list = None, idpy_stream = None):
+                    _args_data = []
+                    for arg in args_list:
+                        if isinstance(arg, IdpyArrayOCL):
+                            _args_data.append(arg.data)
+                        else:
+                            _args_data.append(arg)
+
+                    self.k_dict['_kernel_function'].set_args(*_args_data)
+                    _swap_event = cl.enqueue_nd_range_kernel(self.k_dict['tenet'],
+                                                             self.k_dict['_kernel_function'],
+                                                             global_work_size = self.k_dict['grid'],
+                                                             local_work_size = self.k_dict['block'],
+                                                             wait_for = idpy_stream)
+                    _swap_event.wait()
+                    _time_sec = (_swap_event.profile.end - _swap_event.profile.start) * 1e-9
+                    return _swap_event, _time_sec
+                
+
             return Idea({'tenet': tenet, 'grid': grid, 'block': block,
-                         '_kernel_function': _kernel_function})
+                         '_kernel_function': _kernel_function, '_kernel_name': self.name})
 
         if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
             _kernel_module = cu_SourceModule(self.Code(CUDA_T), options = self.SetMacros(CUDA_T),
@@ -325,9 +345,30 @@ class IdpyKernel:
                                                            grid = self.k_dict['grid'],
                                                            block = self.k_dict['block'],
                                                            stream = idpy_stream)
+
+                def DeployProfiling(self, args_list = None, idpy_stream = None):
+                    _start, _end = cu_driver.Event(), cu_driver.Event()
+                    '''
+                    Unprofiled 'warm-up' call: can it be done better ?
+                    '''
+                    self.k_dict['_kernel_function'](*args_list,
+                                                    grid = self.k_dict['grid'],
+                                                    block = self.k_dict['block'],
+                                                    stream = idpy_stream)
+                    
+                    _start.record(stream = idpy_stream)
+                    self.k_dict['_kernel_function'](*args_list,
+                                                    grid = self.k_dict['grid'],
+                                                    block = self.k_dict['block'],
+                                                    stream = idpy_stream)
+                    _end.record(stream = idpy_stream)
+                    _end.synchronize()
+                    _time_sec = _start.time_till(_end) * 1e-3
+                    return None, _time_sec
                 
-            return Idea({'_kernel_function': _kernel_function,
-                         'grid': grid, 'block': block})
+                
+            return Idea({'_kernel_function': _kernel_function, '_kernel_name': self.name,
+                         'tenet': tenet, 'grid': grid, 'block': block})
 
     def ResetCode(self):
         self.code = ""
@@ -433,7 +474,7 @@ class IdpyMethod:
 
 class IdpyLoop:
     '''
-    class IdpyLoopNew:
+    class IdpyLoop:
     the idea is to pass a list of arguments lists
     and a list of lists of tuples of IdpyKernels/IdpyMethods and arguments indices
     automatically creating streams and events in order to allow
@@ -509,8 +550,152 @@ class IdpyLoop:
                         '''
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
+
+'''
+most likely to be deleted before merging to master
+'''
+def IdpyProfile(idea_object = None, args_list = [], idpy_stream = None):
+    '''
+    IdpyProfile: method that executes the Deploy method of an Idea object
+    returning a tuple:
+    first: an idpy_stream
+    second: a dictionary containing 
+    '''
+    if idea_object.__class__.__name__ != 'Idea':
+        raise Exception("First argument must be an instance of 'Idea' class")
+    if len(args_list) == 0:
+        raise Exception("args_list must not be an empty list")
+    
+    _lang = idea_object.lang
+    _kernel_name = idea_object.k_dict['_kernel_name']
+    
+    if _lang == OCL_T:
+        _idpy_stream_out = idea_object.Deploy(args_list, idpy_stream)
+        _idpy_stream_out.wait()
+        _time_sec = (_idpy_stream_out.profile.end - _idpy_stream_out.profile.start) * 1e-9
+        return _idpy_stream_out, _time_sec
+    
+    if _lang == CUDA_T:
+        _start = cu_driver.Event()
+        _end = cu_driver.Event()
+        _start.record(stream = idpy_stream)
+        idea_object.Deploy(args_list, idpy_stream)
+        _end.record(stream = idpy_stream)
+        _end.synchronize()
+        _time_sec = _start.time_till(_end)*1e-3
+        return idpy_stream, _time_sec
                         
 
+class IdpyLoopProfile:
+    '''
+    class IdpyLoop:
+    the idea is to pass a list of arguments lists
+    and a list of lists of tuples of IdpyKernels/IdpyMethods and arguments indices
+    automatically creating streams and events in order to allow
+    the concurrent execution of these lists
+    '''
+    def __init__(self, args_dicts = None, sequences = None):
+        self.args_dicts, self.sequences = args_dicts, sequences
+        self.meta_streams, self.langs = [], []
+
+    def SetMetaStreams(self, seq):
+        if seq[0][0].lang == CUDA_T:
+            if idpy_langs_sys[CUDA_T]:
+                return cu_driver.Stream()
+            else:
+                raise Exception("CUDA not present on the system")
+        if seq[0][0].lang == OCL_T:
+            if idpy_langs_sys[OCL_T]:
+                return [None for _ in range(len(seq))]
+            else:
+                raise Exception("OpenCL not present on the system")
+
+    def SetLang(self, seq):
+        return seq[0][0].lang
+
+    def SetArgs(self, seq_index, args_keys):
+        if len(args_keys):
+            return [self.args_dicts[seq_index][_] for _ in args_keys]
+        else:
+            raise Exception("List of arguments keys cannot be empty!")
+
+    def PutArgs(self, seq_index, args_indices, args_list_swap):
+        if len(args_indices):
+            for i in range(len(args_indices)):
+                self.args_dicts[seq_index][args_indices[i]] = args_list_swap[i]
+        else:
+            raise Exception("List of arguments keys cannot be empty!")    
+
+    def Run(self, loop_range = None, profiling = False):
+        '''
+        Begin by setting up meta_streams and langs
+        '''
+        for seq in self.sequences:
+            self.meta_streams.append(self.SetMetaStreams(seq))
+            self.langs.append(self.SetLang(seq))
+        '''
+        Set up dictionary for keeping timings
+        '''
+        _timing_dict = \
+            defaultdict( # seq_i
+                lambda: defaultdict(dict) # _kernel_name
+            )
+        
+        for seq_i in range(len(self.sequences)):
+            seq_len = len(self.sequences[seq_i])
+            for item_i in range(seq_len):
+                _item = self.sequences[seq_i][item_i]
+                Idea = _item[0]
+                _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = []
+
+        '''
+        Loop
+        '''
+        for step in loop_range:
+            for seq_i in range(len(self.sequences)):
+                seq_len = len(self.sequences[seq_i])
+
+                if self.langs[seq_i] == OCL_T:
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        '''
+                        Deploying
+                        '''
+                        _prev_evt = self.meta_streams[seq_i][(item_i - 1 + seq_len) % seq_len]
+                        _stream_swap, _time_swap = \
+                            Idea.DeployProfiling(_args, idpy_stream = (None if _prev_evt is None
+                                                                       else _prev_evt))
+                        self.meta_streams[seq_i][item_i] = [_stream_swap]
+                        self.PutArgs(seq_i, _indices, _args)
+                        _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
+
+                if self.langs[seq_i] == CUDA_T:
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        _stream = self.meta_streams[seq_i]                        
+                        '''
+                        Deploying
+                        '''
+                        _stream_swap, _time_swap = \
+                            Idea.DeployProfiling(_args, idpy_stream = _stream)
+                        self.PutArgs(seq_i, _indices, _args)
+                        _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
+
+        for seq_i in range(len(self.sequences)):
+            seq_len = len(self.sequences[seq_i])
+            for item_i in range(seq_len):
+                _item = self.sequences[seq_i][item_i]
+                Idea = _item[0]
+                _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = \
+                    np.array(_timing_dict[seq_i][Idea.k_dict['_kernel_name']])
+
+        return _timing_dict
+
+                      
 '''
 changes: I should be able to pass the dictiionary with the arguments rather
 than a list so that I can name the argument by name rather than by number
@@ -592,3 +777,4 @@ class IdpyLoopList:
                         '''
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
+
