@@ -522,9 +522,11 @@ class IdpyLoop:
 
         for step in loop_range:
             for seq_i in range(len(self.sequences)):
-                seq_len = len(self.sequences[seq_i])
-
-                if self.langs[seq_i] == OCL_T:
+                seq_len = len(self.sequences[seq_i])                
+                '''
+                OpenCL
+                '''                
+                if self.langs[seq_i] == OCL_T:                
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
                         Idea, _indices = _item[0], _item[1]
@@ -539,7 +541,10 @@ class IdpyLoop:
                                                         else _prev_evt))]
                         self.PutArgs(seq_i, _indices, _args)
 
-                if self.langs[seq_i] == CUDA_T:
+                '''
+                CUDA
+                '''
+                if self.langs[seq_i] == CUDA_T:                
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
                         Idea, _indices = _item[0], _item[1]
@@ -550,6 +555,17 @@ class IdpyLoop:
                         '''
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
+
+            '''
+            Synchronizing Streams
+            '''
+            for seq_i in range(len(self.sequences)):
+                if self.langs[seq_i] == OCL_T:
+                    self.meta_streams[seq_i][-1][0].wait()
+                
+                if self.langs[seq_i] == CUDA_T:
+                    self.meta_streams[seq_i][-1].synchronize()
+
 
 '''
 most likely to be deleted before merging to master
@@ -654,7 +670,9 @@ class IdpyLoopProfile:
         for step in loop_range:
             for seq_i in range(len(self.sequences)):
                 seq_len = len(self.sequences[seq_i])
-
+                '''
+                OpenCL
+                '''
                 if self.langs[seq_i] == OCL_T:
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
@@ -671,6 +689,9 @@ class IdpyLoopProfile:
                         self.PutArgs(seq_i, _indices, _args)
                         _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
 
+                '''
+                CUDA
+                '''            
                 if self.langs[seq_i] == CUDA_T:
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
