@@ -1,4 +1,4 @@
-__author__ = "Matteo Lulli"
+713__author__ = "Matteo Lulli"
 __copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
@@ -556,16 +556,6 @@ class IdpyLoop:
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
 
-            '''
-            Synchronizing Streams
-            '''
-            for seq_i in range(len(self.sequences)):
-                if self.langs[seq_i] == OCL_T:
-                    self.meta_streams[seq_i][-1][0].wait()
-                
-                if self.langs[seq_i] == CUDA_T:
-                    self.meta_streams[seq_i][-1].synchronize()
-
 
 '''
 most likely to be deleted before merging to master
@@ -713,6 +703,10 @@ class IdpyLoopProfile:
                 Idea = _item[0]
                 _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = \
                     np.array(_timing_dict[seq_i][Idea.k_dict['_kernel_name']])
+                '''
+                Need to modify the Tenet class for passing the device name
+                '''
+                _timing_dict[seq_i]['device'] = None
 
         return _timing_dict
 
