@@ -1,4 +1,4 @@
-713__author__ = "Matteo Lulli"
+__author__ = "Matteo Lulli"
 __copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
