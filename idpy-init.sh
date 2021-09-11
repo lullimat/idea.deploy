@@ -10,13 +10,16 @@ WGET_PYOPENCL=${WGET_PYOPENCL_2021}
 
 WGET_PYCUDA_2019=https://files.pythonhosted.org/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
 WGET_PYCUDA_2020=https://files.pythonhosted.org/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
-WGET_PYCUDA=${WGET_PYCUDA_2020}
+WGET_PYCUDA_2021=https://files.pythonhosted.org/packages/5a/56/4682a5118a234d15aa1c8768a528aac4858c7b04d2674e18d586d3dfda04/pycuda-2021.1.tar.gz
+WGET_PYCUDA=${WGET_PYCUDA_2021}
 
 TAR_PYOPENCL=$(echo ${WGET_PYOPENCL} | tr '/' ' ' | awk '{print($NF)}')
 DIR_PYOPENCL=${TAR_PYOPENCL:0:${#TAR_PYOPENCL} - 7}
 TAR_PYCUDA=$(echo ${WGET_PYCUDA} | tr '/' ' ' | awk '{print($NF)}')
 DIR_PYCUDA=${TAR_PYCUDA:0:${#TAR_PYCUDA} - 7}
 
+ISTHERE_WGET=$(command -v wget >/dev/null 2>&1 && echo 1 || echo 0)
+ISTHERE_CURL=$(command -v curl >/dev/null 2>&1 && echo 1 || echo 0)
 
 # Script scope
 # Load local python env if None
@@ -224,7 +227,14 @@ then
     if [ ! -f ${VENV_SRC}/${TAR_PYCUDA} ]
     then
 	echo "Downloading pycuda source:..."
-	wget -P ${VENV_SRC} ${WGET_PYCUDA}
+	if((ISTHERE_WGET))
+	then
+	    wget -P ${VENV_SRC} ${WGET_PYCUDA}	    
+	elif((ISTHERE_CURL))
+	then
+	    mkdir ${VENV_SRC}
+	    curl -o ${VENV_SRC}/${TAR_PYCUDA} ${WGET_PYCUDA}
+	fi
 	echo "Done (Downloading pycuda source)"
     fi
     
@@ -263,7 +273,14 @@ then
     if [ ! -f ${VENV_SRC}/${TAR_PYOPENCL} ]
     then
 	echo "Downloading pyopencl source:..."
-	wget -P ${VENV_SRC} ${WGET_PYOPENCL}
+	if((ISTHERE_WGET))
+	then
+	    wget -P ${VENV_SRC} ${WGET_PYOPENCL}
+	elif((ISTHERE_CURL))
+	then	    
+	    mkdir ${VENV_SRC}
+	    curl -o ${VENV_SRC}/${TAR_PYOPENCL} ${WGET_PYOPENCL}	    
+	fi
 	echo "Done (Downloading pyopencl source)"
     fi
     
@@ -317,7 +334,8 @@ echo
 for((ALIAS_I=0; ALIAS_I<${#IDPY_ALIASES[@]}; ALIAS_I++))
 do
     ALIAS_STRING=${IDPY_ALIASES[ALIAS_I]}
-    ALIAS_CHECK=$(grep "${ALIAS_STRING}" ${HOME}/.bashrc \
+    ALIAS_STRING_SED=${IDPY_ALIASES_SED[ALIAS_I]}    
+    ALIAS_CHECK=$(grep "${ALIAS_STRING_SED}" ${HOME}/.bashrc \
 			1>/dev/null 2>/dev/null && echo 1 || echo 0)
 
     if((${ALIAS_CHECK} == 0))
@@ -329,7 +347,7 @@ do
 	    read -p "Would you like to append an this alias to your ${HOME}/.bashrc? (Y/N) " yn
 	    case ${yn} in
 		[Yy]* ) ALIAS_REPLY=1; break;;
-		[Nn]* ) exit;;
+		[Nn]* ) break;;
 		* ) echo "Please answer yes or no";;
 	    esac
 	done
