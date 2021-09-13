@@ -56,6 +56,9 @@ class Tenet(cl.CommandQueue):
     def SetKind(self, kind):
         self.kind = kind
 
+    def SetDeviceName(self, device_name):
+        self.device_name = device_name
+
 class OpenCL:
     '''
     class OpenCL:
@@ -97,6 +100,7 @@ class OpenCL:
     def GetTenet(self):
         _tenet = Tenet.from_parent(self.GetQueue())
         _tenet.SetKind(self.kind)
+        _tenet.SetDeviceName(self.GetDeviceName())
         return _tenet
         
     def SetDevice(self, kind = GPU_T, device = 0):
