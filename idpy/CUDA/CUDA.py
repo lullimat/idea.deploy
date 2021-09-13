@@ -41,8 +41,9 @@ throughout different classes
 '''
 
 class Tenet:
-    def __init__(self, cuda_context):
+    def __init__(self, cuda_context, device_name):
         self.cuda_context = cuda_context
+        self.device_name = device_name
 
     def End(self):
         return self.cuda_context.detach()
@@ -68,7 +69,8 @@ class CUDA:
             return self.devices[self.device].make_context()
 
     def GetTenet(self):
-        return Tenet(self.GetContext())
+        return Tenet(cuda_context = self.GetContext(),
+                     device_name = self.GetDeviceName())
             
     def SetDevice(self, device = 0):
         self.device = device
