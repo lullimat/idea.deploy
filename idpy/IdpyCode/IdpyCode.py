@@ -696,6 +696,9 @@ class IdpyLoopProfile:
                         self.PutArgs(seq_i, _indices, _args)
                         _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
 
+        '''
+        Collecting profiling values
+        '''
         for seq_i in range(len(self.sequences)):
             seq_len = len(self.sequences[seq_i])
             for item_i in range(seq_len):
@@ -706,7 +709,9 @@ class IdpyLoopProfile:
                 '''
                 Need to modify the Tenet class for passing the device name
                 '''
-                _timing_dict[seq_i]['device'] = None
+
+                if 'device_name' not in _timing_dict[seq_i]:
+                    _timing_dict[seq_i]['device_name'] = Idea.k_dict['tenet'].device_name
 
         return _timing_dict
 
