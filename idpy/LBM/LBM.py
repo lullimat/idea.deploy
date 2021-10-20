@@ -314,6 +314,11 @@ def CheckCenterOfMassDeltaPConvergence(lbm):
     
     return _break_f
 
+def CheckMinMaxAveN(lbm):
+    _u_swap = lbm.sims_idpy_memory['n'].D2H()
+    print(np.mean(_u_swap), np.amax(_u_swap), np.amin(_u_swap))
+    return False
+
 def CheckUConvergence(lbm):
     first_flag = False
 
