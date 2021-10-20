@@ -45,7 +45,7 @@ from idpy.IdpyCode import idpy_langs_sys, idpy_langs_list
 
 from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyFunction
-from idpy.IdpyCode.IdpyCode import IdpyMethod, IdpyLoop
+from idpy.IdpyCode.IdpyCode import IdpyMethod, IdpyLoop, IdpyLoopProfile
 
 if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
@@ -235,6 +235,30 @@ def ComputeCenterOfMass(lbm, c_i = ''):
 
     return _mass, _cm_coords
 
+
+def GetSnapshotN(lbm):
+    first_flag = False
+
+    if 'snapshots_n_k' not in lbm.sims_idpy_memory:
+        lbm.sims_idpy_memory['snapshots_n_k'] = 0
+        first_flag = True
+
+    _n_swap = np.copy(lbm.sims_idpy_memory['n'].D2H())
+    _n_swap = _n_swap.reshape(np.flip(lbm.sims_vars['dim_sizes']))
+    _dim = len(lbm.sims_vars['dim_sizes'])
+
+    if _dim == 3:
+        _n_swap = _n_swap[lbm.sims_vars['dim_sizes'][2]//2,:,:] 
+
+    _k_fig = lbm.sims_idpy_memory['snapshots_n_k']
+    _fig = plt.figure()
+    plt.imshow(_n_swap, origin = 'lower')
+    plt.savefig('./snapshot_' + ('%010d' % (_k_fig)) + '.png', dpi = 150)
+    plt.close()
+
+    lbm.sims_idpy_memory['snapshots_n_k'] += 1
+    
+    return False
 
 def CheckCenterOfMassDeltaPConvergence(lbm):
     _first_flag = False
@@ -507,7 +531,7 @@ class ShanChenMultiPhase(RootLB):
                             'pop': False}
 
 
-    def MainLoop(self, time_steps, convergence_functions = []):
+    def MainLoop(self, time_steps, convergence_functions = [], profiling = False):
         _all_init = []
         for key in self.init_status:
             _all_init.append(self.init_status[key])
@@ -537,9 +561,11 @@ class ShanChenMultiPhase(RootLB):
                                              f_classes = [F_PosFromIndex,
                                                           F_IndexFromPos],
                                              optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
         
         self._MainLoop = \
-            IdpyLoop(
+            _loop_class(
                 [self.sims_idpy_memory],
                 [
                     [
@@ -562,7 +588,8 @@ class ShanChenMultiPhase(RootLB):
                         (_K_StreamPeriodic(tenet = self.tenet,
                                            grid = self.sims_vars['grid'],
                                            block = self.sims_vars['block']), ['pop_swap', 'pop',
-                                                                              'XI_list', 'dim_sizes',
+                                                                              'XI_list',
+                                                                              'dim_sizes',
                                                                               'dim_strides']),
                         (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
                     ]
@@ -572,13 +599,13 @@ class ShanChenMultiPhase(RootLB):
         '''
         now the loop: need to implement the exit condition
         '''
-        old_step = 0
-        for step in time_steps:
-            print(step, step - old_step)
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
             '''
             Very simple timing, reasonable for long executions
             '''
-            self._MainLoop.Run(range(step - old_step))
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
             
             old_step = step
             if len(convergence_functions):
@@ -588,6 +615,102 @@ class ShanChenMultiPhase(RootLB):
 
                 if OneTrue(checks):
                     break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None
+
+    def MainLoopCPU(self, time_steps, convergence_functions = [], profiling = False):
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+        
+        _K_ComputeMomentsCPU = K_ComputeMomentsCPU(custom_types = self.custom_types.Push(),
+                                                   constants = self.constants,
+                                                   optimizer_flag = self.optimizer_flag)
+
+        _K_ComputePsi = K_ComputePsi(custom_types = self.custom_types.Push(),
+                                     constants = self.constants,
+                                     psi_code = self.params_dict['psi_code'],
+                                     optimizer_flag = self.optimizer_flag)
+
+        _K_Collision_ShanChenGuoMultiPhaseCPU = \
+            K_Collision_ShanChenGuoMultiPhaseCPU(custom_types = self.custom_types.Push(),
+                                                 constants = self.constants,
+                                                 f_classes = [F_PosFromIndex,
+                                                              F_IndexFromPos],
+                                                 optimizer_flag = self.optimizer_flag)
+        
+        _K_StreamPeriodicCPU = K_StreamPeriodicCPU(custom_types = self.custom_types.Push(),
+                                                   constants = self.constants,
+                                                   f_classes = [F_PosFromIndex,
+                                                                F_IndexFromPos],
+                                                   optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [
+                        (_K_ComputeMomentsCPU(tenet = self.tenet,
+                                              grid = self.sims_vars['grid'],
+                                              block = self.sims_vars['block']), ['n', 'u', 'pop',
+                                                                              'XI_list', 'W_list']),
+                        (_K_ComputePsi(tenet = self.tenet,
+                                       grid = self.sims_vars['grid'],
+                                       block = self.sims_vars['block']), ['psi', 'n']),
+
+                        (_K_Collision_ShanChenGuoMultiPhaseCPU(tenet = self.tenet,
+                                                               grid = self.sims_vars['grid'],
+                                                               block = self.sims_vars['block']),
+                         ['pop', 'u', 'n', 'psi',
+                          'XI_list', 'W_list',
+                          'E_list', 'EW_list',
+                          'dim_sizes', 'dim_strides']),
+                        
+                        (_K_StreamPeriodicCPU(tenet = self.tenet,
+                                              grid = self.sims_vars['grid'],
+                                              block = self.sims_vars['block']), ['pop_swap', 'pop',
+                                                                                 'XI_list',
+                                                                                 'dim_sizes',
+                                                                                 'dim_strides']),
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_f in convergence_functions:
+                    checks.append(c_f(self))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None
+
         
     def ComputeMoments(self):
         if not self.init_status['pop']:
@@ -633,6 +756,27 @@ class ShanChenMultiPhase(RootLB):
         
         self.init_status['pop'] = True
 
+    def InitPopulationsCPU(self):
+        if not AllTrue([self.init_status['n'], self.init_status['u']]):
+            raise Exception("Fields u and n are not initialized")
+
+        _K_InitPopulationsCPU = \
+            K_InitPopulationsCPU(custom_types = self.custom_types.Push(),
+                                 constants = self.constants, f_classes = [],
+                                 optimizer_flag = self.optimizer_flag)
+
+        Idea = _K_InitPopulationsCPU(tenet = self.tenet,
+                                     grid = self.sims_vars['grid'],
+                                     block = self.sims_vars['block'])
+        
+        Idea.Deploy([self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['n'],
+                     self.sims_idpy_memory['u'],
+                     self.sims_idpy_memory['XI_list'],
+                     self.sims_idpy_memory['W_list']])
+        
+        self.init_status['pop'] = True
+        
     def DeltaPLaplace(self, inside = None, outside = None):
         if 'n_in_n_out' not in self.sims_idpy_memory:
             self.sims_idpy_memory['n_in_n_out'] = \
@@ -839,6 +983,48 @@ class ShanChenMultiPhase(RootLB):
         Need to do it here: already forgot once to do it outside
         '''
         self.InitPopulations()
+
+    def InitFlatInterfaceCPU(self, n_g, n_l, width, direction = 0,
+                             full_flag = True):
+        '''
+        Record init values
+        '''
+        self.sims_vars['init_type'] = 'flat'
+        self.sims_vars['n_g'], self.sims_vars['n_l'] = n_g, n_l
+        self.sims_vars['full_flag'] = full_flag
+        self.sims_vars['width'], self.sims_vars['direction'] = width, direction
+        
+        _K_InitFlatInterfaceCPU = \
+            K_InitFlatInterfaceCPU(custom_types = self.custom_types.Push(),
+                                   constants = self.constants,
+                                   f_classes = [F_PosFromIndex,
+                                                F_NFlatProfilePeriodic],
+                                   optimizer_flag = self.optimizer_flag)
+
+        n_g = NPT.C[self.custom_types['NType']](n_g)
+        n_l = NPT.C[self.custom_types['NType']](n_l)
+        width = NPT.C[self.custom_types['LengthType']](width)
+        direction = NPT.C[self.custom_types['SType']](direction)
+        full_flag = NPT.C[self.custom_types['FlagType']](full_flag)
+        
+        Idea = _K_InitFlatInterfaceCPU(tenet = self.tenet,
+                                       grid = self.sims_vars['grid'],
+                                       block = self.sims_vars['block'])
+
+        Idea.Deploy([self.sims_idpy_memory['n'],
+                     self.sims_idpy_memory['u'],
+                     self.sims_idpy_memory['dim_sizes'],
+                     self.sims_idpy_memory['dim_strides'],
+                     self.sims_idpy_memory['dim_center'],
+                     n_g, n_l, width, direction, full_flag])
+
+        self.init_status['n'] = True
+        self.init_status['u'] = True
+        '''
+        Finally, initialize populations...
+        Need to do it here: already forgot once to do it outside
+        '''
+        self.InitPopulationsCPU()
 
 
     def InitVars(self):
@@ -1304,6 +1490,90 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
         }
         """
 
+class K_Collision_ShanChenGuoMultiPhaseCPU(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+        self.SetCodeFlags('g_tid')
+        self.params = {'PopType * pop': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'NType * n': ['global', 'restrict', 'const'],
+                       'PsiType * psi': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const'],
+                       'SType * E_list': ['global', 'restrict', 'const'],
+                       'WType * EW_list': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const']}
+        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            // Getting thread position
+            SType g_tid_pos[DIM];
+            F_PosFromIndex(g_tid_pos, dim_sizes, dim_strides, g_tid);
+
+            // Computing Shan-Chen Force
+            SCFType F[DIM]; SType neigh_pos[DIM];
+            for(int d=0; d<DIM; d++){F[d] = 0.;}
+
+            PsiType lpsi = psi[g_tid];
+
+            for(int qe=0; qe<QE; qe++){
+                // Compute neighbor position
+                for(int d=0; d<DIM; d++){
+                    neigh_pos[d] = ((g_tid_pos[d] + E_list[d + qe*DIM] + dim_sizes[d]) % dim_sizes[d]);
+                }
+                // Compute neighbor index
+                SType neigh_index = F_IndexFromPos(neigh_pos, dim_strides);
+                // Get the pseudopotential value
+                PsiType npsi = psi[neigh_index];
+                // Add partial contribution
+                for(int d=0; d<DIM; d++){F[d] += E_list[d + qe*DIM] * EW_list[qe] * npsi;}
+            }
+            for(int d=0; d<DIM; d++){F[d] *= -SC_G * lpsi;}
+
+            // Local density and velocity for Guo velocity shift and equilibrium
+            NType ln = n[g_tid]; UType lu[DIM];
+
+            // Guo velocity shift & Copy to global memory
+            for(int d=0; d<DIM; d++){ 
+                lu[d] = u[d + g_tid * DIM] + 0.5 * F[d]/ln;
+                u[d + g_tid * DIM] = lu[d];
+            }
+
+            // Compute square norm of Guo shifted velocity
+            UType u_dot_u = 0., F_dot_u = 0.;
+            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d]; F_dot_u  += F[d] * lu[d];}
+
+            // Cycle over the populations: equilibrium + Guo
+            for(int q=0; q<Q; q++){
+                UType u_dot_xi = 0., F_dot_xi = 0.; 
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                    F_dot_xi += F[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1., lguo_pop = 0.;
+
+                // Equilibrium population
+                leq_pop += + u_dot_xi*CM2 + 0.5*u_dot_xi*u_dot_xi*CM4;
+                leq_pop += - 0.5*u_dot_u*CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+
+                // Guo population
+                lguo_pop += + F_dot_xi*CM2 + F_dot_xi*u_dot_xi*CM4;
+                lguo_pop += - F_dot_u*CM2;
+                lguo_pop = lguo_pop * W_list[q];
+
+                pop[q + g_tid * Q] = \
+                    pop[q + g_tid * Q]*(1. - OMEGA) + leq_pop*OMEGA + (1. - 0.5 * OMEGA) * lguo_pop;
+
+             }
+        }
+        """
+
 class K_ComputePsi(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [], psi_code = None,
                  optimizer_flag = None):
@@ -1358,6 +1628,40 @@ class K_StreamPeriodic(IdpyKernel):
         }
         """
 
+class K_StreamPeriodicCPU(IdpyKernel):
+    def __init__(self, custom_types = None, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+        self.SetCodeFlags('g_tid')
+        self.params = {'PopType * dst': ['global', 'restrict'],
+                       'PopType * src': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            SType dst_pos[DIM], src_pos[DIM];
+            F_PosFromIndex(dst_pos, dim_sizes, dim_strides, g_tid);
+
+            // Zero-th population
+            dst[g_tid * Q] = src[g_tid * Q];
+
+            // Gather Populations from neighbors
+            for(int q=1; q<Q; q++){
+                for(int d=0; d<DIM; d++){
+                    src_pos[d] = ((dst_pos[d] - XI_list[d + q * DIM] + dim_sizes[d]) % dim_sizes[d]);
+                }
+
+                SType src_index = F_IndexFromPos(src_pos, dim_strides);
+                dst[q + g_tid * Q] = src[q + src_index * Q];
+            }
+        
+        }
+        """
+
 
 class K_ComputeMoments(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
@@ -1391,6 +1695,40 @@ class K_ComputeMoments(IdpyKernel):
             for(int d=0; d<DIM; d++){ u[g_tid + d * V] = lu[d]/ln;}
         }
         """
+
+class K_ComputeMomentsCPU(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'NType * n': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'PopType * pop': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            UType lu[DIM];
+            for(int d=0; d<DIM; d++){ lu[d] = 0.; }
+
+            NType ln = 0.;
+            for(int q=0; q<Q; q++){
+                PopType lpop = pop[q + g_tid * Q];
+                ln += lpop;
+                for(int d=0; d<DIM; d++){
+                    lu[d] += lpop * XI_list[d + q * DIM];
+                }
+            }
+            n[g_tid] = ln;
+            for(int d=0; d<DIM; d++){ u[d + g_tid * DIM] = lu[d]/ln;}
+        }
+        """
+
         
 class K_InitPopulations(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
@@ -1436,7 +1774,52 @@ class K_InitPopulations(IdpyKernel):
         
         }
         """
-            
+
+class K_InitPopulationsCPU(IdpyKernel):
+    def __init__(self, custom_types = None, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'PopType * pop': ['global', 'restrict'],
+                       'NType * n': ['global', 'restrict', 'const'],
+                       'UType * u': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            NType ln = n[g_tid];
+
+            UType lu[DIM], u_dot_u = 0.;
+            // Copying the velocity
+            for(int d=0; d<DIM; d++){
+                lu[d] = u[d + g_tid * DIM]; u_dot_u += lu[d] * lu[d];
+            }
+
+            // Loop over the populations
+            for(int q=0; q<Q; q++){
+
+                UType u_dot_xi = 0.;
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1.;
+                leq_pop += u_dot_xi * CM2;
+                leq_pop += 0.5 * u_dot_xi * u_dot_xi * CM4;
+                leq_pop -= 0.5 * u_dot_u * CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+                pop[q + g_tid * Q] = leq_pop;
+
+            }
+        
+        }
+        """
+
 class K_InitFlatInterface(IdpyKernel):
     '''
     class K_InitFlatInterface:
@@ -1478,6 +1861,48 @@ class K_InitFlatInterface(IdpyKernel):
         }
         """
 
+class K_InitFlatInterfaceCPU(IdpyKernel):
+    '''
+    class K_InitFlatInterface:
+    need to add a tuning of the launch grid
+    so that in extreme cases each thread cycles on more
+    than a single point
+    '''
+    def __init__(self, custom_types = None, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'NType * n': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const'],
+                       'SType * dim_center': ['global', 'restrict', 'const'],
+                       'NType n_g': ['const'], 'NType n_l': ['const'],
+                       'LengthType width': ['const'],
+                       'SType direction': ['const'],
+                       'FlagType full_flag': ['const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            SType g_tid_pos[DIM];
+            F_PosFromIndex(g_tid_pos, dim_sizes, dim_strides, g_tid);
+
+            NType delta_n = full_flag * (n_l - n_g) + (1 - full_flag) * (n_g - n_l);
+
+            n[g_tid] = 0.5 * (n_g + n_l) + \
+            0.5 * delta_n * (F_NFlatProfilePeriodic(g_tid_pos[direction], dim_center[direction], width, dim_sizes[direction]) - 1.);
+
+            for(int d=0; d<DIM; d++){
+            u[d + g_tid * DIM] = 0.;
+            }
+        }
+        """
+
+        
 class K_InitRadialInterface(IdpyKernel):
     '''
     class K_InitRadialInterface:
@@ -1622,3 +2047,7 @@ class M_SwapPop(IdpyMethod):
 
         return IdpyMethod.PassIdpyStream(self, idpy_stream = idpy_stream)
 
+    def DeployProfiling(self, swap_list = None, idpy_stream = None):
+        swap_list[0], swap_list[1] = swap_list[1], swap_list[0]
+
+        return IdpyMethod.PassIdpyStream(self, idpy_stream = idpy_stream), 0

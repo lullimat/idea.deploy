@@ -652,7 +652,8 @@ class IdpyLoopProfile:
             for item_i in range(seq_len):
                 _item = self.sequences[seq_i][item_i]
                 Idea = _item[0]
-                _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = []
+                if hasattr(Idea, 'k_dict'):
+                    _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = []
 
         '''
         Loop
@@ -677,7 +678,8 @@ class IdpyLoopProfile:
                                                                        else _prev_evt))
                         self.meta_streams[seq_i][item_i] = [_stream_swap]
                         self.PutArgs(seq_i, _indices, _args)
-                        _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
+                        if hasattr(Idea, 'k_dict'):
+                            _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
 
                 '''
                 CUDA
@@ -704,8 +706,9 @@ class IdpyLoopProfile:
             for item_i in range(seq_len):
                 _item = self.sequences[seq_i][item_i]
                 Idea = _item[0]
-                _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = \
-                    np.array(_timing_dict[seq_i][Idea.k_dict['_kernel_name']])
+                if hasattr(Idea, 'k_dict'):
+                    _timing_dict[seq_i][Idea.k_dict['_kernel_name']] = \
+                        np.array(_timing_dict[seq_i][Idea.k_dict['_kernel_name']])
                 '''
                 Need to modify the Tenet class for passing the device name
                 '''
