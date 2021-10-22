@@ -1,3 +1,4 @@
+appdirs
 scipy
 numpy
 sympy
