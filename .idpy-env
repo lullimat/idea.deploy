@@ -4,6 +4,13 @@ VENV_SRC=${VENV}/src/
 VENV_BIN=${VENV}/bin/
 VENV_LIB=${VENV}/lib/
 
+# SERVERS
+PYPI_SERVERS[0]=pypi.python.org
+PYPI_SERVERS[1]=pypi.douban.com
+
+PYHOSTED_SERVERS[0]=files.pythonhosted.org
+PYHOSTED_SERVERS[1]=pypi.tuna.tsinghua.edu.cn
+
 # ALIASES
 LOAD_ALIAS_STRING="alias idpy-load='source ${VENV_BIN}/activate'"
 LOAD_ALIAS_STRING_SED=$(echo ${LOAD_ALIAS_STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
