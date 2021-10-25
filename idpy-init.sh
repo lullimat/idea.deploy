@@ -13,11 +13,13 @@ function CheckPing { ping -c 2 ${1} 2>/dev/null 1>/dev/null && echo 1 || echo 0;
 
 USE_PYPI_SERVER=${PYPI_SERVERS[0]}
 USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[0]}
+PIP_SERVER_OPTION=""
 
 if (($(CheckPing "ipinfo.io") == 0))
 then
     USE_PYPI_SERVER=${PYHOSTED_SERVERS[1]}
     USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[1]}
+    PIP_SERVER_OPTION="-i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}"
 fi
 echo
 
@@ -202,17 +204,17 @@ source ${VENV}/bin/activate
 if((VENV_F == 0))
 then
     echo "Pip installing requirements"
-    pip install --upgrade pip setuptools wheel -i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}
-    pip install -r ${VENV}/requirements.txt -i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}
+    pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
+    pip install -r ${VENV}/requirements.txt ${PIP_SERVER_OPTION}
     ## Install pycuda if cuda is found
     if ((CUDA_F && 0))
     then
-	pip install pycuda -i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}
+	pip install pycuda ${PIP_SERVER_OPTION}
     fi
     ## Install mpi4py if mpicc is found
     if((MPICC_F))
     then
-	pip install mpi4py -i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}
+	pip install mpi4py ${PIP_SERVER_OPTION}
     else
 	echo "No MPI installation found (which mpicc did not return a path)"
     fi
