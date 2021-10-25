@@ -7,41 +7,19 @@ source .idpy-env
 
 echo "Welcome to idea.deploy!"
 echo
-echo "Testing the connection to the PyPI/pythonhosted servers"
+echo "Selecting PyPI/pythonhosted servers"
 
 function CheckPing { ping -c 2 ${1} 2>/dev/null 1>/dev/null && echo 1 || echo 0; }
 
-USE_PYPI_SERVER=""
-for SERVER_NAME in ${PYPI_SERVERS[@]}
-do
-    echo -n "Checking connection to ${SERVER_NAME}..."
-    if (($(CheckPing ${SERVER_NAME}) == 1))
-    then
-	echo "OK"
-	USE_PYPI_SERVER=${SERVER_NAME}
-	break
-    else
-	echo "unreachable"
-    fi
-done
-echo
+USE_PYPI_SERVER=${PYPI_SERVERS[0]}
+USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[0]}
 
-USE_PYHOSTED_SERVER=""
-for SERVER_NAME in ${PYHOSTED_SERVERS[@]}
-do
-    echo -n "Checking connection to ${SERVER_NAME}..."
-    if (($(CheckPing ${SERVER_NAME}) == 1))
-    then
-	echo "OK"
-	USE_PYHOSTED_SERVER=${SERVER_NAME}
-	break
-    else
-	echo "unreachable"
-    fi
-done
+if (($(CheckPing "ipinfo.io") == 0))
+then
+    USE_PYPI_SERVER=${PYHOSTED_SERVERS[1]}
+    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[1]}
+fi
 echo
-
-USE_PYPI_SERVER=${USE_PYHOSTED_SERVER}
 
 WGET_PYOPENCL_2020=https://${USE_PYHOSTED_SERVER}/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
 WGET_PYOPENCL_2021=https://${USE_PYHOSTED_SERVER}/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
