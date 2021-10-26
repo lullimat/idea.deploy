@@ -1,3 +1,5 @@
+appdirs
+pytools
 scipy
 numpy
 sympy

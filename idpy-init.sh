@@ -4,13 +4,32 @@
 # Last revised 25/6/2021
 
 source .idpy-env
-WGET_PYOPENCL_2020=https://files.pythonhosted.org/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
-WGET_PYOPENCL_2021=https://files.pythonhosted.org/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
+
+echo "Welcome to idea.deploy!"
+echo
+echo "Selecting PyPI/pythonhosted servers"
+
+function CheckPing { ping -c 2 ${1} 2>/dev/null 1>/dev/null && echo 1 || echo 0; }
+
+USE_PYPI_SERVER=${PYPI_SERVERS[0]}
+USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[0]}
+PIP_SERVER_OPTION=""
+
+if (($(CheckPing "ipinfo.io") == 0))
+then
+    USE_PYPI_SERVER=${PYHOSTED_SERVERS[1]}
+    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[1]}
+    PIP_SERVER_OPTION="-i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}"
+fi
+echo
+
+WGET_PYOPENCL_2020=https://${USE_PYHOSTED_SERVER}/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
+WGET_PYOPENCL_2021=https://${USE_PYHOSTED_SERVER}/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
 WGET_PYOPENCL=${WGET_PYOPENCL_2021}
 
-WGET_PYCUDA_2019=https://files.pythonhosted.org/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
-WGET_PYCUDA_2020=https://files.pythonhosted.org/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
-WGET_PYCUDA_2021=https://files.pythonhosted.org/packages/5a/56/4682a5118a234d15aa1c8768a528aac4858c7b04d2674e18d586d3dfda04/pycuda-2021.1.tar.gz
+WGET_PYCUDA_2019=https://${USE_PYHOSTED_SERVER}/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
+WGET_PYCUDA_2020=https://${USE_PYHOSTED_SERVER}/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
+WGET_PYCUDA_2021=https://${USE_PYHOSTED_SERVER}/packages/5a/56/4682a5118a234d15aa1c8768a528aac4858c7b04d2674e18d586d3dfda04/pycuda-2021.1.tar.gz
 WGET_PYCUDA=${WGET_PYCUDA_2021}
 
 TAR_PYOPENCL=$(echo ${WGET_PYOPENCL} | tr '/' ' ' | awk '{print($NF)}')
@@ -31,8 +50,6 @@ ISTHERE_CURL=$(command -v curl >/dev/null 2>&1 && echo 1 || echo 0)
 # configure and build and install
 
 # Never forget that ${VENV} is a global path
-
-echo "Welcome to idea.deploy!"
 
 ## Check if Python3 is installed
 echo -n "Checking python3 installation:... "
@@ -186,18 +203,18 @@ source ${VENV}/bin/activate
 
 if((VENV_F == 0))
 then
-    echo "Pip installing requiremnts"
-    pip install --upgrade pip setuptools wheel
-    pip install -r ${VENV}/requirements.txt
+    echo "Pip installing requirements"
+    pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
+    pip install -r ${VENV}/requirements.txt ${PIP_SERVER_OPTION}
     ## Install pycuda if cuda is found
     if ((CUDA_F && 0))
     then
-	pip install pycuda
+	pip install pycuda ${PIP_SERVER_OPTION}
     fi
     ## Install mpi4py if mpicc is found
     if((MPICC_F))
     then
-	pip install mpi4py
+	pip install mpi4py ${PIP_SERVER_OPTION}
     else
 	echo "No MPI installation found (which mpicc did not return a path)"
     fi
