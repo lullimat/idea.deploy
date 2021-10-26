@@ -277,8 +277,7 @@ class IdpyKernel:
             '''               
             I need to rewrite block and grid to match the opencl style and non-C ordering
             '''
-            
-            grid = (block[0] * grid[0], block[1] * grid[1], block[2] * grid[2])
+            grid = tuple(map(lambda x, y: x * y, block, grid))
             '''
             Still not completely sure why I need to fall back on PyOpenCL automatic choice
             of workgroup size when using CPUs, at least on MacOS
@@ -301,7 +300,6 @@ class IdpyKernel:
                     print(self.k_dict['_kernel_function'].get_info(cl.kernel_info.FUNCTION_NAME))
                     print(self.k_dict['_kernel_function'].get_work_group_info(cl.kernel_work_group_info.WORK_GROUP_SIZE, self.k_dict['tenet'].device))
                     '''
-
                     self.k_dict['_kernel_function'].set_args(*_args_data)
                     return cl.enqueue_nd_range_kernel(self.k_dict['tenet'],
                                                       self.k_dict['_kernel_function'],
