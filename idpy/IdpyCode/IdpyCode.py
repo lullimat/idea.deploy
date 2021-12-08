@@ -455,6 +455,12 @@ class IdpyMethod:
             self.lang = OCL_T
         if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
             self.lang = CUDA_T
+
+        '''
+        Mocking the kernels variables
+        '''
+        self.k_dict = {'_kernel_name': self.__class__.__name__}
+            
         '''
         the child class need to define the Deploy method
         def Deploy(self, args, idpy_stream = None)
