@@ -50,7 +50,16 @@ class Tenet(cl.CommandQueue):
     def __init__(self, *args, **kwargs):
         super(Tenet, self).__init__(*args, **kwargs)
 
-    def End(self):
+    def FreeMemoryDict(self, memory_dict = None):
+        if memory_dict is not None and type(memory_dict) is dict:
+            '''
+            I should be checking it is IdpyMemory type
+            '''
+            for _ in memory_dict:
+                if memory_dict[_] is not None:
+                    memory_dict[_].data.release()
+        
+    def End(self):            
         return super().finish()
 
     def SetKind(self, kind):
