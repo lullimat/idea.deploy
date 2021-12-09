@@ -73,7 +73,12 @@ PY3p8_F=$(command -v python3.8 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p9_F=$(command -v python3.9 >/dev/null 2>&1 && echo 1 || echo 0)
 
 ##
-if ((${PY3p8_F}))
+if ((${PY3p9_F}))
+then
+    ID_PYTHON=python3.9
+    PY_PATH=$(which python3.9)
+    echo "Found ${PY_PATH}"
+elif ((${PY3p8_F}))
 then
     ID_PYTHON=python3.8
     PY_PATH=$(which python3.8)

@@ -545,6 +545,7 @@ class IdpyLoop:
     def __init__(self, args_dicts = None, sequences = None):
         self.args_dicts, self.sequences = args_dicts, sequences
         self.meta_streams, self.langs = [], []
+        self.first_run = True
 
     def SetMetaStreams(self, seq):
         if seq[0][0].lang == CUDA_T:
@@ -577,10 +578,13 @@ class IdpyLoop:
     def Run(self, loop_range = None, profiling = False):
         '''
         Begin by setting up meta_streams and langs
+        Neet to do this only once to avoid re-allocating (CUDA) streams
         '''
-        for seq in self.sequences:
-            self.meta_streams.append(self.SetMetaStreams(seq))
-            self.langs.append(self.SetLang(seq))
+        if self.first_run is True:
+            for seq in self.sequences:
+                self.meta_streams.append(self.SetMetaStreams(seq))
+                self.langs.append(self.SetLang(seq))
+            self.first_run = False
 
         for step in loop_range:
             for seq_i in range(len(self.sequences)):
@@ -665,6 +669,7 @@ class IdpyLoopProfile:
     def __init__(self, args_dicts = None, sequences = None):
         self.args_dicts, self.sequences = args_dicts, sequences
         self.meta_streams, self.langs = [], []
+        self.first_run = True
 
     def SetMetaStreams(self, seq):
         if seq[0][0].lang == CUDA_T:
@@ -697,10 +702,14 @@ class IdpyLoopProfile:
     def Run(self, loop_range = None, profiling = False):
         '''
         Begin by setting up meta_streams and langs
+        Neet to do this only once to avoid re-allocating (CUDA) streams
         '''
-        for seq in self.sequences:
-            self.meta_streams.append(self.SetMetaStreams(seq))
-            self.langs.append(self.SetLang(seq))
+        if self.first_run is True:
+            for seq in self.sequences:
+                self.meta_streams.append(self.SetMetaStreams(seq))
+                self.langs.append(self.SetLang(seq))
+            self.first_run = False
+
         '''
         Set up dictionary for keeping timings
         '''
@@ -796,6 +805,7 @@ class IdpyLoopList:
     def __init__(self, args_lists = None, sequences = None):
         self.args_lists, self.sequences = args_lists, sequences
         self.meta_streams, self.langs = [], []
+        self.first_run = True        
 
     def SetMetaStreams(self, seq):
         if seq[0][0].lang == CUDA_T:
@@ -826,10 +836,13 @@ class IdpyLoopList:
     def Run(self, loop_range = None):
         '''
         Begin by setting up meta_streams and langs
+        Neet to do this only once to avoid re-allocating (CUDA) streams
         '''
-        for seq in self.sequences:
-            self.meta_streams.append(self.SetMetaStreams(seq))
-            self.langs.append(self.SetLang(seq))
+        if self.first_run is True:
+            for seq in self.sequences:
+                self.meta_streams.append(self.SetMetaStreams(seq))
+                self.langs.append(self.SetLang(seq))
+            self.first_run = False
 
         for step in loop_range:
             for seq_i in range(len(self.sequences)):

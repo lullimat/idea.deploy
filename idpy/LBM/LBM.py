@@ -1163,9 +1163,9 @@ class ShanChenMultiPhase(RootLB):
                          **self.kwargs)
         
     def End(self):
+        self.tenet.FreeMemoryDict(memory_dict = self.sims_idpy_memory)
         self.tenet.End()
-
-                           
+        ##del self.tenet                 
         
 '''
 Functions

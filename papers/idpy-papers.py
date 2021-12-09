@@ -52,8 +52,9 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia",
                          "Xiaowen Shan"],
-             "doi": "",
+             "doi": "https://doi.org/10.1103/PhysRevE.103.063309",
              "git": "https://github.com/lullimat/arXiv-2009.12522.git"}
+        
         self.arxiv_papers['arXiv-2105.08772'] = \
             {"Title": "A Mesoscale Perspective on the Tolman Length",
              "Authors": ["Matteo Lulli", "Luca Biferale",
@@ -62,6 +63,14 @@ class IdpyPapers:
              "doi": "",
              "git": "https://github.com/lullimat/arXiv-2105.08772.git"}
 
+        self.arxiv_papers['arXiv-2112.02574'] = \
+            {"Title": "Mesoscale Modelling of the Tolman Length in Multi-component Systems",
+             "Authors": ["Matteo Lulli", "Luca Biferale",
+                         "Giacomo Falcucci", "Mauro Sbragaglia",
+                         "Xiaowen Shan"],
+             "doi": "",
+             "git": "https://github.com/lullimat/arXiv-2112.02574.git"}
+        
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
 

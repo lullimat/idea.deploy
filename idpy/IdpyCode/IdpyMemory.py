@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -120,30 +120,34 @@ if idpy_langs_sys[OCL_T]:
         def SetConst(self, const = 0., wait_for = None):
             super().fill(value = const, queue = self.queue, wait_for = wait_for)
 
-    def _on_device_OCL(ary, tenet):
+    def _on_device_OCL(ary, tenet, allocator = None):
         _swap_array = IdpyArrayOCL(shape = ary.shape,
                                    dtype = ary.dtype,
-                                   queue = tenet)
+                                   queue = tenet,
+                                   allocator = allocator)
         _swap_array.H2D(ary)
         return _swap_array
 
-    def _zeros_OCL(shape, dtype, tenet):
+    def _zeros_OCL(shape, dtype, tenet, allocator = None):
         _swap_array = IdpyArrayOCL(shape = shape,
                                    dtype = dtype,
-                                   queue = tenet)
+                                   queue = tenet,
+                                   allocator = allocator)
         _swap_array.SetConst(0)
         return _swap_array
 
-    def _range_OCL(n, tenet, dtype = np.int32):
+    def _range_OCL(n, tenet, dtype = np.int32, allocator = None):
         _tmp_range = np.arange(n, dtype = dtype)
-        _swap_array = _on_device_OCL(_tmp_range, tenet = tenet)
+        _swap_array = _on_device_OCL(_tmp_range, tenet = tenet,
+                                     allocator = allocator)
         del _tmp_range
         return _swap_array
 
-    def _const_OCL(shape,  dtype, const = 0., tenet = None):
+    def _const_OCL(shape, dtype, const = 0., tenet = None, allocator = None):
         _swap_array = IdpyArrayOCL(shape = shape,
                                    dtype = dtype,
-                                   queue = tenet)
+                                   queue = tenet,
+                                   allocator = allocator)
         _swap_array.SetConst(const)
         return _swap_array
 

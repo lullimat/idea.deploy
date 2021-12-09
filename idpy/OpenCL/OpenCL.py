@@ -50,7 +50,16 @@ class Tenet(cl.CommandQueue):
     def __init__(self, *args, **kwargs):
         super(Tenet, self).__init__(*args, **kwargs)
 
-    def End(self):
+    def FreeMemoryDict(self, memory_dict = None):
+        if memory_dict is not None and type(memory_dict) is dict:
+            '''
+            I should be checking it is IdpyMemory type
+            '''
+            for _ in memory_dict:
+                if memory_dict[_] is not None:
+                    memory_dict[_].data.release()
+        
+    def End(self):            
         return super().finish()
 
     def SetKind(self, kind):
@@ -104,10 +113,13 @@ class OpenCL:
         return _tenet
         
     def SetDevice(self, kind = GPU_T, device = 0):
+        if kind not in self.devices:
+            kind = self.CPU_T
+            
         self.kind, self.device = kind, device
     
     def GetDevice(self):
-        if self.kind is not None:
+        if self.kind is not None and self.kind in self.devices:
             return self.devices[self.kind][self.device]
 
     def GetDeviceName(self):

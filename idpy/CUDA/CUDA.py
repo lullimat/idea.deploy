@@ -45,7 +45,10 @@ class Tenet:
         self.cuda_context = cuda_context
         self.device_name = device_name
 
-    def End(self):
+    def FreeMemoryDict(self, memory_dict = None):
+        pass
+
+    def End(self, memory_dict = None):
         return self.cuda_context.detach()
 
 class CUDA:
