@@ -84,7 +84,9 @@ class IdpyKernel:
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
                  optimizer_flag = None):
         self.code, self.name = "", self.__class__.__name__
-        self.kernels, self.params, self.f_classes, self.functions = {}, {}, f_classes, []
+        self.kernels, self.params, self.f_classes, self.functions = \
+            {}, {}, f_classes, []
+        
         self.custom_types, self.constants = custom_types, constants
         '''
         Need to check the type of optimizer_flag
@@ -99,7 +101,8 @@ class IdpyKernel:
         self.macros_consts, self.macros = {}, None
         
         self.gthread_id_code, self.lthread_id_code = gthread_id_code, lthread_id_code
-        self.lthread_id_coords_code, self.block_coords_code = lthread_id_coords_code, block_coords_code
+        self.lthread_id_coords_code, self.block_coords_code = \
+            lthread_id_coords_code, block_coords_code
 
         self.kernels_qualifiers = KernQualif()
         self.AddrQ = AddrQualif()
