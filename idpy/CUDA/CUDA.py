@@ -8,7 +8,7 @@ import pycuda.driver as cu_driver
 from collections import defaultdict
 
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -48,8 +48,17 @@ class Tenet:
     def FreeMemoryDict(self, memory_dict = None):
         pass
 
+    def AllocatedBytes(self):
+        return self.mem_pool.active_bytes
+
     def End(self, memory_dict = None):
+        self.mem_pool.free_held()
+        self.mem_pool.stop_holding()
         return self.cuda_context.detach()
+
+    def SetMemoryPool(self):
+        self.mem_pool = cu.tools.DeviceMemoryPool()
+        self.allocator = self.mem_pool.allocate
 
 class CUDA:
     '''                                                                               
@@ -72,8 +81,11 @@ class CUDA:
             return self.devices[self.device].make_context()
 
     def GetTenet(self):
-        return Tenet(cuda_context = self.GetContext(),
-                     device_name = self.GetDeviceName())
+        _tenet = Tenet(cuda_context = self.GetContext(),
+                       device_name = self.GetDeviceName())
+        _tenet.SetMemoryPool()
+        
+        return _tenet
             
     def SetDevice(self, device = 0):
         self.device = device
