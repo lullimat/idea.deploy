@@ -333,6 +333,9 @@ if IsModuleThere('pycuda'):
             self.constant = -2
             
         def test_IdpyArray(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -378,6 +381,9 @@ if IsModuleThere('pyopencl'):
             self.constant = -2
             
         def test_IdpyArray(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
             ocl = OpenCL()
             ocl.SetDevice()
             tenet = ocl.GetTenet()
@@ -526,6 +532,10 @@ class TestIdpyCode(unittest.TestCase):
         from idpy.CUDA.CUDA import Tenet as CUTenet
 
         def test_IdpyKernelFuncLoopMultStreamCU(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -583,12 +593,14 @@ class TestIdpyCode(unittest.TestCase):
                 [mem_dict_0, mem_dict_1],
                 [
                     [
-                        (SumTwoArrConst(tenet = tenet, grid = grid, block = block),
+                        (SumTwoArrConst(tenet = tenet,
+                                        grid = grid, block = block),
                          ['A', 'B', 'C', 'const']),
                         (self.M_SwapArrays(tenet), ['A', 'C'])
                     ],
                     [
-                        (SumConst(tenet = tenet, grid = grid, block = block), ['D', 'const']),
+                        (SumConst(tenet = tenet, grid = grid, block = block),
+                         ['D', 'const']),
                     ]
                 ])
             
@@ -616,6 +628,10 @@ class TestIdpyCode(unittest.TestCase):
 
         
         def test_IdpyKernelLoopConstCU(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -659,6 +675,10 @@ class TestIdpyCode(unittest.TestCase):
             self.assertTrue(AllTrue(checks))        
         
         def test_IdpyKernelLoopCU(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -702,6 +722,10 @@ class TestIdpyCode(unittest.TestCase):
 
 
         def test_IdpyKernelCU(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -732,6 +756,10 @@ class TestIdpyCode(unittest.TestCase):
 
         
         def test_IdpyMethodCU(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -759,6 +787,10 @@ class TestIdpyCode(unittest.TestCase):
             self.assertTrue(AllTrue(checks))        
 
         def test_IdpyMethodLoopCU(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             cu = CUDA()
             cu.SetDevice()
             tenet = cu.GetTenet()
@@ -801,6 +833,10 @@ class TestIdpyCode(unittest.TestCase):
         from idpy.OpenCL.OpenCL import Tenet as CLTenet
 
         def test_IdpyKernelFuncLoopMultStreamCL(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             ocl = OpenCL()
             ocl.SetDevice()
             tenet = ocl.GetTenet()
@@ -887,10 +923,15 @@ class TestIdpyCode(unittest.TestCase):
             checks += [AllTrue(D.D2H() == check_array)]
             
             tenet.End()
+            del tenet
             self.assertTrue(AllTrue(checks))        
 
         
         def test_IdpyKernelLoopConstCL(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             ocl = OpenCL()
             ocl.SetDevice()
             tenet = ocl.GetTenet()
@@ -935,6 +976,10 @@ class TestIdpyCode(unittest.TestCase):
             self.assertTrue(AllTrue(checks))        
         
         def test_IdpyKernelLoopCL(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             ocl = OpenCL()
             ocl.SetDevice()
             tenet = ocl.GetTenet()
@@ -977,6 +1022,10 @@ class TestIdpyCode(unittest.TestCase):
             self.assertTrue(AllTrue(checks))        
 
         def test_IdpyKernelCL(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             ocl = OpenCL()
             ocl.SetDevice()
             tenet = ocl.GetTenet()
@@ -1005,6 +1054,10 @@ class TestIdpyCode(unittest.TestCase):
 
 
         def test_IdpyMethodCL(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             ocl = OpenCL()
             ocl.SetDevice()
             tenet = ocl.GetTenet()
@@ -1032,6 +1085,10 @@ class TestIdpyCode(unittest.TestCase):
             self.assertTrue(AllTrue(checks))
             
         def test_IdpyMethodLoopCL(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
             cl = OpenCL()
             cl.SetDevice()
             tenet = cl.GetTenet()
