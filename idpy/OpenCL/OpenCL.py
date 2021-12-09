@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -58,8 +58,13 @@ class Tenet(cl.CommandQueue):
             for _ in memory_dict:
                 if memory_dict[_] is not None:
                     memory_dict[_].data.release()
+        self.mem_pool.free_held()
+
+    def AllocatedBytes(self):
+        return self.mem_pool.active_bytes
         
-    def End(self):            
+    def End(self):
+        super().flush()
         return super().finish()
 
     def SetKind(self, kind):
@@ -68,6 +73,52 @@ class Tenet(cl.CommandQueue):
     def SetDeviceName(self, device_name):
         self.device_name = device_name
 
+    def SetMemoryPool(self, allocator = None):
+        if allocator is None:
+            self.mem_pool = cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self))
+        else:
+            self.mem_pool = cl.tools.MemoryPool(allocator(self))
+
+class TenetNew:
+    def __init__(self, cl_context, device):
+        self.context = cl_context
+        self.device = device
+        self.queues = []
+
+    def SetDefaultQueue(self):
+        self.queues = [cl.CommandQueue(self.cl_context, self.device,
+                                       cl.command_queue_properties.PROFILING_ENABLE)]
+
+    def FreeMemoryDict(self, memory_dict = None):
+        if memory_dict is not None and type(memory_dict) is dict:
+            '''
+            I should be checking it is IdpyMemory type
+            '''
+            for _ in memory_dict:
+                if memory_dict[_] is not None:
+                    memory_dict[_].data.release()
+        self.mem_pool.free_held()
+
+    def AllocatedBytes(self):
+        return self.mem_pool.active_bytes
+        
+    def End(self):
+        super().flush()
+        return super().finish()
+
+    def SetKind(self, kind):
+        self.kind = kind
+
+    def SetDeviceName(self, device_name):
+        self.device_name = device_name
+
+    def SetMemoryPool(self, allocator = None):
+        if allocator is None:
+            self.mem_pool = cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self))
+        else:
+            self.mem_pool = cl.tools.MemoryPool(allocator(self))
+
+            
 class OpenCL:
     '''
     class OpenCL:
@@ -103,13 +154,14 @@ class OpenCL:
 
     def GetQueue(self):
         if self.kind is not None:
-            return cl.CommandQueue(self.GetContext(), None,
+            return cl.CommandQueue(self.GetContext(), self.GetDevice(),
                                    cl.command_queue_properties.PROFILING_ENABLE)
 
     def GetTenet(self):
         _tenet = Tenet.from_parent(self.GetQueue())
         _tenet.SetKind(self.kind)
         _tenet.SetDeviceName(self.GetDeviceName())
+        _tenet.SetMemoryPool()
         return _tenet
         
     def SetDevice(self, kind = GPU_T, device = 0):
@@ -140,9 +192,12 @@ class OpenCL:
                 for gpu_i in range(len(self.devices[self.GPU_T])):
                     swap_dev = self.devices[self.GPU_T][gpu_i]
                     gpus_dict[gpu_i]['Name'] = swap_dev.get_info(cl.device_info.NAME)
-                    gpus_dict[gpu_i]['Memory'] = swap_dev.get_info(cl.device_info.GLOBAL_MEM_SIZE)
-                    gpus_dict[gpu_i]['Double'] = swap_dev.get_info(cl.device_info.DOUBLE_FP_CONFIG)
-                    gpus_dict[gpu_i]['DrvVersion'] = swap_dev.get_info(cl.device_info.DRIVER_VERSION)
+                    gpus_dict[gpu_i]['Memory'] = \
+                        swap_dev.get_info(cl.device_info.GLOBAL_MEM_SIZE)
+                    gpus_dict[gpu_i]['Double'] = \
+                        swap_dev.get_info(cl.device_info.DOUBLE_FP_CONFIG)
+                    gpus_dict[gpu_i]['DrvVersion'] = \
+                        swap_dev.get_info(cl.device_info.DRIVER_VERSION)
 
         return gpus_dict
 
@@ -156,8 +211,11 @@ class OpenCL:
                 for cpu_i in range(len(self.devices[self.CPU_T])):
                     swap_dev = self.devices[self.CPU_T][cpu_i]
                     cpus_dict[cpu_i]['Name'] = swap_dev.get_info(cl.device_info.NAME)
-                    cpus_dict[cpu_i]['Memory'] = swap_dev.get_info(cl.device_info.GLOBAL_MEM_SIZE)
-                    cpus_dict[cpu_i]['Double'] = swap_dev.get_info(cl.device_info.DOUBLE_FP_CONFIG)
-                    cpus_dict[cpu_i]['DrvVersion'] = swap_dev.get_info(cl.device_info.DRIVER_VERSION)
+                    cpus_dict[cpu_i]['Memory'] = \
+                        swap_dev.get_info(cl.device_info.GLOBAL_MEM_SIZE)
+                    cpus_dict[cpu_i]['Double'] = \
+                        swap_dev.get_info(cl.device_info.DOUBLE_FP_CONFIG)
+                    cpus_dict[cpu_i]['DrvVersion'] = \
+                        swap_dev.get_info(cl.device_info.DRIVER_VERSION)
 
         return cpus_dict
