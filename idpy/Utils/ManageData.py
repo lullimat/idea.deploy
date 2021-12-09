@@ -33,6 +33,8 @@ Provides general dumping/reading facility through the package dill
 # How to dump lambdas: https://stackoverflow.com/questions/16439301/cant-pickle-defaultdict
 from collections import defaultdict
 import dill, os
+import h5py
+import numpy as np
 
 class ManageData:
     '''
@@ -75,15 +77,52 @@ class ManageData:
             return self.data_dictionary[key]
         else:
             raise Exception("key not present in the data base")
+
+    def Dump(self, kind = 'dill'):
+        if kind not in ['hdf5', 'dill']:
+            raise Exception("Parameter 'kind' must be either 'hdf5' or 'dill'")
+        if kind == 'hdf5':
+            self.DumpHDF5()        
+        if kind == 'dill':
+            self.DumpDill()
+
+    def Read(self, kind = 'dill'):
+        if kind not in ['hdf5', 'dill']:
+            raise Exception("Parameter 'kind' must be either 'hdf5' or 'dill'")        
+        if kind == 'hdf5':
+            return self.ReadHDF5()        
+        if kind == 'dill':
+            return self.ReadDill()
+            
         
-    def Dump(self):
+    def DumpDill(self):
         file_out = open(self.dump_file, 'wb')
         ##chars_n = file_out.write(dill.dumps(self.__dict__))
         chars_n = file_out.write(dill.dumps(self.data_dictionary))
         file_out.close()
         return chars_n
+
+    def DumpHDF5(self):
+        if not self.dump_file.lower().endswith(('.hdf5', '.h5')):
+            file_out = self.dump_file + '.hdf5'
+        else:
+            file_out = self.dump_file
+            
+        _out_f = h5py.File(file_out, "a")
+        _grp = _out_f.create_group(self.__class__.__name__)
+            
+        for _key in self.data_dictionary:
+            if _key not in _grp:
+                print(_key)
+                if type(self.data_dictionary[_key]) is not dict:
+                    _grp.create_dataset(_key, data = self.data_dictionary[_key])
+                else:
+                    _grp.create_dataset(_key,
+                                        data = np.string_(str(self.data_dictionary[_key])))
+            
+        _out_f.close()
         
-    def Read(self):
+    def ReadDill(self):
         if os.path.isfile(self.dump_file):
             file_in = open(self.dump_file, 'rb')
             data_dill = file_in.read()
@@ -93,6 +132,27 @@ class ManageData:
             return True
         else:
             return False
+
+    def ReadHDF5(self, full_key = None):
+        if full_key is None:
+            raise Exception("Missing parameter 'full_key'")
+
+        if not self.dump_file.lower().endswith(('.hdf5', '.h5')):
+            file_name = self.dump_file + '.hdf5'
+        else:
+            file_name = self.dump_file
+        
+        _in_f = h5py.File(file_name, "r")
+        _sims_class_name = list(_in_f.keys())[0]
+        if _sims_class_name != self.__class__.__name__:
+            raise Exception("The file you are reading has been created by another class!")
+
+        if not full_key in _in_f:
+            raise Exception("Key", full_key, "cannot be found in", file_name)
+
+        _swap_data = np.array(_in_f.get(full_key))
+        _in_f.close()
+        return _swap_data
 
     def CleanDump(self):
         if os.path.isfile(self.dump_file):
