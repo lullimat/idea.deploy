@@ -119,8 +119,11 @@ def GetTenet(params_dict):
         if idpy_langs_sys[OCL_T]:
             ocl = OpenCL()
             cl_type = 'gpu' if 'cl_kind' not in params_dict else params_dict['cl_kind']
+            cl_type = cl_type if cl_type in ocl.devices else 'cpu'
             device = 0 if 'device' not in params_dict else params_dict['device']
+            
             ocl.SetDevice(kind = cl_type, device = device)
+            
             print("OpenCL: ", ocl.GetDeviceName())
             return ocl.GetTenet()
         else:
