@@ -165,10 +165,13 @@ class OpenCL:
         return _tenet
         
     def SetDevice(self, kind = GPU_T, device = 0):
+        if kind not in self.devices:
+            kind = self.CPU_T
+            
         self.kind, self.device = kind, device
     
     def GetDevice(self):
-        if self.kind is not None:
+        if self.kind is not None and self.kind in self.devices:
             return self.devices[self.kind][self.device]
 
     def GetDeviceName(self):

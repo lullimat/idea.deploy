@@ -46,7 +46,15 @@ if idpy_os_found == "linux":
 if idpy_os_found == "darwin":
     idpy_opencl_macro_spacing = '\ '
 if idpy_os_found == "win32":
-    idpy_opencl_macro_spacing = '\ '    
+    idpy_opencl_macro_spacing = '\ '
+
+idpy_ctypes_compiler_string_h = None
+if idpy_os_found == "linux":
+    idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -o'
+if idpy_os_found == "darwin":
+    idpy_ctypes_compiler_string_h = 'clang -fPIC -shared -arch x86_64 -o'
+if idpy_os_found == "win32":
+    idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -o'
 
 _module_abs_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 _idea_dot_deploy_path = os.path.dirname(os.path.abspath(_module_abs_path + "../../"))
@@ -67,11 +75,11 @@ _file_swap.close()
 '''
 Language Types and metaTypes
 '''
-CUDA_T, OCL_T, IDPY_T = "pycuda", "pyopencl", "idpy"
-idpy_langs_dict = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T}
+CUDA_T, OCL_T, CTYPES_T, IDPY_T = "pycuda", "pyopencl", "ctypes", "idpy"
+idpy_langs_dict = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}
 
-idpy_langs_human_dict = {CUDA_T: "CUDA", OCL_T: "OpenCL"}
-idpy_langs_dict_sym = {CUDA_T: "CUDA_T", OCL_T: "OCL_T"}
+idpy_langs_human_dict = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes"}
+idpy_langs_dict_sym = {CUDA_T: "CUDA_T", OCL_T: "OCL_T", CTYPES_T: "CTYPES_T"}
 idpy_langs_list = list(idpy_langs_dict.values())
 
 from idpy.Utils.IsModuleThere import AreModulesThere
@@ -97,6 +105,12 @@ if idpy_langs_sys[OCL_T]:
     from idpy.OpenCL.OpenCL import Tenet as CLTenet
     idpy_tenet_types[OCL_T] = CLTenet
 
+if idpy_langs_sys[CTYPES_T]:
+    from idpy.CTypes.CTypes import CTypes
+    from idpy.CTypes.CTypes import Tenet as CTTenet
+    idpy_tenet_types[CTYPES_T] = CTTenet
+
+
 '''
 Methods: GetTenet
 '''
@@ -113,18 +127,29 @@ def GetTenet(params_dict):
             print("CUDA: ", cu.GetDeviceName())
             return cu.GetTenet()
         else:
-            raise Exception("Selected lang = CUDA_T but CUDA is not found on the system!")
+            raise Exception("Selected lang = CUDA_T but the module pycuda is not found in your python environment!")
 
     if 'lang' in params_dict and params_dict['lang'] == OCL_T:
         if idpy_langs_sys[OCL_T]:
             ocl = OpenCL()
             cl_type = 'gpu' if 'cl_kind' not in params_dict else params_dict['cl_kind']
+            cl_type = cl_type if cl_type in ocl.devices else 'cpu'
             device = 0 if 'device' not in params_dict else params_dict['device']
+            
             ocl.SetDevice(kind = cl_type, device = device)
+            
             print("OpenCL: ", ocl.GetDeviceName())
             return ocl.GetTenet()
         else:
-            raise Exception("Selected lang = OCL_T but openCL is not found on the system!")
+            raise Exception("Selected lang = OCL_T but the 'pyopencl' module is not found in your python environment!")
+        
+    if 'lang' in params_dict and params_dict['lang'] == CTYPES_T:
+        if idpy_langs_sys[CTYPES_T]:
+            c_types = CTypes()
+            print("CTypes: ", c_types.GetDeviceName())
+            return c_types.GetTenet()
+        else:
+            raise Exception("Selected lang = CTYPES_T but the 'ctypes' module is not found in your python environment!")
 
 '''
 Method CheckOCLFP
@@ -170,7 +195,7 @@ def GetParamsClean(kwargs, _a_params_dict, needed_params = None):
 
     return kwargs
 
-from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
+from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, IDPY_T
 from idpy.IdpyCode import idpy_langs_sys, idpy_langs_list
 
 '''
@@ -189,7 +214,8 @@ def IdpyHardware():
                 print(key, ": ", gpus_list[gpu_i][key])
             print()
         del cuda
-
+        print("=" * 80)
+        print()
 
     if idpy_langs_sys[OCL_T]:
         from idpy.OpenCL.OpenCL import OpenCL
@@ -210,6 +236,19 @@ def IdpyHardware():
                 print(key, ": ", cpus_list[cpu_i][key])
             print()
         del ocl
+        print("=" * 80)
+        print()
+
+    if idpy_langs_sys[CTYPES_T]:
+        from idpy.CTypes.CTypes import CTypes
+        print("CTypes Found!")
+        c_types = CTypes()
+        print("\nListing CPUs:")
+        print(c_types.GetDeviceName())
+        del c_types
+        print()
+        print("=" * 80)
+        print()        
 
 '''
 Methods: GridAndBlocks

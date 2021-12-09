@@ -44,6 +44,7 @@ import math
 
 from idpy.LBM.SCFStencils import SCFStencils
 from idpy.Utils.ManageData import ManageData
+import ast as ast_module
 
 def FindSingleZeroRange(func, x_init, delta_val):
     old_val, new_val = func(x_init), func(x_init)
@@ -553,6 +554,9 @@ class ShanChanEquilibriumCache(ManageData):
         self.is_file, self.is_key = ManageData.Read(self), False
         self.dict_string = (str(psi_f) + "_" + str(float(G)) + "_" +
                             str(c2) + "_" + str(stencil.w_sol[0]))
+
+        self.dict_string = self.dict_string.replace(" ", "_")
+        
         if self.is_file:
             if self.dict_string in ManageData.WhichData(self):
                 self.data = ManageData.PullData(self, self.dict_string)
@@ -583,7 +587,7 @@ class ShanChanEquilibriumCache(ManageData):
             if len(stencil.w_sol[0]) != 10:
                 len_diff = 10 - len(stencil.w_sol[0])
                 if len_diff < 0:
-                    raise Exception("The number of weights must be 5 at most!")
+                    raise Exception("The number of weights must be 10 at most!")
                 _weights_list = stencil.w_sol[0] + [0 for i in range(len_diff)]
             else:
                 _weights_list = stencil.w_sol[0]

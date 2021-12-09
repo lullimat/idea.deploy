@@ -37,6 +37,7 @@ as long as the different meta-declarations are consistent
 
 import numpy as np
 from collections import defaultdict
+from pathlib import Path
 
 from idpy.IdpyCode.IdpyConsts import AddrQualif, KernQualif, FuncQualif
 
@@ -82,7 +83,21 @@ class IdpyKernel:
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  gthread_id_code = 'g_tid', lthread_id_code = 'l_tid',
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
-                 optimizer_flag = None):
+                 optimizer_flag = None, declare_types = None,
+                 headers_files = None, include_dirs = None,
+                 definitions_files = None, objects_files = None):
+
+        if type(custom_types) is not dict:
+            raise Exception("custom_types param must be a dict")
+        if headers_files is not None and type(headers_files) is not list:
+            raise Exception("headers_files param must be a list")
+        if include_dirs is not None and type(include_dirs) is not list:
+            raise Exception("include_dirs param must be a list")
+        if definitions_files is not None and type(definitions_files) is not list:
+            raise Exception("definitions_files param must be a list")
+        if objects_files is not None and type(objects_files) is not list:
+            raise Exception("objects_files param must be a list")
+        
         self.code, self.name = "", self.__class__.__name__
         self.kernels, self.params, self.f_classes, self.functions = \
             {}, {}, f_classes, []
@@ -92,6 +107,11 @@ class IdpyKernel:
         Need to check the type of optimizer_flag
         '''
         self.optimizer_flag = True if optimizer_flag is None else optimizer_flag
+        self.declare_types = 'typedef' if declare_types is None else declare_types
+        if self.declare_types not in ['typedef', 'macro']:
+            raise Exception("declare_types must be either 'typedef' or 'macro'")
+        
+        self.headers_files = headers_files
         self.declarations = {}
 
         '''
@@ -128,8 +148,9 @@ class IdpyKernel:
             for const in self.constants:
                 self.macros.append("-D " + const + "=" + str(self.constants[const]))
             # Types
-            for c_type in self.custom_types:
-                self.macros.append("-D " + c_type + "=" + str(self.custom_types[c_type]))
+            if self.declare_types == 'macro':
+                for c_type in self.custom_types:
+                    self.macros.append("-D " + c_type + "=" + str(self.custom_types[c_type]))
 
             # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html
             if self.optimizer_flag is False:
@@ -144,8 +165,9 @@ class IdpyKernel:
                 self.macros += (" -D " + const + "=" + str(self.constants[const]))
             # Types
             # https://stackoverflow.com/questions/13531100/escaping-space-in-opencl-compiler-arguments
-            for c_type in self.custom_types:
-                self.macros += (" -D " + c_type + "=" + '\"' + str(self.custom_types[c_type]).replace(" ", idpy_opencl_macro_spacing) + '\"')
+            if self.declare_types == 'macro':
+                for c_type in self.custom_types:
+                    self.macros += (" -D " + c_type + "=" + '\"' + str(self.custom_types[c_type]).replace(" ", idpy_opencl_macro_spacing) + '\"')
 
             if self.optimizer_flag is False:
                 self.macros += " -cl-opt-disable"
@@ -230,10 +252,52 @@ class IdpyKernel:
                         """get_group_id(2);\n""")
         return _swap
 
+    def WriteAsHeader(self, lang = None, prepend_path = None):
+        if lang is None:
+            raise Exception("'lang' param is not defined")
+
+        _extension = '.cuh' if lang == CUDA_T else ('.hpp' if lang == OCL_T else '.h')
+        _as_header_name = \
+            self.__class__.__name__ + _extension
+        _file_path = \
+            Path(prepend_path if prepend_path is not None else '.') / _as_header_name
+
+        with open(_file_path, 'w') as _header_file:
+            _header_file.write(self.Code(lang = lang))
+        return _file_path
+
+    def CleanAsHeader(self, prepend_path = None):
+        _as_header_name = self.__class__.__name__ + '.h'
+        _file_path = \
+            Path(prepend_path if prepend_path is not None else '.') / _as_header_name
+        if _file_path.is_file():
+            pass
+
+    def DeclareTypes(self):
+        _swap = ''
+        for c_type in self.custom_types:
+            _swap  += 'typedef ' + str(self.custom_types[c_type]) + ' ' + c_type + ';\n'
+        _swap += '\n'
+        
+        return _swap
+
+    def IncludeHeaders(self):
+        _swap = ''
+        for _h_file in self.headers_files:
+            _swap += '#include <' + _h_file + '>\n'
+        _swap += '\n'
+        return _swap
+
     def Code(self, lang = None):
         # Argument Qualifiers
         AddrQ = self.AddrQ[lang]
         self.ResetCode()
+        # Inserting headers
+        if self.headers_files is not None:
+            self.code += self.IncludeHeaders()
+        # Inserting types
+        if self.declare_types == 'typedef':
+            self.code += self.DeclareTypes()
         # Inserting Functions
         self.InitFunctions()
         for function in self.functions:
@@ -266,7 +330,7 @@ class IdpyKernel:
             self.code += self.kernels[IDPY_T]
 
         # Closing function
-        self.code += """return; }"""
+        self.code += """return;\n}\n"""
         
         return self.code
 

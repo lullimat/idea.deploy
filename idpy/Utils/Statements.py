@@ -26,29 +26,13 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 '''
-Provides a minimal interface for handling numpy types
+Provides some functions for Boolean statements
 '''
 
-import numpy as np
+from functools import reduce
 
-class NpTypes:
-    '''
-    class NpTypes:
-    NpTypes: handles a dictionary with numpy types and offers "C"-like 
-    key-words
-    -- CType(key)
-    '''
-    
-    def __init__(self):
-        # C Types
-        self.C = {'double': np.float64, 'float': np.float32,
-                  'int': np.int32, 'unsigned int': np.uint32,
-                  'long long int': np.int64,
-                  'unsigned long': np.uint64,
-                  'unsigned long long int': np.uint64,
-                  'char': np.byte, 'unsigned char': np.ubyte}
+def AllTrue(list_swap):
+    return reduce(lambda x, y: x and y, list_swap)
 
-        self.NP = {value: key for (key, value) in self.C.items()}
-
-    def ToList(self):
-        return [key for key in self.C], [key for key in self.NP]
+def OneTrue(list_swap):
+    return reduce(lambda x, y: x or y, list_swap)

@@ -26,29 +26,20 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 '''
-Provides a minimal interface for handling numpy types
+Provides some sequences for analysis and dumping purposes
 '''
 
 import numpy as np
 
-class NpTypes:
-    '''
-    class NpTypes:
-    NpTypes: handles a dictionary with numpy types and offers "C"-like 
-    key-words
-    -- CType(key)
-    '''
-    
-    def __init__(self):
-        # C Types
-        self.C = {'double': np.float64, 'float': np.float32,
-                  'int': np.int32, 'unsigned int': np.uint32,
-                  'long long int': np.int64,
-                  'unsigned long': np.uint64,
-                  'unsigned long long int': np.uint64,
-                  'char': np.byte, 'unsigned char': np.ubyte}
+'''
+GSequence:
+provides a numpy array of integers according to the formula
+p_k = floor(b^{(N * k + 1) / D})
+by default the base is set to 2
+'''
 
-        self.NP = {value: key for (key, value) in self.C.items()}
-
-    def ToList(self):
-        return [key for key in self.C], [key for key in self.NP]
+def GSequence(n_steps, num, den, base = 2):
+    _list = \
+        np.unique(np.array(base ** (np.arange(num * n_steps + 1) / float(den)), 
+                           dtype = np.int32))
+    return _list

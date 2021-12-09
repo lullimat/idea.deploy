@@ -57,7 +57,7 @@ class TestManageData(unittest.TestCase):
         md_dump = ManageData(dump_file = self.file_name)
         md_dump.PushData(data = np.random.rand(10), key = 'paperino')
         md_dump.PushData(data = 'pippo, pluto', key = 'pappo')
-        chars_n = md_dump.Dump()
+        chars_n = md_dump.Dump(kind = 'dill')
         del md_dump
         os.remove(self.file_name)
         self.assertTrue(True)
@@ -66,11 +66,11 @@ class TestManageData(unittest.TestCase):
         md_dump = ManageData(dump_file = self.file_name)
         md_dump.PushData(data = np.random.rand(10), key = 'paperino')
         md_dump.PushData(data = 'pippo, pluto', key = 'pappo')
-        md_dump.Dump()
+        md_dump.Dump(kind = 'dill')
         del md_dump
         
         md_read = ManageData(dump_file = self.file_name)
-        read_flag = md_read.Read()
+        read_flag = md_read.Read(kind = 'dill')
         del md_read
         os.remove(self.file_name)
         self.assertTrue(read_flag)
@@ -79,13 +79,13 @@ class TestManageData(unittest.TestCase):
         md_dump = ManageData(dump_file = self.file_name)
         md_dump.PushData(data = np.random.rand(10), key = 'paperino')
         md_dump.PushData(data = 'pippo, pluto', key = 'pappo')
-        md_dump.Dump()
+        md_dump.Dump(kind = 'dill')
         del md_dump
         
         md_read = ManageData(dump_file = self.file_name)
-        md_read.Read()
+        md_read.Read(kind = 'dill')
         os.rename(self.file_name, self.file_name_mv)
-        md_read.Dump()
+        md_read.Dump(kind = 'dill')
         del md_read
         file_cmp = filecmp.cmp(self.file_name, self.file_name_mv)
         os.remove(self.file_name)
@@ -227,7 +227,7 @@ if IsModuleThere('pyopencl'):
 testing variables in IdpyCode.__init__.py
 '''
 
-from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T, idpy_langs_sys
+from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, IDPY_T, idpy_langs_sys
 from idpy.IdpyCode import idpy_langs_dict, idpy_langs_human_dict
 from idpy.IdpyCode import idpy_langs_dict_sym, idpy_langs_list
 
@@ -237,26 +237,27 @@ class TestIdpyCodeInit(unittest.TestCase):
         '''
         Checking basic types
         '''
-        checks += [CUDA_T == 'pycuda', OCL_T == 'pyopencl', IDPY_T == 'idpy']
+        checks += [CUDA_T == 'pycuda', OCL_T == 'pyopencl',
+                   CTYPES_T == 'ctypes', IDPY_T == 'idpy']
         '''
         idpy_langs_dict
         '''
-        dict_check = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T}
+        dict_check = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}
         checks += [idpy_langs_dict == dict_check]
         '''
         idpy_langs_human_dict
         '''
-        dict_check = {CUDA_T: "CUDA", OCL_T: "OpenCL"}
+        dict_check = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes"}
         checks += [idpy_langs_human_dict == dict_check]
         '''
         idpy_langs_dict_sym
         '''
-        dict_check = {CUDA_T: "CUDA_T", OCL_T: "OCL_T"}
+        dict_check = {CUDA_T: "CUDA_T", OCL_T: "OCL_T", CTYPES_T: "CTYPES_T"}
         checks += [idpy_langs_dict_sym == dict_check]
         '''
         idpy_langs_list
         '''
-        list_check = list({'CUDA_T': CUDA_T, 'OCL_T': OCL_T}.values())
+        list_check = list({'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}.values())
         checks += [idpy_langs_list == list_check]
         '''
         idpy_langs_sys
@@ -275,7 +276,10 @@ class TestIdpyConsts(unittest.TestCase):
         checks = []
         fq = FuncQualif()
 
-        dict_check = {CUDA_T: """__device__""", OCL_T: """ """}
+        dict_check = {CUDA_T: """__device__""",
+                      OCL_T: """ """,
+                      CTYPES_T: """ """}
+        
         for lang in idpy_langs_list:
             checks += [fq[lang] == dict_check[lang]]
 
@@ -285,7 +289,10 @@ class TestIdpyConsts(unittest.TestCase):
         checks = []
         kq = KernQualif()
 
-        dict_check = {CUDA_T: """__global__ void""", OCL_T: """__kernel void"""}
+        dict_check = {CUDA_T: """__global__ void""",
+                      OCL_T: """__kernel void""",
+                      CTYPES_T: """ """}
+        
         for lang in idpy_langs_list:
             checks += [kq[lang] == dict_check[lang]]
 
