@@ -81,7 +81,14 @@ class CRNGS(IdpySims):
             self.params_dict = {}
 
         self.InitCRNGS(args, kwargs)
-        
+        '''
+        Setting number of streams
+        '''
+        if 'n_streams' not in self.params_dict:
+            self.sims_vars['n_streams'] = 1
+        else:
+            self.sims_vars['n_streams'] = self.params_dict['n_streams']
+            
         '''
         Setting variables and constants
         '''
@@ -124,7 +131,8 @@ class CRNGS(IdpySims):
         self.sims_vars['n_prngs'] = self.params_dict['n_prngs']
 
         self.constants = {'ID_RANDMAX': self.sims_vars['ID_RANDMAX'],
-                          'N_PRNGS': self.sims_vars['n_prngs']}
+                          'N_PRNGS': self.sims_vars['n_prngs'],
+                          'TWOPI': 2. * np.pi}
         '''
         Setting device function CRNG through a macro
         '''
@@ -154,7 +162,8 @@ class CRNGS(IdpySims):
         
     def InitCRNGS(self, args, kwargs):
         self.kwargs = GetParamsClean(kwargs, [self.params_dict], 
-                                     needed_params = ['n_prngs', 
+                                     needed_params = ['n_prngs',
+                                                      'n_streams',
                                                       'kind', 
                                                       'init_from', 
                                                       'init_seed',
@@ -243,43 +252,53 @@ class CRNGS(IdpySims):
 
     def InitSeeds(self):
         _swap_seeds = None
-        
-        if self.sims_vars['init_from'] == 'numpy':
-            np.random.seed(self.sims_vars['init_seed'])
-            _swap_seeds = np.random.randint(low = 1, high = self.sims_vars['ID_RANDMAX'],
-                                            size = self.sims_vars['n_prngs'],
-                                            dtype = NPT.C[self.custom_types['CRNGType']])
-            
-        elif self.sims_vars['init_from'] == 'urandom':
-            _swap_seeds = np.zeros(self.sims_vars['n_prngs'],
-                                   dtype = NPT.C[self.custom_types['CRNGType']])
-            '''
-            Very slow...(?)
-            '''
-            for _seed_i in range(self.sims_vars['n_prngs']):
-                _swap_seeds[_seed_i] = \
-                    int.from_bytes(os.urandom(4), byteorder = 'big',
-                                   signed = False)
 
-        self.sims_idpy_memory['seeds'] = \
-            IdpyMemory.OnDevice(_swap_seeds, tenet = self.tenet)
+        _n_streams = self.sims_vars['n_streams']
+        _idpy_memory_swap = None
+        for _i in range(_n_streams):
+            if self.sims_vars['init_from'] == 'numpy':
+                np.random.seed(self.sims_vars['init_seed'] + _i)
+                _swap_seeds = np.random.randint(low = 1, high = self.sims_vars['ID_RANDMAX'],
+                                                size = self.sims_vars['n_prngs'],
+                                                dtype = NPT.C[self.custom_types['CRNGType']])
 
-        del _swap_seeds
-        '''
-        If 'kind' = MINSTD need to remove most significant bit
-        '''
-        if self.sims_vars['kind'] == 'MINSTD':
-            '''
-            Kernel for initializing seeds
-            '''
-            _K_MINSTDSeedsFit = K_MINSTDSeedsFit(custom_types = self.custom_types.Push(),
-                                                 constants = self.constants,
-                                                 optimizer_flag = self.optimizer_flag)
-            Idea = _K_MINSTDSeedsFit(tenet = self.tenet,
-                                     grid = self.sims_vars['grid'],
-                                     block = self.sims_vars['block'])
+            elif self.sims_vars['init_from'] == 'urandom':
+                _swap_seeds = np.zeros(self.sims_vars['n_prngs'],
+                                       dtype = NPT.C[self.custom_types['CRNGType']])
+                '''
+                Very slow...(?)
+                '''
+                for _seed_i in range(self.sims_vars['n_prngs']):
+                    _swap_seeds[_seed_i] = \
+                        int.from_bytes(os.urandom(4), byteorder = 'big',
+                                       signed = False)
 
-            Idea.Deploy([self.sims_idpy_memory['seeds']])
+
+            _idpy_memory_swap = \
+                IdpyMemory.OnDevice(_swap_seeds, tenet = self.tenet)
+
+            del _swap_seeds
+            '''
+            If 'kind' = MINSTD need to remove most significant bit
+            '''
+            if self.sims_vars['kind'] == 'MINSTD':
+                '''
+                Kernel for initializing seeds
+                '''
+                _K_MINSTDSeedsFit = K_MINSTDSeedsFit(custom_types = self.custom_types.Push(),
+                                                     constants = self.constants,
+                                                     optimizer_flag = self.optimizer_flag)
+                Idea = _K_MINSTDSeedsFit(tenet = self.tenet,
+                                         grid = self.sims_vars['grid'],
+                                         block = self.sims_vars['block'])
+
+                Idea.Deploy([_idpy_memory_swap])
+
+            if _n_streams > 1:
+                self.sims_idpy_memory['seeds_' + str(_i)] = _idpy_memory_swap
+            else:
+                self.sims_idpy_memory['seeds'] = _idpy_memory_swap
+                
 
     def __call__(self, reps = 1):
         _K_NSteps = K_NSteps(custom_types = self.custom_types.Push(),
@@ -291,8 +310,17 @@ class CRNGS(IdpySims):
                          grid = self.sims_vars['grid'],
                          block = self.sims_vars['block'])
 
-        Idea.Deploy([self.sims_idpy_memory['seeds'], np.int32(reps)])
-        return self.sims_idpy_memory['seeds'].D2H()
+        _n_streams = self.sims_vars['n_streams']
+        if _n_streams > 1:
+            for _i in range(_n_streams):            
+                Idea.Deploy([self.sims_idpy_memory['seeds_' + str(_i)], np.int32(reps)])
+                
+            return np.array([self.sims_idpy_memory['seeds_' + str(_i)].D2H()
+                             for _i in range(_n_streams)])
+        else:
+            Idea.Deploy([self.sims_idpy_memory['seeds'], np.int32(reps)])
+            return self.sims_idpy_memory['seeds'].D2H()
+            
 
     def Norm(self, reps = 1, rand_type = None):
         '''
@@ -334,12 +362,140 @@ class CRNGS(IdpySims):
                                  grid = self.sims_vars['grid'],
                                  block = self.sims_vars['block'])
 
-        Idea.Deploy([self.sims_idpy_memory['output'],
-                     self.sims_idpy_memory['seeds'],
-                     np.int32(reps)])
-
-        return self.sims_idpy_memory['output'].D2H()
+        _n_streams = self.sims_vars['n_streams']
+        if _n_streams > 1:
+            _outputs = []
+            for _i in range(_n_streams):
+                Idea.Deploy([self.sims_idpy_memory['output'],
+                             self.sims_idpy_memory['seeds_' + str(_i)],
+                             np.int32(reps)])
+                _outputs += [np.copy(self.sims_idpy_memory['output'].D2H())]
                 
+            return np.array(_outputs)
+        else:
+            Idea.Deploy([self.sims_idpy_memory['output'],
+                         self.sims_idpy_memory['seeds'],
+                         np.int32(reps)])            
+            return self.sims_idpy_memory['output'].D2H()
+
+
+    def GaussianSingle(self, mean = 0, var = 1, reps = 1, rand_type = None):
+        '''
+        Setting the type macro checking device architecture
+        '''
+        self.constants['F_CRNGGaussFunction'] = 'F_GaussianCosSingle'
+        if rand_type is None:
+            if self.sims_vars['fp64']:
+                self.custom_types.Set({'RANDType': 'double'})
+            else:
+                self.custom_types.Set({'RANDType': 'float'})
+        else:
+            if rand_type['RANDType'] == 'double' and not self.sims_vars['fp64']:
+                print("The device",
+                      self.tenet.device.get_info(cl.device_info.NAME),
+                      "custom type RANDType demoted to float")
+                self.custom_types.Set({'RANDType': 'float'})
+            else:
+                self.custom_types.Set(rand_type)
+                
+        '''
+        Check output allocation
+        '''
+        if self.sims_idpy_memory['output'] is None:
+            self.sims_idpy_memory['output'] = \
+                IdpyMemory.Zeros(self.sims_vars['n_prngs'], tenet = self.tenet,
+                                 dtype = NPT.C[self.custom_types['RANDType']])
+        '''
+        Init the generic kernel
+        '''
+        _K_OutputGaussianSingle = \
+            K_OutputGaussianSingle(custom_types = self.custom_types.Push(),
+                                   constants = self.constants,
+                                   optimizer_flag = self.optimizer_flag,
+                                   f_classes = [self.F_CRNG, F_Norm,
+                                                F_GaussianCosSingle])
+
+        
+        Idea = _K_OutputGaussianSingle(tenet = self.tenet,
+                                       grid = self.sims_vars['grid'],
+                                       block = self.sims_vars['block'])
+
+        _n_streams = self.sims_vars['n_streams']
+        _mean = NPT.C[self.custom_types['RANDType']](mean)
+        _var = NPT.C[self.custom_types['RANDType']](var)
+        
+        if _n_streams > 1:
+            _outputs = []
+            for _i in range(_n_streams):
+                Idea.Deploy([self.sims_idpy_memory['output'],
+                             self.sims_idpy_memory['seeds_' + str(_i)],
+                             _mean, _var, np.int32(reps)])
+                _outputs += [np.copy(self.sims_idpy_memory['output'].D2H())]
+                
+            return np.array(_outputs)
+        else:
+            Idea.Deploy([self.sims_idpy_memory['output'],
+                         self.sims_idpy_memory['seeds'],
+                         _mean, _var, np.int32(reps)])            
+            return self.sims_idpy_memory['output'].D2H()
+
+        
+    def Gaussian(self, mean = 0, var = 1, reps = 1, rand_type = None):
+        if self.sims_vars['n_streams'] % 2 != 0:
+            raise Exception("'n_streams' must be 2!")
+        '''
+        Setting the type macro checking device architecture
+        '''
+        self.constants['F_CRNGGaussFunction'] = 'F_GaussianCos'
+        if rand_type is None:
+            if self.sims_vars['fp64']:
+                self.custom_types.Set({'RANDType': 'double'})
+            else:
+                self.custom_types.Set({'RANDType': 'float'})
+        else:
+            if rand_type['RANDType'] == 'double' and not self.sims_vars['fp64']:
+                print("The device",
+                      self.tenet.device.get_info(cl.device_info.NAME),
+                      "custom type RANDType demoted to float")
+                self.custom_types.Set({'RANDType': 'float'})
+            else:
+                self.custom_types.Set(rand_type)
+                
+        '''
+        Check output allocation
+        '''
+        if self.sims_idpy_memory['output'] is None:
+            self.sims_idpy_memory['output'] = \
+                IdpyMemory.Zeros(self.sims_vars['n_prngs'], tenet = self.tenet,
+                                 dtype = NPT.C[self.custom_types['RANDType']])
+        '''
+        Init the generic kernel
+        '''
+        _K_OutputGaussian = \
+            K_OutputGaussian(custom_types = self.custom_types.Push(),
+                             constants = self.constants,
+                             optimizer_flag = self.optimizer_flag,
+                             f_classes = [self.F_CRNG, F_Norm, F_GaussianCos])
+
+        
+        Idea = _K_OutputGaussian(tenet = self.tenet,
+                                 grid = self.sims_vars['grid'],
+                                 block = self.sims_vars['block'])
+
+        _mean = NPT.C[self.custom_types['RANDType']](mean)
+        _var = NPT.C[self.custom_types['RANDType']](var)
+
+        _n_streams, _outputs = self.sims_vars['n_streams'], []
+        for _i in range(0, _n_streams, 2):
+            Idea.Deploy([self.sims_idpy_memory['output'],
+                         self.sims_idpy_memory['seeds_' + str(_i)],
+                         self.sims_idpy_memory['seeds_' + str(_i + 1)],
+                         _mean, _var,
+                         np.int32(reps)])
+            _outputs += [np.copy(self.sims_idpy_memory['output'].D2H())]
+            
+        return np.array(_outputs)
+        
         
 '''
 Generic Kernels
@@ -387,6 +543,54 @@ class K_OutputFunction(IdpyKernel):
         }
         """
 
+class K_OutputGaussian(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'RANDType * output': ['global', 'restrict'],
+                       'CRNGType * seeds_0': ['global', 'restrict'],
+                       'CRNGType * seeds_1': ['global', 'restrict'],
+                       'RANDType mean': ['const'], 'RANDType var': ['const'],
+                       'int reps': ['const']}
+        self.kernels[IDPY_T] = """ 
+        if(g_tid < N_PRNGS){
+            CRNGType l_seed_0 = seeds_0[g_tid], l_seed_1 = seeds_1[g_tid];
+            for(int i=0; i<reps; i++){
+               output[g_tid] = F_CRNGGaussFunction(&l_seed_0, &l_seed_1, mean, var);
+            }
+            seeds_0[g_tid] = l_seed_0;
+            seeds_1[g_tid] = l_seed_1;
+        }
+        """
+
+class K_OutputGaussianSingle(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'RANDType * output': ['global', 'restrict'],
+                       'CRNGType * seeds': ['global', 'restrict'],
+                       'RANDType mean': ['const'], 'RANDType var': ['const'],
+                       'int reps': ['const']}
+        self.kernels[IDPY_T] = """ 
+        if(g_tid < N_PRNGS){
+            CRNGType l_seed = seeds[g_tid];
+            for(int i=0; i<reps; i++){
+               output[g_tid] = F_CRNGGaussFunction(&l_seed, mean, var);
+            }
+            seeds[g_tid] = l_seed;
+        }
+        """
+        
 '''
 Generic device functions:
 need to add:
@@ -405,16 +609,62 @@ class F_Norm(IdpyFunction):
         return ((RANDType) (*l_seed)) / (ID_RANDMAX - 1);
         """        
 
-class F_Gaussian(IdpyFunction):
+class F_GaussianCos(IdpyFunction):
+    '''
+    Using Box-Mueller
+    '''
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed_0': [], 'CRNGType * l_seed_1': [],
+                       'RANDType mean': ['const'], 'RANDType var': ['const']}
+        self.functions[IDPY_T] = """
+        RANDType u0 = F_Norm(l_seed_0), u1 = F_Norm(l_seed_1);
+        return sqrt((RANDType)(-2. * var * log((RANDType) u0))) * cos((RANDType)(TWOPI * u1)) + mean;
+        """
+
+class F_GaussianSin(IdpyFunction):
+    '''
+    Using Box-Mueller
+    '''
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed_0': [], 'CRNGType * l_seed_1': [],
+                       'RANDType mean': ['const'], 'RANDType var': ['const']}
+        self.functions[IDPY_T] = """
+        RANDType u0 = F_Norm(l_seed_0), u1 = F_Norm(l_seed_1);
+        return sqrt((RANDType)(-2. * var * log((RANDType) u0))) * sin((RANDType)(TWOPI * u1)) + mean;
+        """
+
+class F_GaussianCosSingle(IdpyFunction):
+    '''
+    Using Box-Mueller
+    a single stream should generate two reasonably uncorrelated random numbers
+    '''
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
         self.params = {'CRNGType * l_seed': [],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
-        F_CRNG(l_seed);
-        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX - 1));
+        RANDType u0 = F_Norm(l_seed); 
+        RANDType u1 = F_Norm(l_seed);
+        return sqrt((RANDType)(-2. * var * log((RANDType) u0))) * cos((RANDType)(TWOPI * u1)) + mean;
         """
 
+class F_GaussianSinSingle(IdpyFunction):
+    '''
+    Using Box-Mueller:
+    a single stream should generate two reasonably uncorrelated random numbers
+    '''
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed': [],
+                       'RANDType mean': ['const'], 'RANDType var': ['const']}
+        self.functions[IDPY_T] = """
+        RANDType u0 = F_Norm(l_seed); 
+        RANDType u1 = F_Norm(l_seed);
+        return sqrt((RANDType)(-2. * var * log((RANDType) u0))) * sin((RANDType)(TWOPI * u1)) + mean;
+        """
+        
 class F_Integers(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
