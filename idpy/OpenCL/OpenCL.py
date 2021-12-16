@@ -86,8 +86,9 @@ class TenetNew:
         self.queues = []
 
     def SetDefaultQueue(self):
-        self.queues = [cl.CommandQueue(self.cl_context, self.device,
-                                       cl.command_queue_properties.PROFILING_ENABLE)]
+        self.queues = \
+            [cl.CommandQueue(self.context, self.device,
+                             cl.command_queue_properties.PROFILING_ENABLE)]
 
     def FreeMemoryDict(self, memory_dict = None):
         if memory_dict is not None and type(memory_dict) is dict:
