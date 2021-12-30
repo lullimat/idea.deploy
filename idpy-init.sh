@@ -1,22 +1,55 @@
 # Script for initializing idea.deploy python virtual environment
-# Copyright (C) 2020 Matteo Lulli (matteo.lulli@gmail.com)
+# Copyright (C) 2020-2021 Matteo Lulli (matteo.lulli@gmail.com)
 # Permission to copy and modify is granted under the MIT license
-# Last revised 28/8/2020
+# Last revised 25/6/2021
 
 source .idpy-env
-WGET_PYOPENCL_2020=https://files.pythonhosted.org/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
-WGET_PYOPENCL_2021=https://files.pythonhosted.org/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
+
+echo "Welcome to idea.deploy!"
+echo
+echo "Checking if conda is installed"
+CONDA_F=$(conda -V 1>/dev/null 2>/dev/null || echo 0 && echo 1)
+PACKAGE_INSTALL=
+
+if ((CONDA_F))
+then
+    echo "conda is found"
+fi
+
+echo
+
+echo "Selecting PyPI/pythonhosted servers"
+
+function CheckPing { ping -c 2 ${1} 2>/dev/null 1>/dev/null && echo 1 || echo 0; }
+
+USE_PYPI_SERVER=${PYPI_SERVERS[0]}
+USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[0]}
+PIP_SERVER_OPTION=""
+
+if (($(CheckPing "www.google.com") == 0))
+then
+    USE_PYPI_SERVER=${PYHOSTED_SERVERS[1]}
+    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[1]}
+    PIP_SERVER_OPTION="-i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}"
+fi
+echo
+
+WGET_PYOPENCL_2020=https://${USE_PYHOSTED_SERVER}/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
+WGET_PYOPENCL_2021=https://${USE_PYHOSTED_SERVER}/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
 WGET_PYOPENCL=${WGET_PYOPENCL_2021}
 
-WGET_PYCUDA_2019=https://files.pythonhosted.org/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
-WGET_PYCUDA_2020=https://files.pythonhosted.org/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
-WGET_PYCUDA=${WGET_PYCUDA_2020}
+WGET_PYCUDA_2019=https://${USE_PYHOSTED_SERVER}/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
+WGET_PYCUDA_2020=https://${USE_PYHOSTED_SERVER}/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
+WGET_PYCUDA_2021=https://${USE_PYHOSTED_SERVER}/packages/5a/56/4682a5118a234d15aa1c8768a528aac4858c7b04d2674e18d586d3dfda04/pycuda-2021.1.tar.gz
+WGET_PYCUDA=${WGET_PYCUDA_2021}
 
 TAR_PYOPENCL=$(echo ${WGET_PYOPENCL} | tr '/' ' ' | awk '{print($NF)}')
 DIR_PYOPENCL=${TAR_PYOPENCL:0:${#TAR_PYOPENCL} - 7}
 TAR_PYCUDA=$(echo ${WGET_PYCUDA} | tr '/' ' ' | awk '{print($NF)}')
 DIR_PYCUDA=${TAR_PYCUDA:0:${#TAR_PYCUDA} - 7}
 
+ISTHERE_WGET=$(command -v wget >/dev/null 2>&1 && echo 1 || echo 0)
+ISTHERE_CURL=$(command -v curl >/dev/null 2>&1 && echo 1 || echo 0)
 
 # Script scope
 # Load local python env if None
@@ -29,8 +62,6 @@ DIR_PYCUDA=${TAR_PYCUDA:0:${#TAR_PYCUDA} - 7}
 
 # Never forget that ${VENV} is a global path
 
-echo "Welcome to idea.deploy!"
-
 ## Check if Python3 is installed
 echo -n "Checking python3 installation:... "
 ## Python3
@@ -42,7 +73,12 @@ PY3p8_F=$(command -v python3.8 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p9_F=$(command -v python3.9 >/dev/null 2>&1 && echo 1 || echo 0)
 
 ##
-if ((${PY3p8_F}))
+if ((${PY3p9_F}))
+then
+    ID_PYTHON=python3.9
+    PY_PATH=$(which python3.9)
+    echo "Found ${PY_PATH}"
+elif ((${PY3p8_F}))
 then
     ID_PYTHON=python3.8
     PY_PATH=$(which python3.8)
@@ -175,6 +211,7 @@ fi
 
 #####################
 ## Checking OpenMpi
+#####################
 MPICC_F=$(which mpicc 1>/dev/null 2>/dev/null && echo 1 || echo 0)
 
 echo "Sourcing virtual environment"
@@ -182,18 +219,20 @@ source ${VENV}/bin/activate
 
 if((VENV_F == 0))
 then
-    echo "Pip installing requiremnts"
-    pip install --upgrade pip setuptools wheel
-    pip install -r ${VENV}/requirements.txt
+    echo "Pip installing requirements"
+    pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
+    pip install -r ${VENV}/requirements.txt ${PIP_SERVER_OPTION}
     ## Install pycuda if cuda is found
     if ((CUDA_F && 0))
     then
-	pip install pycuda
+	pip install pycuda ${PIP_SERVER_OPTION}
     fi
     ## Install mpi4py if mpicc is found
     if((MPICC_F))
     then
-	pip install mpi4py
+	pip install mpi4py ${PIP_SERVER_OPTION}
+    else
+	echo "No MPI installation found (which mpicc did not return a path)"
     fi
     ## Jupyter nbextension
     jupyter contrib nbextension install --user
@@ -205,6 +244,10 @@ then
     ## Further step to avoid toc and fodling disappear
     ## https://github.com/jupyter/help/issues/186
     jupyter nbextension enable --py widgetsnbextension
+    ## Adding ipyparallel
+    jupyter serverextension enable --py ipyparallel
+    jupyter nbextension install --py ipyparallel
+    jupyter nbextension enable --py ipyparallel
 
     ## Adding virtual environemtn to jupyter
     ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
@@ -217,7 +260,14 @@ then
     if [ ! -f ${VENV_SRC}/${TAR_PYCUDA} ]
     then
 	echo "Downloading pycuda source:..."
-	wget -P ${VENV_SRC} ${WGET_PYCUDA}
+	if((ISTHERE_WGET))
+	then
+	    wget -P ${VENV_SRC} ${WGET_PYCUDA}	    
+	elif((ISTHERE_CURL))
+	then
+	    mkdir ${VENV_SRC}
+	    curl -o ${VENV_SRC}/${TAR_PYCUDA} ${WGET_PYCUDA}
+	fi
 	echo "Done (Downloading pycuda source)"
     fi
     
@@ -256,7 +306,14 @@ then
     if [ ! -f ${VENV_SRC}/${TAR_PYOPENCL} ]
     then
 	echo "Downloading pyopencl source:..."
-	wget -P ${VENV_SRC} ${WGET_PYOPENCL}
+	if((ISTHERE_WGET))
+	then
+	    wget -P ${VENV_SRC} ${WGET_PYOPENCL}
+	elif((ISTHERE_CURL))
+	then	    
+	    mkdir ${VENV_SRC}
+	    curl -o ${VENV_SRC}/${TAR_PYOPENCL} ${WGET_PYOPENCL}	    
+	fi
 	echo "Done (Downloading pyopencl source)"
     fi
     
@@ -310,7 +367,8 @@ echo
 for((ALIAS_I=0; ALIAS_I<${#IDPY_ALIASES[@]}; ALIAS_I++))
 do
     ALIAS_STRING=${IDPY_ALIASES[ALIAS_I]}
-    ALIAS_CHECK=$(grep "${ALIAS_STRING}" ${HOME}/.bashrc \
+    ALIAS_STRING_SED=${IDPY_ALIASES_SED[ALIAS_I]}    
+    ALIAS_CHECK=$(grep "${ALIAS_STRING_SED}" ${HOME}/.bashrc \
 			1>/dev/null 2>/dev/null && echo 1 || echo 0)
 
     if((${ALIAS_CHECK} == 0))
@@ -322,7 +380,7 @@ do
 	    read -p "Would you like to append an this alias to your ${HOME}/.bashrc? (Y/N) " yn
 	    case ${yn} in
 		[Yy]* ) ALIAS_REPLY=1; break;;
-		[Nn]* ) exit;;
+		[Nn]* ) break;;
 		* ) echo "Please answer yes or no";;
 	    esac
 	done

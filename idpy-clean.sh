@@ -203,7 +203,7 @@ for((ALIAS_I=0; ALIAS_I<${#IDPY_ALIASES[@]}; ALIAS_I++))
 do
     ALIAS_STRING=${IDPY_ALIASES[ALIAS_I]}
     ALIAS_STRING_SED=${IDPY_ALIASES_SED[ALIAS_I]}
-    ALIAS_CHECK=$(grep "${ALIAS_STRING}" ${HOME}/.bashrc \
+    ALIAS_CHECK=$(grep "${ALIAS_STRING_SED}" ${HOME}/.bashrc \
 			1>/dev/null 2>/dev/null && echo 1 || echo 0)
     if((${ALIAS_CHECK} == 1))
     then
