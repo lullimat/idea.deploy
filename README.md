@@ -66,6 +66,6 @@ Clearly, I am willing to collaborate with those researchers who would like to po
 ## To do (short-term)
 At the moment the scripts can create a python virtual environment only for Linux and MacOS: no testing of the **idpy-init.sh** and **idpy-clean.sh** has been performed so far on Windows Linux Subsystem. Most probably the best approach will be to rewrite the above scripts in python so that they will be Os independent. However, quite a few implementation details depend on the operative system, especially as far as compilers are concerned, e.g. escaping spaces when passing options flags and so on.
 
-Matteo Lulli, July 2nd 2021
+Matteo Lulli, December 31st 2021
 matteo.lulli@gmail.com
 [www.lullimat.org](https://www.lullimat.org)
