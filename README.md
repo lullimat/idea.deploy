@@ -22,9 +22,13 @@ For reproducing the papers results please look below in the **Installation** Sec
 - arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
 - github link: [https://github.com/lullimat/arXiv-2105.08772](https://github.com/lullimat/arXiv-2105.08772)
 
+### **Mesoscale Modelling of the Tolman Length in Multi-component Systems**
+- arXiv link: [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574)
+- github link: [https://github.com/lullimat/arXiv-2112.02574.git](https://github.com/lullimat/arXiv-2112.02574.git)
+
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
-For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina.
+For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina/Big Sur/Monterey for both Intel and M1 machines.
 
 At the moment the main code base for the project is written in python and it heavily relies, among other modules, on PyCUDA [(https://documen.tician.de/pycuda/)](https://documen.tician.de/pycuda/), PyOpenCL [(https://documen.tician.de/pyopencl/)](https://documen.tician.de/pyopencl/) and numpy [(https://numpy.org)](https://numpy.org). In order to keep the user computer as clean as possible a python virtual environment is created through the script **idpy-init.sh** and the necessary dependencies downloaded and installed. PyCUDA and PyOpenCL are both compiled from source when possible. The python environment and the other optional system modifications (like new aliases in the .bashrc) can be cleaned by using the script **idpy-clean.sh**. Since erasing files must be taken with care, each "rm" command is executed only after the user reviews the files/directories that will be removed (please check the terms of the license). The purpose is to fully clean the changes performed by the use of **idpy-init.sh**
 
