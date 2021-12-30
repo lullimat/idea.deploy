@@ -67,6 +67,15 @@ class IdpyPapers:
              "doi": "", "doi-dir": "",
              "git": "https://github.com/lullimat/arXiv-2105.08772.git"}
 
+        self.arxiv_papers['arXiv-2112.02574'] = \
+            {"Title": "Mesoscale Modelling of the Tolman Length in Multi-component Systems",
+             "Authors": ["Matteo Lulli", "Luca Biferale",
+                         "Giacomo Falcucci", "Mauro Sbragaglia",
+                         "Xiaowen Shan"],
+             "doi": "", "doi-dir": "",
+             "git": "https://github.com/lullimat/arXiv-2112.02574.git"}
+        
+
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
 
