@@ -30,7 +30,7 @@ Provides a database for cloning the published papers
 '''
 
 from collections import defaultdict
-import subprocess
+import subprocess, os
 
 class IdpyPapers:
     def __init__(self):
@@ -43,7 +43,10 @@ class IdpyPapers:
     def ShowPapers(self):
         print("The repositories related to these papers can be cloned")
         for key in self.arxiv_papers:
-            print("['" + key +"']", self.arxiv_papers[key]["Title"])
+            print("['" + key +"']",
+                  self.arxiv_papers[key]["Title"],
+                  "-- doi: " + self.arxiv_papers[key]["doi"]
+                  if self.arxiv_papers[key]["doi"] != "" else "")
             print()
 
     def SetPapers(self):
@@ -52,7 +55,8 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia",
                          "Xiaowen Shan"],
-             "doi": "https://doi.org/10.1103/PhysRevE.103.063309",
+             "doi": "10.1103/PhysRevE.103.063309",
+             "doi-dir": "doi-10.1103-PhysRevE.103.063309",
              "git": "https://github.com/lullimat/arXiv-2009.12522.git"}
         
         self.arxiv_papers['arXiv-2105.08772'] = \
@@ -60,7 +64,7 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia",
                          "Xiaowen Shan"],
-             "doi": "",
+             "doi": "", "doi-dir": "",
              "git": "https://github.com/lullimat/arXiv-2105.08772.git"}
 
         self.arxiv_papers['arXiv-2112.02574'] = \
@@ -68,11 +72,17 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia",
                          "Xiaowen Shan"],
-             "doi": "",
+             "doi": "", "doi-dir": "",
              "git": "https://github.com/lullimat/arXiv-2112.02574.git"}
         
+
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
+
+    def SymLink(self, key):
+        if self.arxiv_papers[key]['doi'] != "":
+            print("Creating symlink to:", self.arxiv_papers[key]['doi-dir'])
+            os.symlink(key, self.arxiv_papers[key]['doi-dir'])
 
 if __name__ == "__main__":
     print("Welcome!")
@@ -86,6 +96,9 @@ if __name__ == "__main__":
     if key in idpy_papers.arxiv_papers:
         print("Cloning the repository...")
         idpy_papers.GitClone(key)
+        print()
+        idpy_papers.SymLink(key)
+        
     else:
         raise Exception(key, "not present in the data base!")
         
