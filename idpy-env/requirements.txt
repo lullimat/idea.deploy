@@ -1,3 +1,5 @@
+appdirs
+pytools
 scipy
 numpy
 sympy
@@ -17,3 +19,5 @@ requests
 ## Thanks!
 ## https://stackoverflow.com/questions/58473837/plotly-missing-orca
 kaleido
+ipyparallel
+py-cpuinfo
