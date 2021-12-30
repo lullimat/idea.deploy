@@ -3,7 +3,7 @@
 **Changes are being pushed quite frequently. Please, keep on checking for updates.**
 
 1. **The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772) "A Mesoscale Perspective on the Tolman Length" is ready!**
-2. **The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574) "Mesoscale Modelling of the Tolman Length in Multi-component Systems" is ready! The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal ```git checkout devel``` before using it.**
+2. **The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574) "Mesoscale Modelling of the Tolman Length in Multi-component Systems" is ready! The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal from the root directory of 'idea.deploy' the command ```git checkout devel``` before using it.**
 
 Thanks for passing by! If you are visiting this repository it is likely because of the first two preprints making use of it (see below).
 
