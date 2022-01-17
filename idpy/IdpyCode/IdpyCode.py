@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -83,7 +83,7 @@ class IdpyKernel:
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  gthread_id_code = 'g_tid', lthread_id_code = 'l_tid',
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
-                 optimizer_flag = None, declare_types = None,
+                 optimizer_flag = None, declare_types = None, declare_macros = None,
                  headers_files = None, include_dirs = None,
                  definitions_files = None, objects_files = None):
 
@@ -110,6 +110,10 @@ class IdpyKernel:
         self.declare_types = 'typedef' if declare_types is None else declare_types
         if self.declare_types not in ['typedef', 'macro']:
             raise Exception("declare_types must be either 'typedef' or 'macro'")
+
+        self.declare_macros = 'header' if declare_macros is None else declare_macros
+        if self.declare_macros not in ['header', 'macro']:
+            raise Exception("declare_macros must be either 'header' or 'macro'")
         
         self.headers_files = headers_files
         self.declarations = {}
@@ -127,6 +131,11 @@ class IdpyKernel:
         self.kernels_qualifiers = KernQualif()
         self.AddrQ = AddrQualif()
 
+        '''
+        List of variables and constants for metaprogramming
+        '''
+        self.declared_variables, self.declared_constants = [[]], [[]]
+
         # Code Flags
         self.code_flags = defaultdict(dict)
         self.InitCodeFlags()
@@ -140,13 +149,29 @@ class IdpyKernel:
         if len(self.functions) == 0:
             for f_class in self.f_classes:
                 self.functions.append(f_class(custom_types = self.custom_types))
-        
+
+    def SetDeclaredConstants(self):
+        for const in self.constants:
+            self.declared_constants[0] += [const]
+        for param in self.params:
+            if 'const' in self.params[param]:
+                self.declared_constants[0] += [param.split(' ')[-1]]
+
+    def SetDeclaredVariables(self):
+        for param in self.params:
+            if 'const' not in self.params[param]:
+                '''
+                The name of the variable is supposed to be last
+                '''
+                self.declared_variables[0] += [param.split(' ')[-1]]
+                
     def SetMacros(self, lang = None):
         if lang == CUDA_T:
             self.macros = []
             # Constants
             for const in self.constants:
                 self.macros.append("-D " + const + "=" + str(self.constants[const]))
+                
             # Types
             if self.declare_types == 'macro':
                 for c_type in self.custom_types:
@@ -163,6 +188,7 @@ class IdpyKernel:
             # Constants
             for const in self.constants:
                 self.macros += (" -D " + const + "=" + str(self.constants[const]))
+                
             # Types
             # https://stackoverflow.com/questions/13531100/escaping-space-in-opencl-compiler-arguments
             if self.declare_types == 'macro':
@@ -281,6 +307,14 @@ class IdpyKernel:
         
         return _swap
 
+    def DeclareMacros(self):
+        _swap = ''
+        for c_macro in self.constants:
+            _swap  += '#define ' + c_macro + ' ' + str(self.constants[c_macro]) + '\n'
+        _swap += '\n'
+        
+        return _swap    
+
     def IncludeHeaders(self):
         _swap = ''
         for _h_file in self.headers_files:
@@ -295,6 +329,9 @@ class IdpyKernel:
         # Inserting headers
         if self.headers_files is not None:
             self.code += self.IncludeHeaders()
+        # Inserting macros
+        if self.declare_macros == 'header':
+            self.code += self.DeclareMacros()
         # Inserting types
         if self.declare_types == 'typedef':
             self.code += self.DeclareTypes()
@@ -349,7 +386,8 @@ class IdpyKernel:
             Still not completely sure why I need to fall back on PyOpenCL automatic choice
             of workgroup size when using CPUs, at least on MacOS
             '''
-            block = block if tenet.kind == OpenCL.GPU_T else None 
+            block = block if tenet.kind == OpenCL.GPU_T else None
+            ##block = None
 
             class Idea:
                 def __init__(self, k_dict = None):
