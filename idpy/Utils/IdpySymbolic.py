@@ -31,6 +31,8 @@ Provides some functions and classes for symbolic manipulations
 
 import sympy as sp
 from functools import reduce
+from idpy.Utils.Geometry import FlipVector, IsSameVector
+from idpy.Utils.Statements import AllTrue
 
 '''
 Function MergeTuples:
@@ -148,9 +150,29 @@ Still under active development
 class SymmetricTensor:
     '''
     This class assumes that only the indices i <= j <= k ... are passed'''
-    def __init__(self, c_dict = None, d = None, rank = None):
+    def __init__(self, c_dict = None, list_values = None, list_ttuples = None,
+                 d = None, rank = None):
+
+        if c_dict is None and list_values is None and list_ttuples is None:
+            raise Exception("Missing arguments: either 'c_dict' or 'list_values' and 'list_ttuples'")
+        elif c_dict is None and (list_values is None or list_ttuples is None):
+            raise Exception("Missing argument: either 'list_values' or 'list_ttuples'")        
+        if c_dict is not None and (list_values is not None or list_ttuples is not None):
+            raise Exception("Arguments conflict: either 'c_dict' or 'list_values' and 'list_ttuples'")
+        
         self.d, self.rank = d, rank
-        self.c_dict = c_dict
+        if c_dict is not None:
+            self.c_dict = c_dict
+        else:
+            self.c_dict = dict(zip(list_ttuples, list_values))
+            
+        self.shape = self.set_shape()
+
+    def set_shape(self):
+        _key_0 = list(self.c_dict)[0]
+        _shape = (0 if not hasattr(self.c_dict[_key_0], 'shape') else
+                  self.c_dict[_key_0].shape)
+        return _shape
         
     def __getitem__(self, _index):
         if isinstance(_index, slice):
@@ -162,6 +184,95 @@ class SymmetricTensor:
                 _index = tuple(_index)
                 
             return self.c_dict[_index]
-        
+
+    '''
+    Implements a full contraction among fully-symmetric tensors
+    '''
     def __mul__(self, _b):
-        pass
+        if _b.d != self.d:
+            raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+                            self.d, _b.d)
+        if _b.rank != self.rank:
+            raise Exception('Ranks of the two SymmetricTensor differ!',
+                            self.rank, _b.rank)
+
+        _largest_shape = 0
+        _shapes = [self.shape, _b.shape]
+        _shapes_types = [type(self.shape), type(_b.shape)]
+        _largest_shape = None
+
+        _product, _symt_out = None, False
+        if int in _shapes_types and tuple in _shapes_types:
+            _product = lambda x, y: x * y
+            for _i, _ in enumerate(_shapes_types): 
+                if _ == tuple:
+                    _largest_shape = _shapes[_i]
+        elif AllTrue([_ == tuple for _ in _shapes_types]):
+            _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
+            _symt_out = True
+            if self.shape != _b.shape:
+                raise Exception("Cannot perform the element-wise product")
+        '''
+        Full contraction
+        '''
+        _contraction = sp.Matrix([0] * _largest_shape[0])
+        ##for _tuple in TaylorTuples(list(range(self.d)), self.rank):
+        for _tuple in self.c_dict:
+            _is_symmetric_tuple = True
+            if type(_tuple) == tuple and len(_tuple):
+                _flip_tuple = FlipVector(_tuple)
+                _is_symmetric_tuple = IsSameVector(_tuple, _flip_tuple)
+            '''
+            need to check the shapes in case of sympy matrices, 
+            or if one of the two is a a scalar and the apply the elemntwise product
+            even though I do not need it for now...
+            '''
+            if _is_symmetric_tuple:
+                _contraction += _product(self[_tuple], _b[_tuple])
+            else:
+                _contraction += sp.factorial(self.rank) * _product(self[_tuple], _b[_tuple])
+
+        return (_contraction if not _symt_out else
+                SymmetricTensor(c_dict = {0: _contraction}, d = self.d, rank = 0))
+
+        """
+        else:
+            _product, _swap_dict = 1, {}
+            for _tuple in self.c_dict:
+                _swap_dict[_tuple] = _b * self[_tuple]
+            return SymmetricTensor(c_dict = _swap_dict, d = self.d, rank = self.rank)
+        """
+
+    def __add__(self, _b):
+        if _b.__class__.__name__ != self.__class__.__name__:
+            raise Exception('Summation is only defined between SymmetricTensor(s)')
+        
+        if _b.d != self.d:
+            raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+                            self.d, _b.d)
+        if _b.rank != self.rank:
+            raise Exception('Ranks of the two SymmetricTensor differ!',
+                            self.rank, _b.rank)
+
+        _largest_shape = 0
+        _shapes = [self.shape, _b.shape]
+        _shapes_types = [type(self.shape), type(_b.shape)]
+        _largest_shape = None
+
+        if int in _shapes_types and tuple in _shapes_types:
+            _product = lambda x, y: x * y
+            for _i, _ in enumerate(_shapes_types): 
+                if _ == tuple:
+                    _largest_shape = _shapes[_i]
+        elif AllTrue([_ == tuple for _ in _shapes_types]):
+            if self.shape != _b.shape:
+                raise Exception("Cannot perform the element-wise product")
+        
+        '''
+        Summation
+        '''
+        _sum_dict = {}
+        for _key in self.c_dict:
+            _sum_dict[_key] = self[_key] + _b[_key]
+
+        return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
