@@ -99,17 +99,17 @@ IDStencils['LBM']['SC_D2E8'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
                                        sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040)), 
                                 'e2': 1}
 
-IDStencils['LBM']['D3E4'] = {'XIs': ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
-                                     (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
-                                     (0, 1, 1), (0, -1, 1), (0, -1, -1), (0, 1, -1),
-                                     (1, 0, 1), (1, 0, -1), (-1, 0, -1), (-1, 0, 1)),
-                             'Ws': (sp.Rational(1, 6), sp.Rational(1, 6), sp.Rational(1, 6), sp.Rational(1, 6),
-                                    sp.Rational(1, 6), sp.Rational(1, 6),
-                                    sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12),
-                                    sp.Rational(1, 12), sp.Rational(1, 12),
-                                    sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12),
-                                    sp.Rational(1, 12), sp.Rational(1, 12)), 
-                             'e2': 1}
+IDStencils['LBM']['SC_D3E4'] = {'XIs': ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+                                        (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
+                                        (0, 1, 1), (0, -1, 1), (0, -1, -1), (0, 1, -1),
+                                        (1, 0, 1), (1, 0, -1), (-1, 0, -1), (-1, 0, 1)),
+                                'Ws': (sp.Rational(1, 6), sp.Rational(1, 6), sp.Rational(1, 6), sp.Rational(1, 6),
+                                       sp.Rational(1, 6), sp.Rational(1, 6),
+                                       sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12),
+                                       sp.Rational(1, 12), sp.Rational(1, 12),
+                                       sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12),
+                                       sp.Rational(1, 12), sp.Rational(1, 12)), 
+                                'e2': 1}
 
 
 from idpy.IdpyCode.IdpyUnroll import _get_single_neighbor_pos_macro_fully_sym
