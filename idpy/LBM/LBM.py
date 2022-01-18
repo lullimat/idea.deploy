@@ -478,6 +478,27 @@ class RootLB(IdpySims):
             self.sims_vars['W_list'], self.sims_vars['c2'] = \
                 InitStencilWeights(xi_stencil, custom_types)
 
+        '''
+        Defining ordering lambdas for populations and velocity
+        '''
+        self.sims_vars['ordering_lambdas'] = \
+            defaultdict(
+                lambda: defaultdict(dict)
+            )
+
+        self.sims_vars['ordering_lambdas']['gpu']['pop'] = \
+            lambda pos, q: str(pos) + ' + ' + str(q) +  ' * V'
+        self.sims_vars['ordering_lambdas']['cpu']['pop'] = \
+            lambda pos, q: str(q) + ' + ' + str(pos) +  ' * Q'
+        
+        self.sims_vars['ordering_lambdas']['gpu']['u'] = \
+            lambda pos, d: str(pos) + ' + ' + str(d) +  ' * V'
+        self.sims_vars['ordering_lambdas']['cpu']['u'] = \
+            lambda pos, d: str(d) + ' + ' + str(pos) +  ' * DIM'
+        
+        '''
+        Defining Constants
+        '''
         self.constants = {'V': self.sims_vars['V'],
                           'Q': self.sims_vars['Q'],
                           'DIM': self.sims_vars['DIM'],
@@ -522,6 +543,11 @@ class RootLB(IdpySims):
     def DumpPopSnapshot(self, file_name = RootLB_Dump_def_name):
         IdpySims.DumpSnapshot(self, file_name = file_name,
                               custom_types = self.custom_types)
+
+    def GetDensityField(self):
+        _n_swap = self.sims_idpy_memory['n'].D2H()
+        _n_swap = _n_swap.reshape(np.flip(self.sims_vars['dim_sizes']))
+        return _n_swap
 
 class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
