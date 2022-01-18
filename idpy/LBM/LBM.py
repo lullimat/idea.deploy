@@ -431,8 +431,13 @@ def InitFStencilWeights(f_stencil, custom_types):
     and the square of the sound speed c2
     all types are cast to the appropriate np type
     '''
-    EQ = len(f_stencil['Es'])
-    E_list = [x for e in f_stencil['Es'] for x in e]
+    if 'Es' in f_stencil:
+        EQ = len(f_stencil['Es'])
+        E_list = [x for e in f_stencil['Es'] for x in e]
+    if 'XIs' in f_stencil:
+        EQ = len(f_stencil['XIs'])
+        E_list = [x for e in f_stencil['XIs'] for x in e]
+        
     E_list = np.array(E_list, NPT.C[custom_types['SType']])
     EW_list = np.array(f_stencil['Ws'], NPT.C[custom_types['WType']])
     return EQ, E_list, EW_list
