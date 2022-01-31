@@ -70,6 +70,9 @@ class Tenet(cl.CommandQueue):
     def SetKind(self, kind):
         self.kind = kind
 
+    def GetKind(self):
+        return self.kind
+
     def SetDeviceName(self, device_name):
         self.device_name = device_name
 
@@ -110,6 +113,9 @@ class TenetNew:
     def SetKind(self, kind):
         self.kind = kind
 
+    def GetKind(self):
+        return self.kind
+        
     def SetDeviceName(self, device_name):
         self.device_name = device_name
 
