@@ -26,6 +26,7 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 import numpy as np
+import sympy as sp
 import os
 
 from idpy.Utils.NpTypes import NpTypes
@@ -35,6 +36,14 @@ from idpy.IdpyCode import GetParamsClean, GetTenet
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
 from idpy.IdpyCode import idpy_langs_sys, idpy_tenet_types
+
+from idpy.IdpyCode.IdpyUnroll import _codify_newl, _codify_comment
+from idpy.IdpyCode.IdpyUnroll import _codify_assignment, _codify_add_assignment
+from idpy.IdpyCode.IdpyUnroll import _codify_declaration_const_check
+from idpy.IdpyCode.IdpyUnroll import _check_declared_variables_constants
+from idpy.IdpyCode.IdpyUnroll import _check_needed_variables_constants
+from idpy.IdpyCode.IdpyUnroll import _check_lambda_args, _array_value
+from idpy.IdpyCode.IdpyUnroll import _codify_assignments, _codify_assignment_type_check
 
 if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
@@ -137,9 +146,13 @@ class CRNGS(IdpySims):
         Setting device function CRNG through a macro
         '''
         if self.sims_vars['kind'] == 'MINSTD':
-            self.F_CRNG = F_MINSTD
-            self.constants['F_CRNG'] = 'F_MINSTD'
-            
+            if self.params_dict['fp64']:
+                self.F_CRNG = F_MINSTD
+                self.constants['F_CRNG'] = 'F_MINSTD'
+            else:
+                self.F_CRNG = F_MINSTD32
+                self.constants['F_CRNG'] = 'F_MINSTD32'
+                
         if self.sims_vars['kind'] == 'NUMREC':
             self.F_CRNG = F_NUMREC
             self.constants['F_CRNG'] = 'F_NUMREC'
@@ -198,7 +211,7 @@ class CRNGS(IdpySims):
         if 'n_prngs' not in self.params_dict:
             self.params_dict['n_prngs'] = 1
         if 'optimizer_flag' not in self.params_dict:
-            self.optimizer_flag = False
+            self.optimizer_flag = True
         else:
             self.optimizer_flag = self.params_dict['optimizer_flag']
 
@@ -222,13 +235,13 @@ class CRNGS(IdpySims):
             if self.tenet.device.get_info(cl.device_info.DOUBLE_FP_CONFIG) == 0:
                 self.params_dict['fp64'] = False
                 
-                if self.params_dict['kind'] in ['MINSTD', 'MMIX']:
+                if self.params_dict['kind'] in ['MMIX']:
                     print("The device",
                           self.tenet.device.get_info(cl.device_info.NAME),
                           "does not support 64-bits integers needed by",
                           self.params_dict['kind'])
-                    print("Switching CRNG kind to 'NUMREC'")
-                    self.params_dict['kind'] = 'NUMREC'                    
+                    print("Switching CRNG kind to 'MINSTD'")
+                    self.params_dict['kind'] = 'MINSTD'                    
 
         IdpySims.__init__(self, *args, **self.kwargs)
 
@@ -495,8 +508,576 @@ class CRNGS(IdpySims):
             _outputs += [np.copy(self.sims_idpy_memory['output'].D2H())]
             
         return np.array(_outputs)
+
+'''
+Meta-Programming functions
+'''
+def _codify_declare_MINSTD32_swap(declared_variables = None, declared_constants = None,
+                                  root_hi = 'hi', root_lo = 'lo'):
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _swap_code = """"""
+    _swap_code += _codify_comment("Possibly declaring hi & lo variables for MINSTD 32-bits")
+    _swap_code += \
+        _codify_declaration_const_check(root_hi, 0, 'CRNGType',
+                                        declared_variables,
+                                        declared_constants)
+    _swap_code += \
+        _codify_declaration_const_check(root_lo, 0, 'CRNGType',
+                                        declared_variables,
+                                        declared_constants)
+    _swap_code += _codify_newl
+
+    return _swap_code
+
+def _codify_MINSTD32(declared_variables = None, declared_constants = None,
+                     root_seed = 'lseed', root_hi = 'hi', root_lo = 'lo'):
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed], declared_variables, declared_constants)
+
+    _swap_code = """"""
+    _swap_code += \
+        _codify_declare_MINSTD32_swap(
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            root_hi = root_hi, root_lo = root_lo
+        )
+
+    _swap_code += _codify_comment("MINSTD PRNG; 32-bits implementation")
+    _swap_code += _codify_assignment(root_lo,
+                                     '16807*(' + root_seed + '&0xffff)')
+    _swap_code += _codify_assignment(root_hi,
+                                     '16807*(' + root_seed + '>>16)')
+    _swap_code += _codify_add_assignment(root_lo, '(' + root_hi + '&0x7fff)<<16')
+    _swap_code += _codify_add_assignment(root_lo, root_hi + '>>15')
+
+    if False:
+        _swap_code += \
+            _codify_assignment(
+                root_seed, '((lo & 0x80000000)>>31) * (lo - 0x7fffffff)'
+            )
+        _swap_code += \
+            _codify_add_assignment(
+                root_seed, '((lo ^ 0x80000000)>>31) * lo'
+            )
+
+    if True:
+        _swap_code += \
+            _codify_assignment(
+                root_seed,
+                root_lo + ' - ((-((' + root_lo + '&0x80000000)>>31))&0x7fffffff)'
+            )
+        _swap_code += _codify_newl
+
+    return _swap_code
+
+def _codify_declare_MINSTD_swap(declared_variables = None, declared_constants = None,
+                                root_swap = 'minstd_swap'):
+    _check_declared_variables_constants(declared_variables, declared_constants)    
+    _swap_code = """"""
+    _swap_code += _codify_comment("Possibly declaring swap variable for MINSTD 64-bits")
+    _swap_code += \
+        _codify_declaration_const_check(root_swap, 0, 'UINT64',
+                                        declared_variables,
+                                        declared_constants)
+    _swap_code += _codify_newl
+
+    return _swap_code
+
+def _codify_MINSTD(declared_variables = None, declared_constants = None,
+                   root_seed = 'lseed', root_swap = 'minstd_swap'):
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed], declared_variables, declared_constants)
+    
+    _swap_code = """"""
+    _swap_code += \
+        _codify_declare_MINSTD_swap(
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            root_swap = root_swap
+        )
+
+    _swap_code += _codify_comment("MINSTD PRNG; 64-bits implementation")        
+    _swap_code += _codify_assignment(root_swap, '(16807LL) * ' + root_seed)
+    _swap_code += \
+        _codify_assignment(
+            root_seed,
+            '(' + root_swap + '&0x7fffffff) + (' + root_swap + '>>31)'
+        )
+
+    _swap_code += \
+        'if(' + root_seed + '&0x80000000){' + _codify_newl + \
+        _codify_assignment(
+            root_seed, '(' + root_seed + '&0x7fffffff) + 1'
+        ) + _codify_newl + \
+        '}'
+    _swap_code += _codify_newl
+
+    return _swap_code
+
+def _codify_NUMREC(declared_variables = None, declared_constants = None,
+                   root_seed = 'lseed'):
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed], declared_variables, declared_constants)
+
+    _swap_code = """"""
+    _swap_code += _codify_comment("Numerical Recipes PRNG; 32-bits implementation")    
+    _swap_code += _codify_assignment(root_seed, root_seed + ' * 1664525U + 1013904223U')
+    _swap_code += _codify_newl
+
+    return _swap_code
+
+def _codify_MMIX(declared_variables = None, declared_constants = None,
+                 root_seed = 'lseed'):
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed], declared_variables, declared_constants)
+
+    _swap_code = """"""
+    _swap_code += _codify_comment("MMIX PRNG; 64-bits implementation")    
+    _swap_code += \
+        _codify_assignment(
+            root_seed,
+            root_seed + ' * 6364136223846793005LLU + 1442695040888963407LLU'
+        )
+    _swap_code += _codify_newl
+
+    return _swap_code
+
+_codify_CRNGS = {'MMIX': _codify_MMIX, 'NUMREC': _codify_NUMREC,
+                 'MINSTD': _codify_MINSTD, 'MINSTD32': _codify_MINSTD32}
+_codify_CRNGS_list = list(_codify_CRNGS.keys())
+
+def _codify_flat(declared_variables = None, declared_constants = None,
+                 root_seed = 'lseed', root_flat = 'lflat',
+                 crng_kind = None, rand_type = 'RANDType',
+                 const_out = False):
+    
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+                                      declared_variables, declared_constants)
+    if crng_kind is None:
+        raise Exception("Missing argument 'crng_kind' !")
+    if crng_kind not in _codify_CRNGS_list:
+        raise Exception("Argument 'crng_kind' must be in the list", _codify_CRNGS_list)
+    
+    _swap_code = """"""
+    _swap_code += _codify_comment("Generating flat distribution random number")
+    _swap_code += _codify_newl
+    _swap_code += _codify_comment("Invoking the PRNG")
+    _swap_code += \
+        _codify_CRNGS[crng_kind](
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            root_seed = root_seed
+        )
+    _swap_code += _codify_comment("Possibly declaring swap flat variable")
+    _swap_code += \
+        _codify_declaration_const_check(
+            root_flat,
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX - 1))',
+            rand_type,
+            declared_variables,
+            declared_constants,
+            const_out
+        )
+    _swap_code += _codify_newl
+    
+    return _swap_code
+
+def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
+                          root_seed = 'lseed', root_flat = 'lflat',
+                          assignment_type = None,
+                          crng_kind = None, rand_type = 'RANDType',
+                          mean = sp.Rational(1, 2), var = sp.Rational(1, 12),
+                          const_out = False):
+    
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+                                      declared_variables, declared_constants)
+    if crng_kind is None:
+        raise Exception("Missing argument 'crng_kind' !")
+    if crng_kind not in _codify_CRNGS_list:
+        raise Exception("Argument 'crng_kind' must be in the list", _codify_CRNGS_list)
+    
+    _swap_code = """"""
+    _swap_code += _codify_comment("Generating flat distribution random number")
+    _swap_code += _codify_comment("Possibly declaring swap flat variable")
+    _swap_code += _codify_comment("Invoking the PRNG")
+    _swap_code += \
+        _codify_CRNGS[crng_kind](
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            root_seed = root_seed
+        )
+    _swap_code += _codify_comment("Generating flat distribution variable")
+
+    _shift = (-sp.Rational(1, 2) + mean).evalf()
+    _delta = (sp.sqrt(12 * var)).evalf()
+
+    _swap_code += \
+        _codify_assignment_type_check(
+            root_flat,
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX - 1) + (' + str(_shift) + \
+            ')) * ' + str(_delta),
+            rand_type,
+            declared_variables,
+            declared_constants,
+            const_out,
+            assignment_type
+        )
+    _swap_code += _codify_newl        
+    
+    return _swap_code
+
+'''
+Generating one Gaussian number from two flat numbers belonging to the same sequence
+'''
+def _codify_gaussian_seq(declared_variables = None, declared_constants = None,
+                         mean = 0, var = 1, which_box_m = 'cos',root_seed = 'lseed',
+                         root_gauss = 'lgauss', assignment_type = None,
+                         root_flat = 'lflat', crng_kind = None, rand_type = 'RANDType',
+                         const_out = False):
+
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed, 'TWOPI'],
+                                      declared_variables, declared_constants)
+    
+    if crng_kind is None:
+        raise Exception("Missing argument 'crng_kind' !")
+    if crng_kind not in ['MINSTD', 'MINSTD32', 'NUMREC', 'MMIX']:
+        raise Exception(
+            "Argument 'crng_kind' must be in the list ['MINSTD', 'MINSTD32', 'NUMREC', 'MMIX']"
+        )
+
+    if which_box_m not in ['cos', 'sin']:
+        raise Exception("Argument 'which_box_m' must be in ['cos', 'sin']")
+
+    _swap_code = """"""
+    _swap_code += \
+        _codify_comment("One Gaussian pseudo-random number from a single uniform distribution")
+    for _i in range(2):
+        _swap_code += \
+            _codify_flat(declared_variables = declared_variables,
+                         declared_constants = declared_constants,
+                         root_seed = root_seed, root_flat = root_flat + '_' + str(_i),
+                         crng_kind = crng_kind, rand_type = rand_type)
+
+    _swap_code += _codify_comment("Possibly declaring swap gaussian variable")    
+    _swap_code += \
+        _codify_comment("Applying Box-Mueller Transform")
+
+    if which_box_m == 'cos':
+        _swap_code += \
+            _codify_assignment_type_check(
+                root_gauss,
+                'sqrt((' + rand_type + ')(-2. * ' + str(var) +
+                ' * log((' + rand_type + ') ' +
+                root_flat + '_0))) * cos((' + rand_type + ')(TWOPI * ' +
+                root_flat + '_1)) + ' + str(mean),
+                rand_type,
+                declared_variables,
+                declared_constants,
+                const_out,
+                assignment_type
+            )
+    else:
+        _swap_code += \
+            _codify_assignment_type_check(
+                root_gauss,
+                'sqrt((' + rand_type + ')(-2. * ' + str(var) +
+                ' * log((' + rand_type + ') ' +
+                root_flat + '_0))) * sin((' + rand_type + ')(TWOPI * ' +
+                root_flat + '_1)) + ' + str(mean),
+                rand_type,
+                declared_variables,
+                declared_constants,
+                const_out,
+                assignment_type
+            )
         
+    return _swap_code
+
+'''
+Generating two Gaussian numbers from two flat numbers from two independent sequences
+'''
+def _codify_gaussian_p(declared_variables = None, declared_constants = None,
+                       mean = 0, var = 1,
+                       root_seeds = ['lseed_0', 'lseed_1'],
+                       root_gauss = 'lgauss', assignment_type = None,
+                       root_flat = 'lflat', crng_kind = None, rand_type = 'RANDType',
+                       const_out = False, single_out = True):
+    
+    _check_declared_variables_constants(declared_variables, declared_constants)
+
+    _check_needed_variables_constants(root_seeds + ['TWOPI'],
+                                      declared_variables, declared_constants)
+    
+    if crng_kind is None:
+        raise Exception("Missing argument 'crng_kind' !")
+    if crng_kind not in ['MINSTD', 'MINSTD32', 'NUMREC', 'MMIX']:
+        raise Exception(
+            "Argument 'crng_kind' must be in the list ['MINSTD', 'MINSTD32', 'NUMREC', 'MMIX']"
+        )
+
+    _swap_code = """"""
+    _swap_code += \
+        _codify_comment("Two Gaussian pseudo-random number from two indep. uniform distributions")
+    for _i, _seed in enumerate(root_seeds):
+        _swap_code += \
+            _codify_flat(declared_variables = declared_variables,
+                         declared_constants = declared_constants,
+                         root_seed = _seed, root_flat = root_flat + '_' + str(_i),
+                         crng_kind = crng_kind, rand_type = rand_type)
+
+    _swap_code += _codify_comment("Possibly declaring swap gaussian variable")    
+    _swap_code += \
+        _codify_comment("Applying Box-Mueller Transform")
+
+    _swap_code += \
+        _codify_assignment_type_check(
+            root_gauss + ('_0' if not single_out else ''),
+            'sqrt((' + rand_type + ')(-2. * ' + str(var) +
+            ' * log((' + rand_type + ') ' +
+            root_flat + '_0))) * cos((' + rand_type + ')(TWOPI * ' +
+            root_flat + '_1)) + ' + str(mean),
+            rand_type,
+            declared_variables,
+            declared_constants,
+            const_out,
+            assignment_type
+        )
+
+    if not single_out:
+        _swap_code += \
+            _codify_assignment_type_check(
+                root_gauss + '_1',
+                'sqrt((' + rand_type + ')(-2. * ' + str(var) +
+                ' * log((' + rand_type + ') ' +
+                root_flat + '_0))) * sin((' + rand_type + ')(TWOPI * ' +
+                root_flat + '_1)) + ' + str(mean),
+                rand_type,
+                declared_variables,
+                declared_constants,
+                const_out,
+                assignment_type                
+            )
         
+    return _swap_code
+
+'''
+Function implementing the reads from an array:
+the lambda_ordering should only have one argument: need to 'prune' a more complex
+lambda before passing
+'''
+def _codify_read_seeds(declared_variables = None, declared_constants = None,
+                       seeds_array = 'seeds_array', root_seed = 'lseed',
+                       n_reads = 1, lambda_ordering = None, use_ptrs = False):
+
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_lambda_args(1, lambda_ordering)
+    _check_needed_variables_constants([seeds_array],
+                                      declared_variables, declared_constants)
+    _swap_code = """"""
+
+    for _i in range(n_reads):
+        _swap_code += \
+            _codify_declaration_const_check(
+                root_seed + '_' + str(_i),
+                _array_value(seeds_array, lambda_ordering(_i), use_ptrs),
+                'CRNGType',
+                declared_variables,
+                declared_constants
+            )            
+    
+    return _swap_code
+'''
+Function implementing the reads from an array:
+the lambda_ordering should only have one argument: need to 'prune' a more complex
+lambda before passing
+'''    
+def _codify_write_seeds(declared_variables = None, declared_constants = None,
+                        seeds_array = 'seeds_array', root_seed = 'lseed',
+                        n_writes = 1, lambda_ordering = None, use_ptrs = False):
+
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_lambda_args(1, lambda_ordering)
+    _check_needed_variables_constants([seeds_array],
+                                      declared_variables, declared_constants)
+    _swap_code = """"""
+
+    for _i in range(n_writes):
+        _swap_code += \
+            _codify_assignment(
+                _array_value(seeds_array, lambda_ordering(_i), use_ptrs),
+                root_seed + '_' + str(_i)
+            )            
+    
+    return _swap_code
+
+'''
+This method should declare all that is needed and check for the seeds array
+In particular I can use this method no matter the approach if I just parametrize it
+in terms of the number of random variables that I need.
+How the random numbers are used is method-specific.
+Hence, I need to pass the variances
+The desired random number can be constants by default
+The specified 'rand_vars_type' must be compatible with 'RANDType'
+'''
+def _codify_n_random_vars(
+        declared_variables = None, declared_constants = None,
+        seeds_array = 'seeds_array', root_seed = 'lseed',
+        rand_vars = None, rand_vars_type = 'RANDType',
+        assignment_type = None,
+        lambda_ordering = None, use_ptrs = False,
+        variances = None, means = None, distribution = 'flat',
+        generator = 'MINSTD32', parallel_streams = 1,
+        output_const = True, which_box_m = None
+):    
+    if distribution not in ['flat', 'gaussian']:
+        raise Exception("Parameter 'distribution' must be in ['flat', 'gaussian']")
+
+    if variances is None:
+        raise Exception("Missing argument 'variances'")
+    if type(variances) != list:
+        raise Exception("Argument 'variances' must be a list")
+
+    if means is None:
+        raise Exception("Missing argument 'means'")
+    if type(means) != list:
+        raise Exception("Argument 'means' must be a list")
+    
+    if rand_vars is None:
+        raise Exception("Missing argument 'rand_vars'")
+    if type(rand_vars) != list:
+        raise Exception("Argument 'rand_vars' must be a list")
+    _n_rand_vars = len(rand_vars)
+
+    if len(variances) != _n_rand_vars:
+        raise Exception("Number of variances and random variables must coincide")
+
+    '''
+    Need to check which is the best option and possibly change it as the default one
+    '''
+    if parallel_streams > 1:
+        if distribution == 'flat' and parallel_streams < _n_rand_vars:
+            raise Exception("Not enough streams for 'flat' distribution: expected", _n_rand_vars)
+        if distribution == 'gaussian' and parallel_streams < _n_rand_vars:
+            raise Exception("Not enough streams for 'gaussian' distribution: expected at least", _n_rand_vars)
+
+    if generator not in _codify_CRNGS_list:
+        raise Exception("Parameter 'generator' must be in", _codify_CRNGS_list)
+
+    if lambda_ordering is None:
+        raise Exception("Missing paramter 'lambda_ordering'")
+
+    '''
+    Setting the flag for the generation of Gaussian numbers using double of single stream each
+    '''
+    _gaussian_parallel = None
+    if distribution == 'gaussian':
+        _gaussian_parallel = True if parallel_streams == 2 * _n_rand_vars else False
+        if which_box_m is None and not _gaussian_parallel:
+            which_box_m = 'cos'
+    
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([seeds_array],
+                                      declared_variables, declared_constants)
+
+    _swap_code = """"""
+    _swap_code += _codify_comment("Reading prng seeds")
+    _swap_code += \
+        _codify_read_seeds(
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            seeds_array = seeds_array, root_seed = root_seed,
+            n_reads = parallel_streams,
+            lambda_ordering = lambda_ordering,
+            use_ptrs = use_ptrs
+        )
+    _swap_code += _codify_newl
+    _swap_code += _codify_newl    
+
+    if distribution == 'flat':
+        for _i, _rv in enumerate(rand_vars):
+            _swap_code += _codify_comment("--------------------------------")
+            _swap_code += _codify_comment("GENERATING VALUE FOR " + str(_rv))
+            _i_seed = _i if parallel_streams > 1 else 0
+            _swap_code += \
+                _codify_flat_mean_var(
+                    declared_variables = declared_variables,
+                    declared_constants = declared_constants,
+                    root_seed = root_seed + '_' + str(_i_seed),
+                    root_flat = _rv,
+                    assignment_type = assignment_type,
+                    crng_kind = generator,
+                    rand_type = rand_vars_type,
+                    mean = means[_i],
+                    var = variances[_i],
+                    const_out = output_const
+                )
+            _swap_code += _codify_newl
+        _swap_code += _codify_newl
+
+    if distribution == 'gaussian':
+        if _gaussian_parallel:
+            for _i, _rv in enumerate(rand_vars):
+                _swap_code += _codify_comment("--------------------------------")
+                _swap_code += _codify_comment("GENERATING VALUE FOR " + str(_rv))
+                _swap_code += \
+                    _codify_gaussian_p(
+                        declared_variables = declared_variables,
+                        declared_constants = declared_constants,
+                        mean = means[_i],
+                        var = variances[_i],
+                        root_seeds = ['lseed_' + str(_i * 2),
+                                      'lseed_' + str(_i * 2 + 1)],
+                        root_gauss = _rv,
+                        assignment_type = assignment_type,                        
+                        root_flat = 'lflat',
+                        crng_kind = generator,
+                        rand_type = rand_vars_type,
+                        const_out = output_const,
+                        single_out = True
+                    )
+                _swap_code += _codify_newl
+            _swap_code += _codify_newl
+
+        if not _gaussian_parallel:
+            for _i, _rv in enumerate(rand_vars):
+                _i_seed = _i if parallel_streams > 1 else 0
+                _swap_code += _codify_comment("--------------------------------")
+                _swap_code += _codify_comment("GENERATING VALUE FOR " + str(_rv))
+                _swap_code += \
+                    _codify_gaussian_seq(
+                        declared_variables = declared_variables,
+                        declared_constants = declared_constants,
+                        mean = means[_i],
+                        var = variances[_i],
+                        which_box_m = which_box_m,
+                        root_seed = root_seed + '_' + str(_i_seed),
+                        root_gauss = _rv,
+                        assignment_type = assignment_type,                        
+                        root_flat = 'lflat',
+                        crng_kind = generator,
+                        rand_type = rand_vars_type,
+                        const_out = output_const
+                    )
+                _swap_code += _codify_newl
+            _swap_code += _codify_newl
+                
+    _swap_code += _codify_comment("Writing back prng seeds")                
+    _swap_code += \
+        _codify_write_seeds(
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            seeds_array = seeds_array, root_seed = root_seed,
+            n_writes = parallel_streams,
+            lambda_ordering = lambda_ordering,
+            use_ptrs = use_ptrs
+        )
+    
+    return _swap_code
+
+
 '''
 Generic Kernels
 '''
@@ -708,10 +1289,30 @@ class F_MINSTD(IdpyFunction):
         self.functions[IDPY_T] = """
         UINT64 swap = (16807LL) * (*l_seed);
         *l_seed = (swap & 0x7fffffff) + (swap >> 31);
-        if((*l_seed) & 0x80000000) *l_seed = ((*l_seed) & 0x70000000) + 1;
+        if((*l_seed) & 0x80000000) *l_seed = ((*l_seed) & 0x7fffffff) + 1;
         return;
         """
 
+class F_MINSTD32(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'void'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        '''
+        l_seed: local seed
+        the idea is to manually read and write the seed from the global memory
+        at the beginning and at the end of each kernel so that internal loops
+        can take advantage of it rather than reapting useless storage operations
+        '''
+        self.params = {'CRNGType * l_seed': []}
+        
+        self.functions[IDPY_T] = """
+        CRNGType lo = 16807*((*lseed)&0xffff);
+        CRNGType hi = 16807*((*lseed)>>16);
+        lo += (hi&0x7fff)<<16;
+        lo += hi>>15;
+        *lseed = lo - ((-((lo&0x80000000)>>31))&0x7fffffff);
+        return;
+        """
+        
 class F_NUMREC(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'void'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
