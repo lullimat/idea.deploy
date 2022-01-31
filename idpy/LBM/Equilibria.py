@@ -63,13 +63,24 @@ class HermiteEquilibria:
         )
 
     def GetHigherOrderSymmetricUTensor(self, order):
-        _taylor_tuples = TaylorTuples(list(self.u), 2)
-        _taylor_indices = TaylorTuples(list(range(self.D)), 2)
+        _taylor_tuples = TaylorTuples(list(self.u), order)
+        _taylor_indices = TaylorTuples(list(range(self.D)), order)
         _swap_dict = {}
         for _i, _index_tuple in enumerate(_taylor_indices):
             _swap_dict[_index_tuple] = reduce(lambda x, y: x * y, _taylor_tuples[_i])
         return SymmetricTensor(c_dict = _swap_dict, d = self.D, rank = order)
 
+    '''
+    This function looks general enough to be put in idpy.Utils.IdpySymbolic
+    '''
+    def GetASymmetricTensor(self, order, root_sym = 'A'):
+        _taylor_indices = TaylorTuples(list(range(self.D)), order)
+        _swap_dict = {}
+        for _i, _index_tuple in enumerate(_taylor_indices):
+            _lower_indices = reduce(lambda x, y: str(x) + str(y), _index_tuple)
+            _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_" + _lower_indices)
+        return SymmetricTensor(c_dict = _swap_dict, d = self.D, rank = order)
+    
     def SetPopulationsSyms(self, root_pop):
         self.f_i = sp.Matrix([sp.Symbol(root_pop + '_eq_' + str(_))
                               for _ in range(self.Q)])
@@ -80,7 +91,8 @@ class HermiteEquilibria:
         self.w_i_n = sp.Matrix(self.idpy_stencil.Ws)
         self.w_symt = SymmetricTensor(c_dict = {0: self.w_i}, d = self.D, rank = 0)
 
-    def GetSymEquilibrium(self, order = 2):
+        
+    def GetSymEquilibrium(self, order = 2, tensor_dict = None):
         '''
         The idea is to use the class SymmetricTensor to simplify the writing
         '''        
@@ -102,11 +114,73 @@ class HermiteEquilibria:
                           _eq_set[1] * self.u_symt / _c2 +
                           _eq_set[2] * self.u2_symt / (2 * _c2 * _c2))
 
+            if tensor_dict is not None:
+                if '1' in tensor_dict:
+                    _f_eq += self.n * (_eq_set[1] * tensor_dict['1'] / _c2)
+                if '2' in tensor_dict:
+                    _f_eq += self.n * (_eq_set[2] * tensor_dict['2'] / (2 * _c2 * _c2))
+                    
             for _i in range(self.Q):
                 _f_eq[_i] *= self.w_i_n[_i]
 
             return _f_eq
 
+        if order == 3:
+            self.u2_symt = self.GetHigherOrderSymmetricUTensor(order = 2)
+            self.u3_symt = self.GetHigherOrderSymmetricUTensor(order = 3)            
+            ##return self.n, self.u_symt, self.u2_symt, self.w_symt
+
+            '''
+            Maybe this one should return a dict of Symmetric tensors 
+            starting from order = 2
+            '''            
+            _eq_set = \
+                self.idpy_stencil.GetEquilibriumHermiteSet(order = order,
+                                                           symt_flag = True)
+            
+            _c2 = self.idpy_stencil.c2
+            _f_eq = \
+                self.n * (
+                    _eq_set[0] +
+                    _eq_set[1] * self.u_symt / _c2 +
+                    _eq_set[2] * self.u2_symt / (2 * _c2 * _c2) + 
+                    _eq_set[3] * self.u3_symt / (6 * _c2 * _c2 * _c2)
+                )
+
+            for _i in range(self.Q):
+                _f_eq[_i] *= self.w_i_n[_i]
+
+            return _f_eq
+        
+        if order == 4:
+            self.u2_symt = self.GetHigherOrderSymmetricUTensor(order = 2)
+            self.u3_symt = self.GetHigherOrderSymmetricUTensor(order = 3)            
+            self.u4_symt = self.GetHigherOrderSymmetricUTensor(order = 4)
+            ##return self.n, self.u_symt, self.u2_symt, self.w_symt
+
+            '''
+            Maybe this one should return a dict of Symmetric tensors 
+            starting from order = 2
+            '''            
+            _eq_set = \
+                self.idpy_stencil.GetEquilibriumHermiteSet(order = order,
+                                                           symt_flag = True)
+            
+            _c2 = self.idpy_stencil.c2
+            _f_eq = \
+                self.n * (
+                    _eq_set[0] +
+                    _eq_set[1] * self.u_symt / _c2 +
+                    _eq_set[2] * self.u2_symt / (2 * _c2 * _c2) + 
+                    _eq_set[3] * self.u3_symt / (6 * _c2 * _c2 * _c2) +
+                    _eq_set[4] * self.u4_symt / (24 * _c2 * _c2 * _c2 * _c2)
+                )
+
+            for _i in range(self.Q):
+                _f_eq[_i] *= self.w_i_n[_i]
+
+            return _f_eq
+        
     '''
     Need to do the same for the forcing so that each line can be reassembled in 
     the collision case: at the end of the day though, I should be able to write
