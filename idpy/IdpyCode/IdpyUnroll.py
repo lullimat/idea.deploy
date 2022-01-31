@@ -31,8 +31,20 @@ from idpy.Utils.Statements import AllTrue
 This module provides the basic functions to generate unrolled code in the kernels
 '''
 
-_sp_macro = lambda _x, _m : "(" + str(_x) + "&(~(-(" + str(_x) + " >= " + str(_m) + "))))"
-_sm_macro = lambda _x, _m : "(" + str(_x) + "+((-(" + str(_x) + " < 0))&" + str(_m) + "))"
+_sp_macro_old = lambda _x, _m : "(" + str(_x) + "&(~(-(" + str(_x) + " >= " + str(_m) + "))))"
+_sm_macro_old = lambda _x, _m : "(" + str(_x) + "+((-(" + str(_x) + " < 0))&" + str(_m) + "))"
+
+_sp_macro = \
+    lambda _x, _d, _m : \
+    "((" + str(_x) + " + " + str(_d) + ")" + \
+    " - ((-(" + str(_x) + " + " + str(_d) + " >= " + str(_m) + "))" + \
+    " & " + str(_m) + "))"
+
+_sm_macro = \
+    lambda _x, _d, _m : \
+    "((" + str(_x) + " - " + str(_d) + ")" + \
+    " + ((-(" + str(_x) + " - " + str(_d) + " < 0))" + \
+    " & " + str(_m) + "))"
 
 '''
 Simple wrapper functions for code generation
@@ -88,7 +100,9 @@ def _codify_declaration_const_check(_var_str, _expr, _type = None,
                                     declare_const_flag = False):
     _swap_code = """"""
     if _var_str not in declared_variables[0] and _var_str not in declared_constants[0]:
-        _declare_f = _codify_declaration_const if declare_const_flag else _codify_declaration
+        _declare_f = \
+            _codify_declaration_const if declare_const_flag else _codify_declaration
+        
         _swap_code += _declare_f(_var_str, _expr, _type)
         if declare_const_flag:
             declared_constants[0] += [_codify(_var_str)]
@@ -98,10 +112,45 @@ def _codify_declaration_const_check(_var_str, _expr, _type = None,
     elif _var_str in declared_constants[0] and declare_const_flag:
         pass
         ##raise Exception("Variable", _var_str, "already declared as a constant!")
-    elif _var_str in declared_variables[0]:
-        pass
+    elif _var_str in declared_variables[0] and not declare_const_flag:
+        _swap_code += _codify_assignment(_var_str, _expr)
+    elif _var_str in declared_variables[0] and declare_const_flag:
+        raise Exception("Name", _var_str, "already a variable. Cannot use it for a constant!")
 
     return _swap_code
+
+def _codify_assignment_type_check(_var_str, _expr, _type = None,
+                                  declared_variables = None,
+                                  declared_constants = None,
+                                  declare_const_flag = False,
+                                  assignment_type = None):
+
+    if assignment_type is None:
+        return _codify_declaration_const_check(
+            _var_str = _var_str, _expr = _expr, _type = _type,
+            declared_variables = declared_variables,
+            declared_constants = declared_constants,
+            declare_const_flag = declare_const_flag
+        )
+
+    if assignment_type is not None and declare_const_flag:
+        raise Exception("Cannot have 'assignment_type' ", assignment_type, "and constant declaration")
+
+    if assignment_type is not None:
+        _swap_code = """"""
+        if _var_str not in declared_variables[0]:
+            raise Exception("Variable ", _var_str, "not declared. Cannot use 'assignment_type' ", assignment_type)
+        if _var_str in declared_constants[0]:
+            raise Exception("Variable ", _var_str, "declared as constant. Cannot use 'assignment_type' ", assignment_type)
+        
+        _assignment_f = _codify_assignments[assignment_type]
+        _swap_code += _assignment_f(_var_str, _expr)
+
+        return _swap_code
+
+_codify_assignments = {'add': _codify_add_assignment, 'sub': _codify_sub_assignment,
+                       'mul': _codify_mul_assignment, 'div': _codify_div_assignment,
+                       None: _codify_assignment}
 
 '''
 _get_cartesian_coordinates_macro
@@ -339,6 +388,7 @@ def _neighbors_register_pressure_macro(_declared_variables, _declared_constants,
     _lexicographic_index_neigh_red_list = []
     
     '''
+    Expression Optimizer:
     The starting index is 1 in order to perform backwards comparisons
     '''
     for _i in range(1, len(_lexicographic_index_neigh_list)):
@@ -419,7 +469,78 @@ def _neighbors_register_pressure_macro(_declared_variables, _declared_constants,
                                                             _declared_variables, 
                                                             _declared_constants, 
                                                             _declare_const_flag)
-            
+                    
+    return _macro_neighbors
+
+'''
+Deprecated...
+'''
+def _subs_sp_sm_macros(_code, _root_coordinate, _stencil_vectors, _dim_sizes):
+    for _vector in _stencil_vectors:    
+        for _d in range(len(_vector)):
+            _str_vector_delta = '_p' + str(_vector[_d]) if _vector[_d] > 0 else '_m' + str(abs(_vector[_d]))
+            _which_macro = _sp_macro if _vector[_d] > 0 else _sm_macro
+            _sign_str = ' + ' if _vector[_d] > 0 else ' - '
+            _to_be_chgd = _root_coordinate + '_' + str(_d) + _str_vector_delta
+            _to_be_put = _which_macro('(' + _root_coordinate + '_' + str(_d) + _sign_str + str(abs(_vector[_d])) + ')', 
+                                      _dim_sizes[_d])
+            _code = _code.replace(_to_be_chgd, _to_be_put)
+    return _code
+
+def _check_declared_variables_constants(declared_variables = None,
+                                        declared_constants = None):
+    '''
+    Checking that the list of declared variables is available
+    '''
+    if declared_variables is None:
+        raise Exception("Missing argument 'declared_variables'")
+    if type(declared_variables) != list:
+        raise Exception("Argument 'declared_variables' must be a list containing one list")
+    if len(declared_variables) == 0 or type(declared_variables[0]) != list:
+        raise Exception("List 'declared_variables' must contain another list!")
+
+    '''
+    Checking that the list of declared constants is available
+    '''
+    if declared_constants is None:
+        raise Exception("Missing argument 'declared_constants'")
+    if type(declared_constants) != list:
+        raise Exception("Argument 'declared_constants' must be a list containing one list")
+    if len(declared_constants) == 0 or type(declared_constants[0]) != list:
+        raise Exception("List 'declared_constants' must contain another list!")
+    
+def _check_needed_variables_constants(_needed_variables = None,
+                                      declared_variables = None,
+                                      declared_constants = None):    
+    if _needed_variables is None:
+        raise Exception("Missing argument '_needed_variables' !")
+    if type(_needed_variables) != list:
+        raise Exception("Argument '_needed_variables' must be a list of strings!")
+    
+    _chk_needed_variables = []
+    for _ in _needed_variables:
+        _chk_needed_variables += [_ in declared_variables[0] or _ in declared_constants[0]]
+    if not AllTrue(_chk_needed_variables):
+        print()
+        for _i, _ in enumerate(_chk_needed_variables):
+            if not _:
+                print("Variable/constant ", _needed_variables[_i], "not declared!")
+        raise Exception("Some needed variables/constants have not been declared yet (!)")
+    
+def _check_lambda_args(args_n, _lambda = None):
+    if _lambda is None:
+        raise Exception("Missing argument '_lambda'")
+    elif _lambda.__code__.co_argcount != args_n:
+        raise Excpetion(
+            "The number of arguments for '_lambda' should be ", args_n
+        )
+
+    
+"""
+OLD AND UNUSED CODE
+Soon will be deleted
+
+
         if False:
             _macro_neighbors += \
                 _custom_type + " n_" + _root_coordinate + "_" + str(_i) + " = " + str(_swap_elem) + ";\n"
@@ -437,17 +558,5 @@ def _neighbors_register_pressure_macro(_declared_variables, _declared_constants,
     if False:
         _macro_neighbors = \
             _subs_sp_sm_macros(_macro_neighbors, _root_coordinate, _stencil_vectors, _dim_sizes)
-        
-    return _macro_neighbors
 
-def _subs_sp_sm_macros(_code, _root_coordinate, _stencil_vectors, _dim_sizes):
-    for _vector in _stencil_vectors:    
-        for _d in range(len(_vector)):
-            _str_vector_delta = '_p' + str(_vector[_d]) if _vector[_d] > 0 else '_m' + str(abs(_vector[_d]))
-            _which_macro = _sp_macro if _vector[_d] > 0 else _sm_macro
-            _sign_str = ' + ' if _vector[_d] > 0 else ' - '
-            _to_be_chgd = _root_coordinate + '_' + str(_d) + _str_vector_delta
-            _to_be_put = _which_macro('(' + _root_coordinate + '_' + str(_d) + _sign_str + str(abs(_vector[_d])) + ')', 
-                                      _dim_sizes[_d])
-            _code = _code.replace(_to_be_chgd, _to_be_put)
-    return _code
+"""
