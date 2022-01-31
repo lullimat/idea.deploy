@@ -87,6 +87,8 @@ class GuoForcing:
         self.w_symt = SymmetricTensor(c_dict = {0: self.w_i}, d = self.D, rank = 0)
 
     def GetHigherOrderSymmetricUFTensor(self, order = 2):
+        if order != 2:
+            raise Exception("order > 2 not yet implemented!")
         '''
         Need to generalize to higher orders
         '''
@@ -99,7 +101,7 @@ class GuoForcing:
             
         return SymmetricTensor(c_dict = _swap_dict, d = self.D, rank = order)
 
-    def GetSymForcing(self, order = 2):
+    def GetSymForcing(self, order = 2, tensor_dict = None):
         '''
         Using the class SymmetricTensor to simplify the writing
         '''
@@ -108,16 +110,76 @@ class GuoForcing:
                 self.idpy_stencil.GetEquilibriumHermiteSet(order = order, symt_flag = True)
             _c2 = self.idpy_stencil.c2
             _uF = self.GetHigherOrderSymmetricUFTensor()
-
             
             _F_guo = \
                 _eq_set[1] * self.F_symt / _c2 + \
                 _eq_set[2] * _uF / (2 * _c2 * _c2)
 
+            if tensor_dict is not None:
+                if '1' in tensor_dict:
+                    _F_guo += _eq_set[1] * tensor_dict['1'] / _c2
+                if '2' in tensor_dict:
+                    _F_guo += _eq_set[2] * tensor_dict['2'] / (2 * _c2 * _c2)
+            
             for _i in range(self.Q):
                 _F_guo[_i] *= (1 - self.omega_sym / 2) * self.w_i_n[_i]
 
             return _F_guo
+
+    def GetSymForcingMRT(self, order = 2, tensor_dict = None,
+                         eq_obj = None, relaxation_matrix = None,
+                         search_depth = 6):
+        if eq_obj is None:
+            raise Exception("Missing argument 'eq_obj'")        
+        if relaxation_matrix is None:
+            raise Exception("Missing argument 'relaxation_matrix'")
+
+        _Q, _D = eq_obj.Q, eq_obj.D
+
+        _S = relaxation_matrix
+        _1 = sp.eye(_Q)
+        
+        _M_dict = \
+            eq_obj.idpy_stencil.GetInvertibleHermiteSet(
+                search_depth = search_depth
+            )
+        _M, _Mm1 = _M_dict['M'], _M_dict['M'].inv()        
+        
+        '''
+        Using the class SymmetricTensor to simplify the writing
+        '''
+        if order == 2:
+            _eq_set = \
+                self.idpy_stencil.GetEquilibriumHermiteSet(
+                    order = order, symt_flag = True
+                )
+            _c2 = self.idpy_stencil.c2
+            _uF = self.GetHigherOrderSymmetricUFTensor()
+
+            '''
+            Like this we are making a double step:
+            should substitute this straight with with the moment-space values
+            '''
+            _F_guo = \
+                _eq_set[1] * self.F_symt / _c2 + \
+                _eq_set[2] * _uF / (2 * _c2 * _c2)
+
+            if tensor_dict is not None:
+                if '1' in tensor_dict:
+                    _F_guo += _eq_set[1] * tensor_dict['1'] / _c2
+                if '2' in tensor_dict:
+                    _F_guo += _eq_set[2] * tensor_dict['2'] / (2 * _c2 * _c2)
+
+            for _i in range(self.Q):
+                _F_guo[_i] *= self.w_i_n[_i]                    
+
+            _F_guo_m = (_1 - _S / 2) * _M * _F_guo
+            _F_guo = _Mm1 * _F_guo_m
+            '''
+            returning sp.expand(_F_guo) makes the object immutable
+            '''
+            return _F_guo
+        
             
     '''
     Getting thr forcing separately for each population
@@ -266,3 +328,18 @@ class GuoForcing:
 
         return _swap_code
         
+class KupershtokhForcingEffective:
+    def __init__(self):
+        pass
+
+class HeForcingEffective:
+    def __init__(self):
+        pass
+
+class ShanChenForcingEffective:
+    def __init__(self):
+        pass
+
+class Guo2021ForcingEffective:
+    def __init__(self):
+        pass
