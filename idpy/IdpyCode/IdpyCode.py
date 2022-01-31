@@ -45,6 +45,9 @@ from idpy.IdpyCode import idpy_nvcc_path, idpy_langs_list
 from idpy.IdpyCode import idpy_langs_dict_sym, idpy_langs_sys
 from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
 from idpy.IdpyCode import idpy_opencl_macro_spacing
+from idpy.IdpyCode import idpy_copyright
+
+from idpy.IdpyCode.IdpyUnroll import _codify_comment
 
 if idpy_langs_sys[CUDA_T]:
     from idpy.IdpyCode.IdpyMemory import IdpyArrayCUDA
@@ -289,6 +292,13 @@ class IdpyKernel:
             Path(prepend_path if prepend_path is not None else '.') / _as_header_name
 
         with open(_file_path, 'w') as _header_file:
+            for _line in idpy_copyright.splitlines():
+                _header_file.write(_codify_comment(_line))
+            _header_file.write(_codify_comment(""))
+            _header_file.write(_codify_comment("This file was automatically generated from"))
+            _header_file.write(_codify_comment("an instance of " + self.__class__.__name__))
+            _header_file.write(_codify_comment("a child class of idpy.IdpyCode.IdpyKernel"))
+            _header_file.write("\n")
             _header_file.write(self.Code(lang = lang))
         return _file_path
 
