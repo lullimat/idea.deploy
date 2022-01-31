@@ -47,6 +47,10 @@ from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyFunction
 from idpy.IdpyCode.IdpyCode import IdpyMethod, IdpyLoop, IdpyLoopProfile
 
+from idpy.LBM.LBMKernelsMeta import K_MRTCollideStreamMeta, K_SRTCollideStreamMeta
+from idpy.LBM.LBMKernelsMeta import K_StreamPeriodicMeta
+from idpy.IdpyCode.IdpyUnroll import _get_seq_macros
+
 if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
     from idpy.OpenCL.OpenCL import OpenCL
@@ -458,12 +462,22 @@ class RootLB(IdpySims):
             
         self.kwargs = \
             GetParamsClean(kwargs, [self.params_dict],
-                           needed_params = ['custom_types', 'dim_sizes', 'xi_stencil'])
+                           needed_params = ['custom_types', 'dim_sizes', 'xi_stencil',
+                                            'root_dim_sizes', 'root_strides', 'root_coord'])
 
         if 'dim_sizes' not in self.params_dict:
             raise Exception("Missing parameter 'dim_sizes'")
         if 'xi_stencil' not in self.params_dict:
             raise Exception("Missing parameter 'xi_stencil'")
+
+        if 'root_dim_sizes' not in self.params_dict:
+            self.params_dict['root_dim_sizes'] = 'L'
+            
+        if 'root_strides' not in self.params_dict:
+            self.params_dict['root_strides'] = 'STR'
+            
+        if 'root_coord' not in self.params_dict:
+            self.params_dict['root_coord'] = 'x'        
 
         custom_types = None
         if 'custom_types' in self.params_dict:
@@ -512,6 +526,21 @@ class RootLB(IdpySims):
                           'PI': np.pi}
 
         '''
+        Macros for meta-programming kernels
+        '''
+        ## dim_sizes
+        _swap_macros_sizes = \
+            _get_seq_macros(self.sims_vars['DIM'], self.params_dict['root_dim_sizes'])
+        for _i, _ in enumerate(self.sims_vars['dim_sizes']):
+            self.constants[_swap_macros_sizes[_i]] = _
+
+        ## dim_strides
+        _swap_macros_strides = \
+            _get_seq_macros(self.sims_vars['DIM'] - 1, self.params_dict['root_strides'])
+        for _i, _ in enumerate(self.sims_vars['dim_strides']):
+            self.constants[_swap_macros_strides[_i]] = _
+
+        '''
         memory to be allocated
         '''
         self.sims_idpy_memory = {'pop': None,
@@ -554,6 +583,140 @@ class RootLB(IdpySims):
         _n_swap = _n_swap.reshape(np.flip(self.sims_vars['dim_sizes']))
         return _n_swap
 
+    def GetVelocityField(self):
+        if 'set_ordering' not in self.params_dict:
+            raise Exception("Variable 'set_ordering' not present in 'params_dict'")
+        
+        _u_swap = self.sims_idpy_memory['u'].D2H()
+
+        _u_dims = None
+        if self.params_dict['set_ordering'] == 'cpu':
+            _u_dims = np.flip(np.append([self.sims_vars['DIM']], self.sims_vars['dim_sizes']))
+        if self.params_dict['set_ordering'] == 'gpu':
+            _u_dims = np.append([self.sims_vars['dim_sizes', self.sims_vars['DIM']]])
+            
+        _u_swap = _u_swap.reshape(_u_dims)
+        return _u_swap
+    
+    def SRTCollisionPushStreamMeta(self):
+        _K_SRTCollideStreamMeta = \
+            K_SRTCollideStreamMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag, 
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'], 
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                collect_mul = False, stream_mode = 'push',
+                pressure_mode = 'compute',
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+    
+        Idea = \
+            _K_SRTCollideStreamMeta(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'],
+                     self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['n']])
+        
+        return _K_SRTCollideStreamMeta
+
+    def MRTCollisionPushStreamMeta(self, relaxation_matrix = None, omega_syms_vals = None):
+        if relaxation_matrix is None:
+            raise Exception("Missing argument 'relaxation_matrix'")
+        if omega_syms_vals is None:
+            raise Exception("Missing argument 'omega_syms_vals'")        
+        
+        _K_MRTCollideStreamMeta = \
+            K_MRTCollideStreamMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag, 
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'],
+                relaxation_matrix = relaxation_matrix,
+                omega_syms_vals = omega_syms_vals,
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                collect_mul = False, stream_mode = 'push',
+                pressure_mode = 'compute',
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+    
+        Idea = \
+            _K_MRTCollideStreamMeta(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'],
+                     self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['n']])
+        
+        return _K_MRTCollideStreamMeta
+    
+    def StreamingStepMeta(self, stream_mode = 'push'):
+        _K_StreamPeriodicMeta = \
+            K_StreamPeriodicMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag,
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'],
+                ordering_lambda = self.sims_vars['ordering']['pop'],
+                collect_mul = False, pressure_mode = 'compute',
+                stream_mode = stream_mode,
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+
+        Idea = \
+            _K_StreamPeriodicMeta(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'], self.sims_idpy_memory['pop']])
+
+        return _K_StreamPeriodicMeta    
+
+    def StreamingStep(self):
+        _K_StreamPeriodic = \
+            K_StreamPeriodic(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex,
+                             F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag
+            )        
+
+        Idea = \
+            _K_StreamPeriodic(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'],
+                     self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['XI_list'],
+                     self.sims_idpy_memory['dim_sizes'],
+                     self.sims_idpy_memory['dim_strides']])
+
+        return _K_StreamPeriodic
+    
 class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
         self.SetupRoot(*args, **kwargs)
