@@ -21,3 +21,4 @@ requests
 kaleido
 ipyparallel
 py-cpuinfo
+einsteinpy
