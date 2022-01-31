@@ -41,6 +41,8 @@ throughout different classes
 '''
 
 class Tenet:
+    GPU_T = "gpu"
+    
     def __init__(self, cuda_context, device_name):
         self.cuda_context = cuda_context
         self.device_name = device_name
@@ -50,6 +52,9 @@ class Tenet:
 
     def AllocatedBytes(self):
         return self.mem_pool.active_bytes
+
+    def GetKind(self):
+        return self.GPU_T    
 
     def End(self, memory_dict = None):
         self.mem_pool.free_held()
