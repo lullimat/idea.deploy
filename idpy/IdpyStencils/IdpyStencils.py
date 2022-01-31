@@ -336,9 +336,6 @@ class IdpyStencil:
         for _ in _needed_variables:
             _chk_needed_variables += [_ in declared_variables[0] or
                                       _ in declared_constants[0]]
-
-        print(declared_variables[0])
-        print(declared_constants[0])
         
         if not AllTrue(_chk_needed_variables):
             print()
@@ -517,17 +514,129 @@ class IdpyStencil:
                 _swap_code += \
                     _codify_declaration_const_check(
                         _codify_sympy(_u),
-                        _codify_sympy(_moment_swap[_u_i + 1] / _n[a_i]),
+                        _codify_sympy(_moment_swap[_u_i + 1] / _n[_a_i]),
                         u_type,
                         declared_variables,
                         declared_constants,
                         declare_const_flag = declare_const_dict['moments']
                     )
-                _swap_code += _codify_div_assignment(_codify_sympy(_u),
-                                                     _codify_sympy(_n[_a_i]))
                 _swap_code += _codify_newl
 
         return _swap_code
+
+    '''
+    def MomentsHermiteCode
+    '''
+    def MomentsHermiteCode(self, declared_variables = None, declared_constants = None,
+                           arrays = ['array'], arrays_types = ['AType'],
+                           root_neq_mom = 'neq_m',
+                           mom_type = 'mom_type',
+                           lex_index = 'g_tid', keep_read = True,
+                           ordering_lambdas = None,
+                           use_ptrs = False, search_depth = 6,
+                           declare_const_dict = {'arrays_xi': True, 'moments': False}):
+        '''
+        Checking that the list of declared variables is available
+        '''
+        if declared_variables is None:
+            raise Exception("Missing argument 'declared_variables'")
+        if type(declared_variables) != list:
+            raise Exception("Argument 'declared_variables' must be a list containing one list")
+        if len(declared_variables) == 0 or type(declared_variables[0]) != list:
+            raise Exception("List 'declared_variables' must contain another list!")
+    
+        '''
+        Checking that the list of declared constants is available
+        '''
+        if declared_constants is None:
+            raise Exception("Missing argument 'declared_constants'")
+        if type(declared_constants) != list:
+            raise Exception("Argument 'declared_constants' must be a list containing one list")
+        if len(declared_constants) == 0 or type(declared_constants[0]) != list:
+            raise Exception("List 'declared_constants' must contain another list!")
+        '''
+        Checking that the ordering_lambda is defined
+        '''
+        if ordering_lambdas is None:
+            raise Exception("Missing argument 'ordering_lambdas'")
+        if type(ordering_lambdas) != list:
+            raise Exception("Argument 'ordering_lambdas' must be a list of lambdas")
+        if len(ordering_lambdas) != len(arrays):
+            raise Exception("The length of 'ordering_lambdas' must be the same as 'arrays'")
+
+
+        '''
+        Defining and checking the variables that are needed
+        '''
+        _dim, _Q = len(self.XIs[0]), len(self.XIs)
+ 
+        _needed_variables = arrays        
+        _chk_needed_variables = []
+        for _ in _needed_variables:
+            _chk_needed_variables += [_ in declared_variables[0] or _ in declared_constants[0]]
+        if not AllTrue(_chk_needed_variables):
+            print()
+            for _i, _ in enumerate(_chk_needed_variables):
+                if not _:
+                    print("Variable/constant ", _needed_variables[_i], "not declared!")
+            raise Exception("Some needed variables/constants have not been declared yet (!)")
+        
+        _swap_code = """"""
+
+        '''
+        defining the symbols and the vector for 'array'
+        '''
+        _array_vars, _vector_array_vars = [], []
+        for _i_a, _array in enumerate(arrays):
+            _swap_a = _get_sympy_seq_vars(_Q, _array)
+            _array_vars += [_swap_a]
+            _vector_array_vars += [sp.Matrix(_swap_a)]
+
+            for _i_var, _var in enumerate(_swap_a):
+                _sx_hnd = _codify_sympy(_var)
+                _dx_hnd = \
+                    _array_value(_array,
+                                 ordering_lambdas[_i_a](lex_index, _i_var),
+                                 use_ptrs)
+                _swap_code += \
+                    _codify_declaration_const_check(
+                        _sx_hnd, _dx_hnd,
+                        arrays_types[_i_a],
+                        declared_variables,
+                        declared_constants,
+                        declare_const_flag = declare_const_dict['arrays_xi']
+                    )
+
+        _swap_code += _codify_newl
+
+        '''
+        Defining the symbols for the array entries
+        '''
+        _neq_mom_vars = []
+        for _a_i in range(len(arrays)):
+            _neq_mom_vars += [_get_sympy_seq_vars(_Q, root_neq_mom + '_' + str(_a_i))]
+
+        '''
+        Computing and declaring the momenta
+        '''
+        _full_hermite_set = self.GetInvertibleHermiteSet(search_depth = search_depth)['M']
+        for _a_i in range(len(arrays)):
+            _moment_swap = _full_hermite_set * _vector_array_vars[_a_i]
+            
+            for _m_i, _m in enumerate(_neq_mom_vars[_a_i]):
+                _swap_code += \
+                    _codify_declaration_const_check(
+                        _codify_sympy(_m),
+                        _codify_sympy(_moment_swap[_m_i].evalf()),
+                        mom_type,
+                        declared_variables,
+                        declared_constants,
+                        declare_const_flag = declare_const_dict['moments']
+                    )
+            _swap_code += _codify_newl
+
+        return _swap_code
+    
 
     '''
     symt_flag: flag to toggle the output as a idpy.Utils.IdpySymbolic.SymmetricTensor
@@ -563,7 +672,7 @@ class IdpyStencil:
         return _out_dict
     
     def GetHydroHermiteSet(self, root_xi_sym = '\\xi'):
-        return self.GetHermiteSet(_max_order = 1, root_xi_sym = root_xi_sym)    
+        return self.GetHermiteSet(_max_order = 1, root_xi_sym = root_xi_sym)
 
     def GetHermiteOrder(self, _order, root_xi_sym = '\\xi'):
         _hc = Hermite(d = self.D, root_sym = 'c')
@@ -584,7 +693,7 @@ class IdpyStencil:
                                                      _xi_sym_list[_i] / _c_s_sym)
 
                 _hermite_pol = sp.simplify(((_c_s_sym ** _order) * _hermite_pol))
-                _hermite_pol = _hermite_pol.subs(_c_s_sym, sp.sqrt(sp.Rational(1,3)))
+                _hermite_pol = _hermite_pol.subs(_c_s_sym, sp.sqrt(self.c2))
 
                 _M_coeffs_swap = []
                 for _xi in self.XIs:
@@ -616,7 +725,7 @@ class IdpyStencil:
                                                      _xi_sym_list[_i] / _c_s_sym)
 
                 _hermite_pol = sp.simplify(((_c_s_sym ** _order) * _hermite_pol))
-                _hermite_pol = _hermite_pol.subs(_c_s_sym, sp.sqrt(sp.Rational(1,3)))
+                _hermite_pol = _hermite_pol.subs(_c_s_sym, sp.sqrt(self.c2))
 
                 _M_coeffs_swap = []
                 for _xi in self.XIs:
@@ -633,62 +742,66 @@ class IdpyStencil:
     Need to watch out for situations in which there is more than a possibility
     '''
     def GetInvertibleHermiteSet(self, search_depth, root_xi_sym = '\\xi'):
-        _hc = Hermite(d = self.D, root_sym = 'c')
-        _c_sym_list = _hc.sym_list
-        _xi_sym_list = [sp.Symbol(root_xi_sym + '_' + str(_)) for _ in range(self.D)]
-        _c_s_sym = sp.Symbol('c_s')
-        
-        _M_coeffs = [[1] * self.Q]
-        
-        _count_momenta, _order = 1, 1
-        _hermite_polys_list, _taylor_tuples_list = [1], [None]
+        if not hasattr(self, 'M'):
+            _hc = Hermite(d = self.D, root_sym = 'c')
+            _c_sym_list = _hc.sym_list
+            _xi_sym_list = [sp.Symbol(root_xi_sym + '_' + str(_)) for _ in range(self.D)]
+            _c_s_sym = sp.Symbol('c_s')
 
-        while _count_momenta < self.Q + search_depth:
-            for _tuple in TaylorTuples(list(range(self.D)), _order):
-                _hermite_pol = _hc.GetH(_order)[_tuple]
+            _M_coeffs = [[1] * self.Q]
 
-                for _i in range(len(_c_sym_list)):
-                    _hermite_pol = _hermite_pol.subs(_c_sym_list[_i],
-                                                     _xi_sym_list[_i] / _c_s_sym)
+            _count_momenta, _order = 1, 1
+            _hermite_polys_list, _taylor_tuples_list = [1], [None]
 
-                _hermite_pol = sp.simplify(((_c_s_sym ** _order) * _hermite_pol))
-                _hermite_pol = _hermite_pol.subs(_c_s_sym, sp.sqrt(sp.Rational(1,3)))
+            while _count_momenta < self.Q + search_depth:
+                for _tuple in TaylorTuples(list(range(self.D)), _order):
+                    _hermite_pol = _hc.GetH(_order)[_tuple]
 
-                _M_coeffs_swap = []
-                for _xi in self.XIs:
-                    _coeff_swap = _hermite_pol
-                    for _i in range(len(_xi)):
-                        _coeff_swap = _coeff_swap.subs(_xi_sym_list[_i], _xi[_i])
-                    _M_coeffs_swap += [_coeff_swap]
+                    for _i in range(len(_c_sym_list)):
+                        _hermite_pol = _hermite_pol.subs(_c_sym_list[_i],
+                                                         _xi_sym_list[_i] / _c_s_sym)
 
-                '''
-                Excluding rows of zero-coefficients
-                '''
-                _all_zero_chk = []
-                for _coeff in _M_coeffs_swap:
-                    _all_zero_chk += [_coeff == 0]
+                    _hermite_pol = sp.simplify(((_c_s_sym ** _order) * _hermite_pol))
+                    _hermite_pol = _hermite_pol.subs(_c_s_sym, sp.sqrt(self.c2))
 
-                if not AllTrue(_all_zero_chk):
-                    _hermite_polys_list += [_hermite_pol]
-                    _taylor_tuples_list += [_tuple]
-                    _M_coeffs += [_M_coeffs_swap]
-                    _count_momenta += 1
+                    _M_coeffs_swap = []
+                    for _xi in self.XIs:
+                        _coeff_swap = _hermite_pol
+                        for _i in range(len(_xi)):
+                            _coeff_swap = _coeff_swap.subs(_xi_sym_list[_i], _xi[_i])
+                        _M_coeffs_swap += [_coeff_swap]
 
-            _order += 1
+                    '''
+                    Excluding rows of zero-coefficients
+                    '''
+                    _all_zero_chk = []
+                    for _coeff in _M_coeffs_swap:
+                        _all_zero_chk += [_coeff == 0]
 
-        '''
-        Need to modify to handle the cases where there are more possibilities
-        '''
-        ##_M_coeffs = _M_coeffs[:6] + _M_coeffs[7:9] + _M_coeffs[12:13]
-        _M_full = sp.Matrix([_row for _row in _M_coeffs])
-        _, _indices = _M_full.T.rref()
+                    if not AllTrue(_all_zero_chk):
+                        _hermite_polys_list += [_hermite_pol]
+                        _taylor_tuples_list += [_tuple]
+                        _M_coeffs += [_M_coeffs_swap]
+                        _count_momenta += 1
 
-        self.M = _M_full[_indices,:]
-        self.MHermitePolys = np.array(_hermite_polys_list, dtype = object)[list(_indices)]
-        self.MTaylorTuples = np.array(_taylor_tuples_list, dtype = object)[list(_indices)]
-        self.MHermiteNorms = np.array(self.GetNormHermiteMoment(self.M, _)
-                                      for _ in range(self.Q))
-        
+                _order += 1
+
+            '''
+            Need to modify to handle the cases where there are more possibilities
+            '''
+            ##_M_coeffs = _M_coeffs[:6] + _M_coeffs[7:9] + _M_coeffs[12:13]
+            _M_full = sp.Matrix([_row for _row in _M_coeffs])
+            _, _indices = _M_full.T.rref()
+
+            self.M = _M_full[_indices,:]
+            self.MHermitePolys = \
+                np.array(_hermite_polys_list, dtype = object)[list(_indices)]
+            self.MTaylorTuples = \
+                np.array(_taylor_tuples_list, dtype = object)[list(_indices)]
+            self.MHermiteNorms = \
+                np.array(self.GetNormHermiteMoment(self.M, _)
+                         for _ in range(self.Q))
+
         return {'M': self.M, 'MHermitePolys': self.MHermitePolys,
                 'MTaylorTuples': self.MTaylorTuples,
                 'MHermiteNorms': self.MHermiteNorms}
@@ -712,9 +825,6 @@ class IdpyStencil:
     at least not much
     '''
         
-    '''
-    def MomentsCode
-    '''
             
     '''
     def StreamingCode
@@ -742,11 +852,17 @@ class IdpyStencil:
 
         for _delta_c in range(1, _largest_c + 1):
             for _d in range(_dim):
-                _sp = _sp_macro('(' + root_coord + '_' + str(_d) + ' + ' + str(_delta_c) + ')', 
-                                _dim_sizes_macros[_d])
-                _sm = _sm_macro('(' + root_coord + '_' + str(_d) + ' - ' + str(_delta_c) + ')', 
-                                _dim_sizes_macros[_d])
+                if False:
+                    _sp = _sp_macro('(' + root_coord + '_' + str(_d) + ' + ' + str(_delta_c) + ')', 
+                                    _dim_sizes_macros[_d])
+                    _sm = _sm_macro('(' + root_coord + '_' + str(_d) + ' - ' + str(_delta_c) + ')', 
+                                    _dim_sizes_macros[_d])
 
+                _sp = _sp_macro(root_coord + '_' + str(_d), str(_delta_c), 
+                                _dim_sizes_macros[_d])
+                _sm = _sm_macro(root_coord + '_' + str(_d), str(_delta_c), 
+                                _dim_sizes_macros[_d])
+                    
                 _neigh_c_var = root_coord + '_' + str(_d) + '_p' + str(_delta_c)
                 _swap_code += _codify_declaration_const_check(_neigh_c_var, _sp, pos_type, 
                                                               declared_variables, 
@@ -894,7 +1010,7 @@ class IdpyStencil:
             self._define_cartesian_neighbors_coords(
                 declared_variables = declared_variables,
                 declared_constants = declared_constants,
-                code = _swap_code, pos_type = pos_type,
+                pos_type = pos_type,
                 root_dim_sizes = root_dim_sizes, 
                 root_strides = root_strides, 
                 root_coord = root_coord,
