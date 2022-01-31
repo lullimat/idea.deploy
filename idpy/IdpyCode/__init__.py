@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -259,3 +259,10 @@ def GridAndBlocks1D(_n_threads_min, _block_size = 128):
 
     return _grid, _block
 
+'''
+Copyright string
+'''
+_license_path = _idea_dot_deploy_path + "/" + "LICENSE"
+_file_swap = open(_license_path, "r")
+idpy_copyright = _file_swap.read()
+_file_swap.close()
