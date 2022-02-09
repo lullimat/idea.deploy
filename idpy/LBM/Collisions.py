@@ -39,28 +39,37 @@ import numpy as np
 from IPython.display import display, Math, Latex
 
 class RelaxationMatrix:
-    def __init__(self, eq_obj = None, search_depth = 6):
+    def __init__(self, eq_obj = None, search_depth = 6, WOrth_flag = True):
         if eq_obj is None:
             raise Exception("Missing argument 'eq_obj'")
 
-        self.M_dict = \
-            eq_obj.idpy_stencil.GetInvertibleHermiteSet(search_depth = search_depth)
+        if WOrth_flag:
+            _M_dict = \
+                eq_obj.idpy_stencil.GetWOrthInvertibleHermiteSet(
+                    search_depth = search_depth
+                )
+            self.MHermitePolys = _M_dict['MWOrthHermitePolys']
+
+        else:
+            _M_dict = \
+                eq_obj.idpy_stencil.GetInvertibleHermiteSet(search_depth = search_depth)
+            self.MHermitePolys = _M_dict['MHermitePolys']
+            
         self.D, self.Q = eq_obj.D, eq_obj.Q
 
     def GetMoments(self):
-        return self.M_dict['MHermitePolys']
+        return self.MHermitePolys
 
     def DisplayMoments(self):
-        for _i, _m in enumerate(self.M_dict['MHermitePolys']):
-            _tuple = self.M_dict['MTaylorTuples'][_i]
+        for _i, _m in enumerate(self.MHermitePolys):
             display(
                 Latex(
-                    str(_i) + ": " + str(_tuple) + " :$" + sp.latex(_m) + "$"
+                    str(_i) + " :$" + sp.latex(_m) + "$"
                 )
             )
 
     def GetIndexFromMoment(self, moment):
-        return np.where(self.M_dict['MHermitePolys'] == moment)[0][0]
+        return np.where(self.MHermitePolys == moment)[0][0]
 
     def GetDiagonalMatrix(self, omega_list = None):
         self.omega_list = omega_list
@@ -87,7 +96,7 @@ class BGK:
     def MRTCollisionPlusGuoSym(self, order = 2, eq_obj = None, guo_obj = None,
                                neq_pop_root = 'pop', neq_mom_root = 'mneq',
                                relaxation_matrix = None,
-                               search_depth = 6):
+                               search_depth = 6, WOrth_flag = True):
         if eq_obj is None:
             raise Exception("Missing argument 'eq_obj'")
         if guo_obj is None:
@@ -104,8 +113,17 @@ class BGK:
         _1 = sp.eye(_Q)
         
         _neq_pop_vector = sp.Matrix(_get_sympy_seq_vars(_Q, neq_pop_root))
-        _M_dict = eq_obj.idpy_stencil.GetInvertibleHermiteSet(search_depth = search_depth)
-        _M, _Mm1 = _M_dict['M'], _M_dict['M'].inv()
+
+        if WOrth_flag:
+            _M_dict = \
+                eq_obj.idpy_stencil.GetWOrthInvertibleHermiteSet(
+                    search_depth = search_depth
+                )
+            _M, _Mm1 = _M_dict['MWOrth'], _M_dict['MWOrth'].inv()
+        else:
+            _M_dict = \
+                eq_obj.idpy_stencil.GetInvertibleHermiteSet(search_depth = search_depth)
+            _M, _Mm1 = _M_dict['M'], _M_dict['M'].inv()
 
         _neq_m = \
             sp.Matrix([sp.Symbol(neq_mom_root + '_' + str(_q)) for _q in range(_Q)])
@@ -179,7 +197,7 @@ class BGK:
     def MRTCollisionSym(self, order = 2, eq_obj = None,
                         neq_pop_root = 'pop', neq_mom_root = 'mneq',
                         relaxation_matrix = None,
-                        search_depth = 6):
+                        search_depth = 6, WOrth_flag = True):
         if eq_obj is None:
             raise Exception("Missing argument 'eq_obj'")
         if relaxation_matrix is None:
@@ -191,8 +209,17 @@ class BGK:
         _1 = sp.eye(_Q)
         
         _neq_pop_vector = sp.Matrix(_get_sympy_seq_vars(_Q, neq_pop_root))
-        _M_dict = eq_obj.idpy_stencil.GetInvertibleHermiteSet(search_depth = search_depth)
-        _M, _Mm1 = _M_dict['M'], _M_dict['M'].inv()
+
+        if WOrth_flag:
+            _M_dict = \
+                eq_obj.idpy_stencil.GetWOrthInvertibleHermiteSet(
+                    search_depth = search_depth
+                )
+            _M, _Mm1 = _M_dict['MWOrth'], _M_dict['MWOrth'].inv()
+        else:
+            _M_dict = \
+                eq_obj.idpy_stencil.GetInvertibleHermiteSet(search_depth = search_depth)
+            _M, _Mm1 = _M_dict['M'], _M_dict['M'].inv()
 
         _neq_m = \
             sp.Matrix([sp.Symbol(neq_mom_root + '_' + str(_q))
@@ -249,7 +276,7 @@ class BGK:
             self, order = 2, i = None,
             eq_obj = None, guo_obj = None,
             neq_pop = 'pop', tuples_eq = [], tuples_guo = [],
-            relaxation_matrix = None, search_depth = 6,
+            relaxation_matrix = None, search_depth = 6, WOrth_flag = True,
             neq_mom_root = 'mneq', omega_syms_vals = None
     ):
         if i is None:
@@ -268,7 +295,7 @@ class BGK:
                 order = order, eq_obj = eq_obj, guo_obj = guo_obj,
                 neq_pop_root = neq_pop, neq_mom_root = neq_mom_root,
                 relaxation_matrix = relaxation_matrix,
-                search_depth = search_depth,
+                search_depth = search_depth, WOrth_flag = WOrth_flag
             )
 
         '''
@@ -310,7 +337,7 @@ class BGK:
     def CodifySingleMRTCollisionSym(
             self, order = 2, i = None,
             eq_obj = None, neq_pop = 'pop', tuples_eq = [],
-            relaxation_matrix = None, search_depth = 6,
+            relaxation_matrix = None, search_depth = 6, WOrth_flag = True,
             neq_mom_root = 'mneq', omega_syms_vals = None
     ):
         if i is None:
@@ -327,7 +354,7 @@ class BGK:
                 order = order, eq_obj = eq_obj,
                 neq_pop_root = neq_pop, neq_mom_root = neq_mom_root,
                 relaxation_matrix = relaxation_matrix,
-                search_depth = search_depth
+                search_depth = search_depth, WOrth_flag = WOrth_flag
             )
 
         '''
@@ -422,8 +449,13 @@ class BGK:
         _needed_variables = \
             [dst_arrays_var] + _src_pop_vars + _dim_sizes_macros + _dim_strides_macros
 
-        if rnd_pops is not None:
-            _needed_varaibles += rnd_pops
+        '''
+        This part does not seem useful, since I need to add the terms from
+        outside I would also need to make sure they are declared
+        '''
+        if False:
+            if rnd_pops is not None:
+                _needed_variables += rnd_pops
         
         _chk_needed_variables = []
         for _ in _needed_variables:
@@ -702,6 +734,7 @@ class BGK:
             dst_arrays_var = 'pop_swap',
             stencil_obj = None, eq_obj = None,
             guo_obj = None, relaxation_matrix = None, omega_syms_vals = None,
+            search_depth = 6, WOrth_flag = True,
             neq_pop = 'pop', pressure_mode = 'compute',
             tuples_eq = [], tuples_guo = [], pos_type = 'int', 
             use_ptrs = False, collect_mul = False,
@@ -835,7 +868,8 @@ class BGK:
                         order = order, i = _q, eq_obj = eq_obj, guo_obj = guo_obj,
                         neq_pop = neq_pop, tuples_eq = tuples_eq, tuples_guo = tuples_guo,
                         relaxation_matrix = relaxation_matrix,
-                        omega_syms_vals = omega_syms_vals
+                        omega_syms_vals = omega_syms_vals,
+                        search_depth = search_depth, WOrth_flag = WOrth_flag
                     )
 
                 if rnd_pops is not None:
@@ -874,20 +908,21 @@ class BGK:
         
         return _swap_code
 
-    def MRTCollisionPushStreamCode(self,
-                                   declared_variables = None,
-                                   declared_constants = None,
-                                   ordering_lambda = None, order = 2,
-                                   dst_arrays_var = 'pop_swap',
-                                   stencil_obj = None, eq_obj = None,
-                                   relaxation_matrix = None, omega_syms_vals = None,
-                                   neq_pop = 'pop', pressure_mode = 'compute',
-                                   tuples_eq = [], pos_type = 'int', 
-                                   use_ptrs = False, collect_mul = False,
-                                   root_dim_sizes = 'L', root_strides = 'STR', 
-                                   root_coord = 'x', lex_index = 'g_tid', 
-                                   declare_const_dict = {'cartesian_coord_neigh': False},
-                                   rnd_pops = None):
+    def MRTCollisionPushStreamCode(
+            self, declared_variables = None, declared_constants = None,
+            ordering_lambda = None, order = 2,
+            dst_arrays_var = 'pop_swap',
+            stencil_obj = None, eq_obj = None,
+            relaxation_matrix = None, omega_syms_vals = None,
+            search_depth = 6, WOrth_flag = True,            
+            neq_pop = 'pop', pressure_mode = 'compute',
+            tuples_eq = [], pos_type = 'int', 
+            use_ptrs = False, collect_mul = False,
+            root_dim_sizes = 'L', root_strides = 'STR', 
+            root_coord = 'x', lex_index = 'g_tid', 
+            declare_const_dict = {'cartesian_coord_neigh': False},
+            rnd_pops = None
+    ):
 
         '''
         Checking that the list of declared variables is available
@@ -1004,6 +1039,7 @@ class BGK:
                         order = order, i = _q, eq_obj = eq_obj,
                         relaxation_matrix = relaxation_matrix,
                         omega_syms_vals = omega_syms_vals,
+                        search_depth = search_depth, WOrth_flag = WOrth_flag,
                         neq_pop = neq_pop, tuples_eq = tuples_eq
                     )
 
