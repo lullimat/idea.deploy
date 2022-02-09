@@ -55,3 +55,11 @@ class Hermite:
                 _swap_dict[_tuple] = sp.simplify(((-1) ** n) * _der_dict[_tuple] / self.gen_f)
             return SymmetricTensor(c_dict = _swap_dict, d = self.d, rank = n)
 
+
+def HermiteWProd(A, B, Ws):
+    if len(A) != len(B) or len(A) != len(Ws) or len(B) != len(Ws):
+        raise Exception("Parameters 'A', 'B' and 'Ws' must all have the same length!")
+    _prod = 0
+    for _i in range(len(A)):
+        _prod += A[_i] * B[_i] * Ws[_i]
+    return _prod    
