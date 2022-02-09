@@ -129,11 +129,11 @@ from idpy.IdpyCode.IdpyUnroll import _get_sympy_seq_macros, _get_sympy_seq_vars
 from idpy.IdpyCode.IdpyUnroll import _codify_declaration_const, _codify_sympy_declaration_const
 from idpy.IdpyCode.IdpyUnroll import _codify_declaration_const_check
 
-from idpy.Utils.Geometry import GetLen2Pos, IsOppositeVector
+from idpy.Utils.Geometry import GetLen2Pos, IsOppositeVector, ProjectionVAlongU, ProjectVAlongU
 from idpy.Utils.Statements import AllTrue
 
 from idpy.Utils.ManageData import ManageData
-from idpy.Utils.Hermite import Hermite
+from idpy.Utils.Hermite import Hermite, HermiteWProd
 
 from idpy.Utils.IdpySymbolic import TaylorTuples
 from idpy.Utils.Statements import AllTrue, OneTrue
@@ -799,23 +799,88 @@ class IdpyStencil:
             self.MTaylorTuples = \
                 np.array(_taylor_tuples_list, dtype = object)[list(_indices)]
             self.MHermiteNorms = \
-                np.array(self.GetNormHermiteMoment(self.M, _)
-                         for _ in range(self.Q))
+                np.array([self.GetNormHermiteMoment(self.M, _)
+                          for _ in range(self.Q)])
+            self.MWProdsHermite = \
+                self.GetWeightedProdsHermiteMomentsBasis(self.M)
 
         return {'M': self.M, 'MHermitePolys': self.MHermitePolys,
                 'MTaylorTuples': self.MTaylorTuples,
-                'MHermiteNorms': self.MHermiteNorms}
+                'MHermiteNorms': self.MHermiteNorms,
+                'MWProdsHermite': self.MWProdsHermite}
 
     '''
     Need to write a function for the calculation of the weighted 'norm' of the moments
     two steps: i) single moment, ii) create the list of moments
-    '''
-    
+    '''    
     def GetNormHermiteMoment(self, M, i):
         _swap_norm = \
             M[i,:] * sp.matrix_multiply_elementwise(M[i,:].T, sp.Matrix(self.Ws))
         return _swap_norm[0]
-        
+
+
+    def GetWeightedProdsHermiteMomentsBasis(self, M):
+        _norms, _Ws = [], sp.Matrix(self.Ws)
+        for _i in range(self.Q):
+            _row_swap = []
+            for _j in range(self.Q):
+                _row_swap += \
+                    [M[_i,:] * (sp.matrix_multiply_elementwise(M[_j,:].T, _Ws))]
+            _norms += [_row_swap]
+
+        _norms = sp.Matrix(_norms)
+        return _norms
+
+    '''
+    GetWOrthInvertibleHermiteSet:
+    this function executes the Gram-Schmidt procedure on the independent set of Hermite poly
+    '''
+    def GetWOrthInvertibleHermiteSet(self, search_depth, root_xi_sym = '\\xi'):
+        _M_dict = \
+            self.GetInvertibleHermiteSet(
+                search_depth = search_depth,
+                root_xi_sym = root_xi_sym
+            )
+
+        _M, _H_polys = _M_dict['M'], _M_dict['MHermitePolys']
+
+        _lambda_hermite_prod = lambda x, y: HermiteWProd(x, y, self.Ws)
+
+        _HermiteW_Orth_M, _HermiteW_Orth_Polys, _coeffs_list = [_M[0,:]], [_H_polys[0]], []
+        '''
+        Here we compute the orthogonal vectors and keep track of the Hermite polynomials
+        '''
+        for _i in range(1, _M.shape[0]):
+            _new_vector = _M[_i,:]
+            _new_poly = _H_polys[_i]
+            _coeffs_swap = []
+            for _j in range(len(_HermiteW_Orth_M)):
+                _coeff = \
+                    -ProjectionVAlongU(_M[_i,:], _HermiteW_Orth_M[_j], _lambda_hermite_prod)
+                _new_poly += _coeff * _HermiteW_Orth_Polys[_j]
+                _new_vector += \
+                    -ProjectVAlongU(_M[_i,:], _HermiteW_Orth_M[_j], _lambda_hermite_prod)
+                _coeffs_swap += [_coeff]
+
+            _HermiteW_Orth_M += [_new_vector]
+            _HermiteW_Orth_Polys += [sp.simplify(_new_poly)]
+            _coeffs_list += [_coeffs_swap]
+            
+        self.MWOrth = sp.Matrix(_HermiteW_Orth_M)
+        self.MWOrthHermitePolys = \
+            np.array(_HermiteW_Orth_Polys, dtype = object)
+        self.MWOrthCs = np.array(_coeffs_list, dtype = object)
+        self.MWOrthHermiteNorms = \
+            np.array([self.GetNormHermiteMoment(self.MWOrth, _)
+                      for _ in range(self.Q)])
+        self.MWOrthWProdsHermite = \
+            self.GetWeightedProdsHermiteMomentsBasis(self.MWOrth)
+
+        return {'MWOrth': self.MWOrth,
+                'MWOrthHermitePolys': self.MWOrthHermitePolys,
+                'MWOrthHermiteNorms': self.MWOrthHermiteNorms,
+                'MWOrthWProdsHermite': self.MWOrthWProdsHermite,
+                'MWOrthCs': self.MWOrthCs}
         
     '''
     def MakeMemoryFriendly:
