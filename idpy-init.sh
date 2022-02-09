@@ -7,15 +7,6 @@ source .idpy-env
 
 echo "Welcome to idea.deploy!"
 echo
-echo "Checking if conda is installed"
-CONDA_F=$(conda -V 1>/dev/null 2>/dev/null || echo 0 && echo 1)
-PACKAGE_INSTALL=
-
-if ((CONDA_F))
-then
-    echo "conda is found"
-fi
-
 echo
 
 echo "Selecting PyPI/pythonhosted servers"
