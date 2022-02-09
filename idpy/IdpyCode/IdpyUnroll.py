@@ -247,6 +247,9 @@ def _get_seq_vars(N, _root_symbol):
 def _get_sympy_seq_macros(N, _root_symbol):
     return [sp.Symbol(_) for _ in _get_seq_macros(N, _root_symbol)]
 
+def _get_sympy_seq_funcs(N, _root_symbol):
+    return [sp.Function(_) for _ in _get_seq_macros(N, _root_symbol)]
+
 def _get_sympy_seq_vars(N, _root_symbol):
     return _get_sympy_seq_macros(N, _root_symbol)
 
@@ -531,7 +534,7 @@ def _check_lambda_args(args_n, _lambda = None):
     if _lambda is None:
         raise Exception("Missing argument '_lambda'")
     elif _lambda.__code__.co_argcount != args_n:
-        raise Excpetion(
+        raise Exception(
             "The number of arguments for '_lambda' should be ", args_n
         )
 
