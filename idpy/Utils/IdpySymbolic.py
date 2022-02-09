@@ -276,3 +276,11 @@ class SymmetricTensor:
             _sum_dict[_key] = self[_key] + _b[_key]
 
         return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
+
+def GetASymmetricTensor(dim, order, root_sym = 'A'):
+    _taylor_indices = TaylorTuples(list(range(dim)), order)
+    _swap_dict = {}
+    for _i, _index_tuple in enumerate(_taylor_indices):
+        _lower_indices = reduce(lambda x, y: str(x) + str(y), _index_tuple)
+        _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_" + _lower_indices)
+    return SymmetricTensor(c_dict = _swap_dict, d = dim, rank = order)
