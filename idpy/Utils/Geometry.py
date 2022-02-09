@@ -59,3 +59,15 @@ def IsSameVector(A, B):
 import numpy as np
 def FlipVector(A):
     return tuple(np.flip(A))
+
+'''
+Here U and V are supposed to be iterables and prod a function of two arguments
+'''
+def ProjectionVAlongU(V, U, prod):
+    return (prod(V, U) / prod(U, U))
+
+'''
+Here U is supposed to be multiplyable by a scalar: sympy.Matrix works
+'''
+def ProjectVAlongU(V, U, prod):
+    return U * ProjectionVAlongU(V, U, prod)
