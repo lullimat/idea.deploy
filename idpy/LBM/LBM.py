@@ -593,7 +593,7 @@ class RootLB(IdpySims):
         if self.params_dict['set_ordering'] == 'cpu':
             _u_dims = np.flip(np.append([self.sims_vars['DIM']], self.sims_vars['dim_sizes']))
         if self.params_dict['set_ordering'] == 'gpu':
-            _u_dims = np.append([self.sims_vars['dim_sizes', self.sims_vars['DIM']]])
+            _u_dims = np.flip(np.append(self.sims_vars['dim_sizes'], [self.sims_vars['DIM']]))
             
         _u_swap = _u_swap.reshape(_u_dims)
         return _u_swap
