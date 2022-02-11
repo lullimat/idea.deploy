@@ -636,7 +636,7 @@ def _codify_MMIX(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_assignment(
             root_seed,
-            root_seed + ' * 6364136223846793005LLU + 1442695040888963407LLU'
+            root_seed + ' * 6364136223846793005 + 1442695040888963407'
         )
     _swap_code += _codify_newl
 
