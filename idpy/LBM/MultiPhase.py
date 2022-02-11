@@ -420,6 +420,8 @@ class ShanChenMultiPhase(RootLB):
         _stream = IdeaPsi.Deploy([self.sims_idpy_memory['n'],
                                   self.sims_idpy_memory['psi'],
                                   self.sims_idpy_memory['pop']])
+
+        _stream = [_stream] if self.params_dict['lang'] == OCL_T else None        
         
         IdeaVelocity.Deploy([self.sims_idpy_memory['n'],
                              self.sims_idpy_memory['u'],
