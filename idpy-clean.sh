@@ -11,7 +11,7 @@ echo
 echo "Welcome to the idea.deploy cleaning script!"
 echo "Cleaning jupyter environment..."
 (
-    source ${VENV}/bin/activate
+    source "${VENV}/bin/activate"
     jupyter kernelspec uninstall idpy-env -y
 )
 echo "done"
@@ -20,43 +20,45 @@ echo
 #################################
 ## Cleaning virtual environment
 echo -n "Cleaning python virtual environment..."
-if [ -d ${VENV} ]
+if [ -d "${VENV}" ]
 then
 	if ((${VERBOSE_FLAG}))
 	then
 		echo
-	    echo rm -r ${VENV}
+	    echo rm -r "${VENV}"
 	fi		
-	rm -r ${VENV}
+	rm -r "${VENV}"
 fi
 echo "done"
 echo
 #################################
 ## Cleaning found cuda path
 echo -n "Cleaning found cuda path..."
-if [ -f ${ID_CUDA_PATH_FOUND} ]
+if [ -f "${ID_CUDA_PATH_FOUND}" ]
 then
 	if ((${VERBOSE_FLAG}))
 	then
 		echo
-	    echo rm ${ID_CUDA_PATH_FOUND}
+	    echo rm "${ID_CUDA_PATH_FOUND}"
 	fi	
-	rm ${ID_CUDA_PATH_FOUND}
+	rm "${ID_CUDA_PATH_FOUND}"
 fi
 echo "done"
 echo
 #################################
 ## Deleting python tests output
 echo -n "Checking python tests outputs..."
-FILES_LIST="${IDPY_TEST_STDOUT} ${IDPY_TEST_STDERR}"
-for FILE_NAME in ${FILES_LIST}
+FILES_LIST[0]="${IDPY_TEST_STDOUT}"
+FILES_LIST[1]="${IDPY_TEST_STDERR}"
+for((FILE_I=0; FILE_I<${#FILES_LIST[@]}; FILE_I++))
 do
-    if [ -f ${FILE_NAME} ]
+	FILE_NAME=${FILES_LIST[${FILE_I}]}
+    if [ -f "${FILE_NAME}" ]
     then
     	if ((${VERBOSE_FLAG}))
     	then
     		echo
-		    echo "rm ${FILE_NAME}"
+		    echo rm "${FILE_NAME}"
 		 fi
 	    rm "${FILE_NAME}"
 	fi
@@ -72,17 +74,8 @@ STRING_LIST[2]=${ID_BASHRC_SOURCE_ALIASES}
 for((STRING_I=0; STRING_I<${#STRING_LIST[@]}; STRING_I++))
 do
 	STRING=${STRING_LIST[${STRING_I}]}
-	STRING_CHECK=$(grep "${STRING}" ${HOME}/.bashrc \
-				1>/dev/null 2>/dev/null && echo 1 || echo 0)
-	if((${STRING_CHECK} == 1))
-	then
-		if ((${VERBOSE_FLAG}))
-		then
-			echo "Deleting line ${STRING} from ${HOME}/.bashrc"
-		fi
-		STRING_SED=$(echo ${STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
-		sed -i.idpy.bkp -e "/${STRING_SED}/d" ${HOME}/.bashrc
-	fi
+	STRING_SED=$(echo ${STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
+	sed -i.idpy.bkp -e "/${STRING_SED}/d" ${HOME}/.bashrc
 done
 echo "done"
 echo
