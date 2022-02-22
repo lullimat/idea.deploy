@@ -3,7 +3,7 @@
 # Permission to copy and modify is granted under the MIT license
 # Last revised 25/6/2021
 
-source .idpy-env
+source .idpy-env-old
 
 echo "Welcome to idea.deploy!"
 echo
