@@ -63,7 +63,26 @@ append to sys path in order to avoid relative imports
 '''
 sys.path.append(_idea_dot_deploy_path)
 
-_idpy_env_path = _idea_dot_deploy_path + "/" + "idpy-env/"
+'''
+Define some virtual environment variables
+'''
+import re
+_VENV_ROOT_STR, _IDPY_ENV_F = "VENV_ROOT", ".idpy-env"
+_id_env_file = open(_idea_dot_deploy_path + "/" + _IDPY_ENV_F)
+_venv_root = None
+for _line in _id_env_file.readlines():
+    if re.search(_VENV_ROOT_STR, _line):
+        _venv_root = _line.split("/")[1].strip()
+        break
+_id_env_file.close()
+if _venv_root is None:
+    raise \
+        Exception(
+            "Could not find string ", _VENV_ROOT_STR, 
+            "in file", _idea_dot_deploy_path + "/" + _IDPY_ENV_F
+            )
+
+_idpy_env_path = _idea_dot_deploy_path + "/" + _venv_root + "/"
 _cuda_path_found = _idpy_env_path + "/" + "cuda_path_found"
 
 '''

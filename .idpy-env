@@ -1,8 +1,16 @@
 # VENV variables
-VENV=${PWD}/idpy-env/
+VENV_ROOT=${PWD}/py-env
+VENV=${VENV_ROOT}/idpy-env
 VENV_SRC=${VENV}/src/
 VENV_BIN=${VENV}/bin/
 VENV_LIB=${VENV}/lib/
+VENV_ALIASES=${VENV}/idpy-aliases.sh
+
+ID_BASHRC_BANNER="# idea.deploy: the 2 lines below are for importing the aliases"
+ID_BASHRC_ALIASES_OPT="shopt -s expand_aliases"
+ID_BASHRC_SOURCE_ALIASES="source ${VENV_ALIASES}"
+
+ID_CUDA_PATH_FOUND=${VENV_ROOT}/cuda_path_found
 
 # SERVERS
 PYPI_SERVERS[0]=pypi.python.org

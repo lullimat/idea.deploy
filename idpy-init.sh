@@ -7,7 +7,6 @@ source .idpy-env
 
 echo "Welcome to idea.deploy!"
 echo
-echo
 
 echo "Selecting PyPI/pythonhosted servers"
 
@@ -133,7 +132,7 @@ fi
 #####################
 ## Checking CUDA
 echo -n "Looking for CUDA installation (for pyopencl headers):..."
-if [ -f ${VENV}/cuda_paths ]
+if [ -f ${VENV_ROOT}/cuda_paths ]
 then
     CUDA_F=0
     while IFS= read -r line
@@ -143,9 +142,9 @@ then
 	    CUDA_F=1
 	    CUDA_PATH=${line}
 	fi
-    done < ${VENV}/cuda_paths
+    done < ${VENV_ROOT}/cuda_paths
 else
-    echo "File ${VENV}/cuda_paths not found!"
+    echo "File ${VENV_ROOT}/cuda_paths not found!"
     echo "Looks like something is wrong with the installation"
     echo "Bye Bye!"
     exit 1
@@ -154,7 +153,7 @@ fi
 if ((CUDA_F))
 then
     echo "Found ${CUDA_PATH}"
-    echo ${CUDA_PATH} > ${VENV}/cuda_path_found
+    echo ${CUDA_PATH} > ${ID_CUDA_PATH_FOUND}
     CUDA_EXPORT_PATH_STRING="export PATH=\${PATH}:${CUDA_PATH}/bin"
     CUDA_EXPORT_LD_LIB_PATH_STRING="export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:${CUDA_PATH}/lib:${CUDA_PATH}/lib64"
     CHECK_CUDA_PATH_ACTIVATE=$(grep "${CUDA_EXPORT_PATH_STRING}" \
@@ -184,7 +183,7 @@ then
     fi
 else
     echo "Not Found"
-    echo > ${VENV}/cuda_path_found
+    echo > ${VENV_ROOT}/cuda_path_found
 fi
 
 ## Check if pycuda is installed
@@ -212,7 +211,7 @@ if((VENV_F == 0))
 then
     echo "Pip installing requirements"
     pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
-    pip install -r ${VENV}/requirements.txt ${PIP_SERVER_OPTION}
+    pip install -r ${VENV_ROOT}/requirements.txt ${PIP_SERVER_OPTION}
     ## Install pycuda if cuda is found
     if ((CUDA_F && 0))
     then
@@ -357,30 +356,14 @@ echo
 ## ALIASES
 for((ALIAS_I=0; ALIAS_I<${#IDPY_ALIASES[@]}; ALIAS_I++))
 do
-    ALIAS_STRING=${IDPY_ALIASES[ALIAS_I]}
-    ALIAS_STRING_SED=${IDPY_ALIASES_SED[ALIAS_I]}    
-    ALIAS_CHECK=$(grep "${ALIAS_STRING_SED}" ${HOME}/.bashrc \
-			1>/dev/null 2>/dev/null && echo 1 || echo 0)
-
-    if((${ALIAS_CHECK} == 0))
-    then
-	echo "${ALIAS_STRING}"
-	ALIAS_REPLY=0
-	while true
-	do
-	    read -p "Would you like to append an this alias to your ${HOME}/.bashrc? (Y/N) " yn
-	    case ${yn} in
-		[Yy]* ) ALIAS_REPLY=1; break;;
-		[Nn]* ) break;;
-		* ) echo "Please answer yes or no";;
-	    esac
-	done
-	if((${ALIAS_REPLY}))
-	then
-	    echo "${ALIAS_STRING}" >> ${HOME}/.bashrc
-	fi
-	echo "For using the alias in the present shell: source ${HOME}/.bashrc"
-    fi
-    echo
+	echo "${IDPY_ALIASES[ALIAS_I]}" >> ${VENV_ALIASES}
 done
-echo "Python virtual environment for idea.deploy initialized"
+## Appending lines at the end of the .bashrc to source the aliases
+echo "${ID_BASHRC_BANNER}" >> ${HOME}/.bashrc
+echo "${ID_BASHRC_ALIASES_OPT}" >> ${HOME}/.bashrc
+echo "${ID_BASHRC_SOURCE_ALIASES}" >> ${HOME}/.bashrc
+
+echo "For using the alias in the present shell: source ${HOME}/.bashrc"
+
+echo "Python virtual environment for idea.deploy initialized!"
+echo
