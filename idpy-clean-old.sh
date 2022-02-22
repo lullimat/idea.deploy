@@ -3,7 +3,7 @@
 # Permission to copy and modify is granted under the MIT license
 # Last revised 28/8/2020
 
-source .idpy-env
+source .idpy-env-old
 echo
 echo "Welcome to the idea.deploy cleaning script!"
 echo "Cleaning python virtual environment..."
