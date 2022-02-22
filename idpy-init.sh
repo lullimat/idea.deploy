@@ -9,18 +9,53 @@ echo "Welcome to idea.deploy!"
 echo
 
 echo "Selecting PyPI/pythonhosted servers"
+echo "Please select the region/servers for downloading python packages"
+echo
+for((SERVER_NAME_I=0; SERVER_NAME_I<${#PYHOSTED_SERVERS[@]}; SERVER_NAME_I++))
+do
+    echo "${SERVER_NAME_I}) ${PYHOSTED_SERVERS[${SERVER_NAME_I}]}/${PYPI_SERVERS[${SERVER_NAME_I}]}"
+done
+echo "$((${#PYPI_SERVERS[@]}))) for custom addresses"
+echo
 
-function CheckPing { ping -c 2 ${1} 2>/dev/null 1>/dev/null && echo 1 || echo 0; }
+while true
+do
+    read -p "Enter selection (press 'return' for default 0): " SELECTED_SERVER
+    if [ -z ${SELECTED_SERVER} ]
+    then
+        SELECTED_SERVER=0
+    fi
 
-USE_PYPI_SERVER=${PYPI_SERVERS[0]}
-USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[0]}
-PIP_SERVER_OPTION=""
+    if((SELECTED_SERVER >= 0 && SELECTED_SERVER <= ${#PYPI_SERVERS[@]}))
+    then
+        break
+    else
+        echo
+        echo "Please enter an integer between 0 and $((${#PYPI_SERVERS[@]}))"
+        echo
+    fi
+done
+echo
 
-if (($(CheckPing "www.google.com") == 0))
+if((SELECTED_SERVER < ${#PYPI_SERVERS[@]}))
 then
-    USE_PYPI_SERVER=${PYHOSTED_SERVERS[1]}
-    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[1]}
-    PIP_SERVER_OPTION="-i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}"
+    USE_PYPI_SERVER=${PYPI_SERVERS[${SELECTED_SERVER}]}
+    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[${SELECTED_SERVER}]}
+    PIP_SERVER_OPTION=${PIP_SERVER_OPTION_LIST[${SELECTED_SERVER}]}
+elif((SELECTED_SERVER == ${#PYPI_SERVERS[@]}))
+then
+    echo "If you wish to add this choice as one of the default options you can modify"
+    echo "the variables 'PYPI_SERVERS', 'PYHOSTED_SERVERS' and 'PIP_SERVER_OPTION_LIST'"
+    echo "in the file '.idpy-env'"
+    echo    
+    echo "Please insert the servers addresses and options"
+    read -p "Pythonhosted server: " USE_PYHOSTED_SERVER
+    read -p "Pypi server: " USE_PYPI_SERVER
+    read -p "Pip server options: " PIP_SERVER_OPTION
+    if [ -z ${PIP_SERVER_OPTION} ]
+    then
+        PIP_SERVER_OPTION=""
+    fi
 fi
 echo
 
@@ -157,13 +192,9 @@ then
     CUDA_EXPORT_PATH_STRING="export PATH=\${PATH}:${CUDA_PATH}/bin"
     CUDA_EXPORT_LD_LIB_PATH_STRING="export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:${CUDA_PATH}/lib:${CUDA_PATH}/lib64"
     CHECK_CUDA_PATH_ACTIVATE=$(grep "${CUDA_EXPORT_PATH_STRING}" \
-				    ${VENV_BIN}/activate \
-				    1>/dev/null 2>/dev/null \
-				   && echo 1 || echo 0)
+        ${VENV_BIN}/activate &>/dev/null && echo 1 || echo 0)
     CHECK_CUDA_LD_PATH_ACTIVATE=$(grep "${CUDA_EXPORT_LD_LIB_PATH_STRING}" \
-				       ${VENV_BIN}/activate \
-				       1>/dev/null 2>/dev/null \
-				      && echo 1 || echo 0)
+        ${VENV_BIN}/activate &>/dev/null && echo 1 || echo 0)
 
     if((CHECK_CUDA_PATH_ACTIVATE == 0))
     then
