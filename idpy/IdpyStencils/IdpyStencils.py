@@ -1313,7 +1313,7 @@ class IdpyStencil:
                             if abs(_xi[_d]) > 0:
                                 
                                 _assignement_function = (
-                                    _codify_sympy_add_assignment if _xi[_d] > 0 else 
+                                    _codify_sympy_add_assignment if (_xi[_d] * _weights_values[_q]) > 0 else 
                                     _codify_sympy_sub_assignment
                                 )
                                 
@@ -1352,7 +1352,7 @@ class IdpyStencil:
                         if abs(_xi[_d]) > 0:
 
                             _assignement_function = (
-                                _codify_sympy_add_assignment if _xi[_d] > 0 else 
+                                _codify_sympy_add_assignment if (_xi[_d] * _weights_values[_q]) > 0 else 
                                 _codify_sympy_sub_assignment
                             )
                             
