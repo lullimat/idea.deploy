@@ -33,7 +33,7 @@ Provides general dumping/reading facility through the package dill
 # How to dump lambdas: https://stackoverflow.com/questions/16439301/cant-pickle-defaultdict
 from collections import defaultdict
 import dill, os
-import h5py
+import h5py, json
 import numpy as np
 
 class ManageData:
@@ -78,22 +78,30 @@ class ManageData:
         else:
             raise Exception("key not present in the data base")
 
-    def Dump(self, kind = 'dill'):
-        if kind not in ['hdf5', 'dill']:
-            raise Exception("Parameter 'kind' must be either 'hdf5' or 'dill'")
+    def Dump(self, kind = 'dill', indent = None):
+        if kind not in ['hdf5', 'dill', 'json']:
+            raise Exception("Parameter 'kind' must be in ['hdf5','dill','json']")
         if kind == 'hdf5':
             self.DumpHDF5()        
         if kind == 'dill':
             self.DumpDill()
+        if kind == 'json':
+            self.DumpJson(indent = indent)
 
     def Read(self, kind = 'dill'):
-        if kind not in ['hdf5', 'dill']:
-            raise Exception("Parameter 'kind' must be either 'hdf5' or 'dill'")        
+        if kind not in ['hdf5', 'dill', 'json']:
+            raise Exception("Parameter 'kind' must be in ['hdf5','dill','json']")        
         if kind == 'hdf5':
             return self.ReadHDF5()        
         if kind == 'dill':
             return self.ReadDill()
-            
+        if kind == 'json':
+            return self.ReadJson()
+
+    def DumpJson(self, indent = None):
+        file_out = open(self.dump_file, 'w')
+        file_out.write(json.dumps(self.data_dictionary, indent = indent))
+        file_out.close()
         
     def DumpDill(self):
         file_out = open(self.dump_file, 'wb')
@@ -127,8 +135,17 @@ class ManageData:
             file_in = open(self.dump_file, 'rb')
             data_dill = file_in.read()
             file_in.close()
-            ##self.__dict__ = dill.loads(data_dill)
             self.data_dictionary = dill.loads(data_dill)
+            return True
+        else:
+            return False
+
+    def ReadJson(self):
+        if os.path.isfile(self.dump_file):
+            file_in = open(self.dump_file, 'r')
+            data_json = json.load(file_in)
+            file_in.close()
+            self.data_dictionary = defaultdict(dict, data_json)
             return True
         else:
             return False

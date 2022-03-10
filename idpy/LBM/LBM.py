@@ -994,7 +994,7 @@ class ShanChenMultiPhase(RootLB):
         self.InitPopulations()
 
         
-    def InitRadialInterface(self, n_g, n_l, R, full_flag = True):
+    def InitRadialInterface(self, n_g, n_l, R, W = 1, full_flag = True):
         '''
         Record init values
         '''
@@ -1012,6 +1012,7 @@ class ShanChenMultiPhase(RootLB):
         n_g = NPT.C[self.custom_types['NType']](n_g)
         n_l = NPT.C[self.custom_types['NType']](n_l)
         R = NPT.C[self.custom_types['LengthType']](R)
+        W = NPT.C[self.custom_types['LengthType']](W)
         full_flag = NPT.C[self.custom_types['FlagType']](full_flag)
         
         Idea = _K_InitRadialInterface(tenet = self.tenet,
@@ -1023,7 +1024,7 @@ class ShanChenMultiPhase(RootLB):
                      self.sims_idpy_memory['dim_sizes'],
                      self.sims_idpy_memory['dim_strides'],
                      self.sims_idpy_memory['dim_center'],
-                     n_g, n_l, R, full_flag])
+                     n_g, n_l, R, W, full_flag])
         
         self.init_status['n'] = True
         self.init_status['u'] = True
@@ -1733,7 +1734,7 @@ class K_InitRadialInterface(IdpyKernel):
                        'SType * dim_strides': ['global', 'restrict', 'const'],
                        'SType * dim_center': ['global', 'restrict', 'const'],
                        'NType n_g': ['const'], 'NType n_l': ['const'],
-                       'LengthType R': ['const'],
+                       'LengthType R': ['const'], 'LengthType W': ['const'],
                        'FlagType full_flag': ['const']}
 
         self.kernels[IDPY_T] = """
@@ -1745,7 +1746,7 @@ class K_InitRadialInterface(IdpyKernel):
         NType delta_n = full_flag * (n_l - n_g) + (1 - full_flag) * (n_g - n_l);
 
         n[g_tid] = 0.5 * (n_g + n_l) - \
-        0.5 * delta_n * tanh((LengthType)(r - R));
+        0.5 * delta_n * tanh((LengthType)(r - R) / W);
 
         for(int d=0; d<DIM; d++){
         u[g_tid + d * V] = 0.;
