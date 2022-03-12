@@ -66,6 +66,18 @@ IDStencils['LBM']['XI_D2Q9'] = {'XIs': ((0, 0),
                                        sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36)),
                                 'c2': sp.Rational(1, 3)}
 
+IDStencils['LBM']['XI_D3Q15'] = {'XIs': ((0, 0, 0),
+                                         (1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+                                         (1, 1, 1), (-1, 1, 1), (-1, -1, 1), (1, -1, 1),
+                                         (1, 1, -1), (-1, 1, -1), (-1, -1, -1), (1, -1, -1)),
+                                 'Ws': (sp.Rational(2, 9),
+                                        sp.Rational(1, 9), sp.Rational(1, 9), sp.Rational(1, 9),
+                                        sp.Rational(1, 9), sp.Rational(1, 9), sp.Rational(1, 9),
+                                        sp.Rational(1, 72), sp.Rational(1, 72), sp.Rational(1, 72), sp.Rational(1, 72),
+                                        sp.Rational(1, 72), sp.Rational(1, 72), sp.Rational(1, 72), sp.Rational(1, 72)),
+                                 'c2': sp.Rational(1, 3)}
+
+
 IDStencils['LBM']['XI_D3Q19'] = {'XIs': ((0, 0, 0),
                                          (1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
                                          (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
@@ -77,6 +89,23 @@ IDStencils['LBM']['XI_D3Q19'] = {'XIs': ((0, 0, 0),
                                         sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36),
                                         sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36),
                                         sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36), sp.Rational(1, 36)),
+                                 'c2': sp.Rational(1, 3)}
+
+IDStencils['LBM']['XI_D3Q27'] = {'XIs': ((0, 0, 0),
+                                         (1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+                                         (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
+                                         (1, 0, 1), (-1, 0, 1), (-1, 0, -1), (1, 0, -1),
+                                         (0, 1, 1), (0, -1, 1), (0, -1, -1), (0, 1, -1),
+                                         (1, 1, 1), (-1, 1, 1), (-1, -1, 1), (1, -1, 1),
+                                         (1, 1, -1), (-1, 1, -1), (-1, -1, -1), (1, -1, -1)),
+                                 'Ws': (sp.Rational(8, 27),
+                                        sp.Rational(2, 27), sp.Rational(2, 27), sp.Rational(2, 27),
+                                        sp.Rational(2, 27), sp.Rational(2, 27), sp.Rational(2, 27),
+                                        sp.Rational(1, 54), sp.Rational(1, 54), sp.Rational(1, 54), sp.Rational(1, 54),
+                                        sp.Rational(1, 54), sp.Rational(1, 54), sp.Rational(1, 54), sp.Rational(1, 54),
+                                        sp.Rational(1, 54), sp.Rational(1, 54), sp.Rational(1, 54), sp.Rational(1, 54),
+                                        sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216),
+                                        sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216)),
                                  'c2': sp.Rational(1, 3)}
 
 IDStencils['LBM']['SC_D2E4'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
@@ -110,6 +139,74 @@ IDStencils['LBM']['SC_D3E4'] = {'XIs': ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1
                                        sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12),
                                        sp.Rational(1, 12), sp.Rational(1, 12)), 
                                 'e2': 1}
+
+
+IDStencils['LBM']['SC_D3E6'] = \
+    {'XIs': 
+        ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), 
+        (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
+        (0, 1, 1), (0, -1, 1), (0, -1, -1), (0, 1, -1),
+        (1, 0, 1), (1, 0, -1), (-1, 0, -1), (-1, 0, 1),
+        (1, 1, 1), (-1, 1, 1), (-1, -1, 1), (1, -1, 1),
+        (1, 1, -1), (-1, 1, -1), (-1, -1, -1), (1, -1, -1),
+        (2, 0, 0), (0, 2, 0), (-2, 0, 0), (0, -2, 0), (0, 0, 2), (0, 0, -2)),
+    'Ws': (sp.Rational(2, 15), sp.Rational(2, 15), sp.Rational(2, 15), sp.Rational(2, 15), sp.Rational(2, 15), sp.Rational(2, 15),
+            sp.Rational(1, 15), sp.Rational(1, 15), sp.Rational(1, 15), sp.Rational(1, 15),
+            sp.Rational(1, 15), sp.Rational(1, 15), sp.Rational(1, 15), sp.Rational(1, 15),
+            sp.Rational(1, 15), sp.Rational(1, 15), sp.Rational(1, 15), sp.Rational(1, 15),
+            sp.Rational(1, 60), sp.Rational(1, 60), sp.Rational(1, 60), sp.Rational(1, 60),
+            sp.Rational(1, 60), sp.Rational(1, 60), sp.Rational(1, 60), sp.Rational(1, 60),
+            sp.Rational(1, 120), sp.Rational(1, 120), sp.Rational(1, 120), sp.Rational(1, 120), sp.Rational(1, 120), sp.Rational(1, 120))
+    }
+
+IDStencils['LBM']['SC_D3E8'] = \
+    {'XIs': 
+        ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+        (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
+        (0, 1, 1), (0, -1, 1), (0, -1, -1), (0, 1, -1),
+        (1, 0, 1), (1, 0, -1), (-1, 0, -1), (-1, 0, 1),
+        (1, 1, 1), (-1, 1, 1), (-1, -1, 1), (1, -1, 1),
+        (1, 1, -1), (-1, 1, -1), (-1, -1, -1), (1, -1, -1),
+        (2, 0, 0), (0, 2, 0), (-2, 0, 0), (0, -2, 0), (0, 0, 2), (0, 0, -2),
+        (2, 1, 0), (2, -1, 0), (2, 0, 1), (2, 0, -1),
+        (1, 2, 0), (-1, 2, 0), (0, 2, 1), (0, 2, -1),
+        (-2, 1, 0), (-2, -1, 0), (-2, 0, 1), (-2, 0, -1),
+        (1, -2, 0), (-1, -2, 0), (0, -2, 1), (0, -2, -1),
+        (1, 0, 2), (-1, 0, 2), (0, 1, 2), (0, -1, 2),
+        (1, 0, -2), (-1, 0, -2), (0, 1, -2), (0, -1, -2),
+        (2, 1, 1), (2, -1, 1), (2, -1, -1), (2, 1, -1),
+        (1, 2, 1), (-1, 2, 1), (-1, 2, -1), (1, 2, -1),
+        (-2, 1, 1), (-2, -1, 1), (-2, -1, -1), (-2, 1, -1),
+        (1, -2, 1), (-1, -2, 1), (-1, -2, -1), (1, -2, -1),
+        (1, 1, 2), (-1, 1, 2), (-1, -1, 2), (1, -1, 2),
+        (1, 1, -2), (-1, 1, -2), (-1, -1, -2), (1, -1, -2),
+        (2, 2, 0), (-2, 2, 0), (-2, -2, 0), (2, -2, 0),
+        (2, 0, 2), (-2, 0, 2), (-2, 0, -2), (2, 0, -2),
+        (0, 2, 2), (0, -2, 2), (0, -2, -2), (0, 2, -2)),
+    'Ws': (sp.Rational(4, 45), sp.Rational(4, 45), sp.Rational(4, 45), sp.Rational(4, 45), sp.Rational(4, 45), sp.Rational(4, 45),
+            sp.Rational(1, 21), sp.Rational(1, 21), sp.Rational(1, 21), sp.Rational(1, 21),
+            sp.Rational(1, 21), sp.Rational(1, 21), sp.Rational(1, 21), sp.Rational(1, 21),
+            sp.Rational(1, 21), sp.Rational(1, 21), sp.Rational(1, 21), sp.Rational(1, 21),
+            sp.Rational(2, 105), sp.Rational(2, 105), sp.Rational(2, 105), sp.Rational(2, 105),
+            sp.Rational(2, 105), sp.Rational(2, 105), sp.Rational(2, 105), sp.Rational(2, 105),
+            sp.Rational(5, 504), sp.Rational(5, 504), sp.Rational(5, 504), sp.Rational(5, 504), sp.Rational(5, 504), sp.Rational(5, 504),
+            sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315),
+            sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315),
+            sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315),
+            sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315),
+            sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315),
+            sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315), sp.Rational(1, 315),
+            sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630),
+            sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630),
+            sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630),
+            sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630),
+            sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630),
+            sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630), sp.Rational(1, 630),
+            sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040),
+            sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040),
+            sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040))
+    }
+
 
 
 from idpy.IdpyCode.IdpyUnroll import _get_single_neighbor_pos_macro_fully_sym
