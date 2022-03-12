@@ -679,6 +679,31 @@ class IdpyLoop:
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
 
+        '''
+        Synchronizing with device: can this be done better? Are we waisting time?
+        '''
+        for seq_i in range(len(self.sequences)):
+            seq_len = len(self.sequences[seq_i])                
+            '''
+            OpenCL
+            '''                
+            if self.langs[seq_i] == OCL_T:                
+                '''
+                Waiting
+                '''
+                if self.meta_streams[seq_i][-1][0] is not None:
+                    self.meta_streams[seq_i][-1][0].wait()
+
+            '''
+            CUDA
+            '''
+            if self.langs[seq_i] == CUDA_T:
+                _end = cu_driver.Event()
+                '''
+                Waiting
+                '''
+                _end.record(stream = self.meta_streams[seq_i])
+                _end.synchronize()                
 
 '''
 most likely to be deleted before merging to master
