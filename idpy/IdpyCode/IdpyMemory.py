@@ -98,6 +98,9 @@ if idpy_langs_sys[CUDA_T]:
     def _max_CUDA(a, stream = None):
         return cu_array.max(a = a, stream = stream)
 
+    def _min_CUDA(a, stream = None):
+        return cu_array.min(a = a, stream = stream)
+    
 
 if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
@@ -165,6 +168,9 @@ if idpy_langs_sys[OCL_T]:
     def _max_OCL(a, queue = None):
         return cl_array.max(a = a, queue = queue)
 
+    def _min_OCL(a, queue = None):
+        return cl_array.min(a = a, queue = queue)
+    
 def Array(*args, **kwargs):
     if 'tenet' not in kwargs:
         raise Exception("Need to pass tenet = tenetObject")
@@ -246,6 +252,13 @@ def Max(ary, idpy_stream = None):
     if idpy_langs_sys[OCL_T] and ary.lang == OCL_T:
         return _max_OCL(a = ary, queue = ary.queue).get(queue = ary.queue).item()
 
+def Min(ary, idpy_stream = None):
+    if idpy_langs_sys[CUDA_T] and ary.lang == CUDA_T:
+        return _min_CUDA(a = ary, stream = idpy_stream).get().item()
+
+    if idpy_langs_sys[OCL_T] and ary.lang == OCL_T:
+        return _min_OCL(a = ary, queue = ary.queue).get(queue = ary.queue).item()
+    
 '''
 need to define IdpySum:
 a class that can used in IdpyLoop's
