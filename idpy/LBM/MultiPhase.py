@@ -29,7 +29,7 @@ import sympy as sp
 
 from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
 
-from idpy.IdpyCode import IDPY_T
+from idpy.IdpyCode import IDPY_T, OCL_T, CUDA_T
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyMethod, IdpyLoop, IdpyLoopProfile
 from idpy.IdpyCode.IdpyUnroll import _get_seq_macros, _get_seq_vars, _codify_newl
@@ -405,7 +405,7 @@ class ShanChenMultiPhase(RootLB):
                 SCFStencil = self.params_dict['f_stencil'],
                 use_ptrs = self.params_dict['use_ptrs'],
                 ordering_lambda_pop = self.sims_vars['ordering']['pop'],
-                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                ordering_lambda_u= self.sims_vars['ordering']['u'],
                 collect_mul = False, pressure_mode = 'compute',
                 root_dim_sizes = self.params_dict['root_dim_sizes'],
                 root_strides = self.params_dict['root_strides'],
@@ -427,13 +427,10 @@ class ShanChenMultiPhase(RootLB):
                              self.sims_idpy_memory['u'],
                              self.sims_idpy_memory['pop'],
                              self.sims_idpy_memory['psi']],
-                            idpy_stream = [_stream])
+                            idpy_stream = _stream)
 
         self.init_status['n'] = True
-        self.init_status['u'] = True
-
-        return _K_ComputeVelocityAfterForceSCMPMeta
-        
+        self.init_status['u'] = True        
         
     def InitPopulations(self):
         if not AllTrue([self.init_status['n'], self.init_status['u']]):
