@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -530,7 +530,7 @@ class ShanChanEquilibriumCache(ManageData):
     def __init__(self,
                  stencil = None,
                  G = None, c2 = None, psi_f = None,
-                 dump_file = 'SCEqCache', n_eps = 1e-2):
+                 dump_file = 'SCEqCache.json', n_eps = 1e-2):
         ManageData.__init__(self, dump_file = dump_file)
 
         if stencil is None:
@@ -551,7 +551,7 @@ class ShanChanEquilibriumCache(ManageData):
         '''
         Looking for the file and data
         '''
-        self.is_file, self.is_key = ManageData.Read(self), False
+        self.is_file, self.is_key = ManageData.Read(self, kind = 'json'), False
         self.dict_string = (str(psi_f) + "_" + str(float(G)) + "_" +
                             str(c2) + "_" + str(stencil.w_sol[0]))
 
@@ -613,15 +613,15 @@ class ShanChanEquilibriumCache(ManageData):
             _n_c = _shan_chen.n_c
             _G_c = _shan_chen.G_c
 
-            _data_dict = {'G_c': _G_c, 'n_c': _n_c,
-                          'n_l': _n_l, 'n_g': _n_g,
-                          'p_0': _p_0, 'sigma_f': _sigma_f}
+            _data_dict = {'G_c': float(_G_c), 'n_c': float(_n_c),
+                          'n_l': float(_n_l), 'n_g': float(_n_g),
+                          'p_0': float(_p_0), 'sigma_f': float(_sigma_f)}
 
             
             self.PushData(data = _data_dict,
                           key = self.dict_string)
 
-            self.Dump()
+            self.Dump(kind = 'json', indent = 4)
 
     def GetFromCache(self):
         return ManageData.PullData(self, key = self.dict_string)

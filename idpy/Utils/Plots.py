@@ -28,7 +28,7 @@ __status__ = "Development"
 import matplotlib.pyplot as plt
 
 def CreateFiguresPanels(_nx, _ny, _x_size = 6.5, _y_size = 4.8):
-    return plt.figure(figsize = (1 * _x_size, 3 * _y_size))
+    return plt.figure(figsize = (_nx * _x_size, _ny * _y_size))
 
 def SetMatplotlibLatexParamas(rc, rcParams):
     if type(rc) != list:
