@@ -51,6 +51,8 @@ from idpy.LBM.LBMKernelsMeta import K_MRTCollideStreamMeta, K_SRTCollideStreamMe
 from idpy.LBM.LBMKernelsMeta import K_StreamPeriodicMeta
 from idpy.IdpyCode.IdpyUnroll import _get_seq_macros
 
+import matplotlib.pyplot as plt
+
 if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
     from idpy.OpenCL.OpenCL import OpenCL
@@ -252,8 +254,18 @@ def GetSnapshotN(lbm):
         lbm.sims_idpy_memory['snapshots_n_k'] = 0
         first_flag = True
 
-    _n_swap = np.copy(lbm.sims_idpy_memory['n'].D2H())
-    _n_swap = _n_swap.reshape(np.flip(lbm.sims_vars['dim_sizes']))
+    if 'root_snapshots' in lbm.sims_vars:
+        _root_snaps = lbm.sims_vars['root_snapshots']
+    else:
+        _root_snaps = './'
+
+    if 'dpi_snapshots' in lbm.sims_vars:
+        _dpi_snaps = lbm.sims_vars['dpi_snapshots']
+    else:
+        _dpi_snaps = 150
+
+
+    _n_swap = lbm.GetDensityField()
     _dim = len(lbm.sims_vars['dim_sizes'])
 
     if _dim == 3:
@@ -262,7 +274,7 @@ def GetSnapshotN(lbm):
     _k_fig = lbm.sims_idpy_memory['snapshots_n_k']
     _fig = plt.figure()
     plt.imshow(_n_swap, origin = 'lower')
-    plt.savefig('./snapshot_' + ('%010d' % (_k_fig)) + '.png', dpi = 150)
+    plt.savefig(_root_snaps + 'snapshot_' + ('%010d' % (_k_fig)) + '.png', dpi = _dpi_snaps)
     plt.close()
 
     lbm.sims_idpy_memory['snapshots_n_k'] += 1
