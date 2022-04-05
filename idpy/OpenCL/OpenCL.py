@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -32,6 +32,7 @@ methods names, if shared, match those of idpy.CUDA.CUDA class
 
 import pyopencl as cl
 from collections import defaultdict
+from idpy.IdpyCode import OCL_T
 
 '''
 The main idea is to create the child classes
@@ -81,6 +82,24 @@ class Tenet(cl.CommandQueue):
             self.mem_pool = cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self))
         else:
             self.mem_pool = cl.tools.MemoryPool(allocator(self))
+
+    def GetDeviceName(self):
+        return self.device_name['Name']
+
+    def GetDeviceNumber(self):
+        return self.device_name['Device']
+
+    def GetDeviceMemory(self):
+        return self.device_name['Memory']
+
+    def GetDeviceFP64(self):
+        return self.device_name['FP64']
+
+    def GetLang(self):
+        return OCL_T
+
+    def GetDrvVersion(self):
+        return str(self.device_name['DrvVersion'])
 
 class TenetNew:
     def __init__(self, cl_context, device):
@@ -182,6 +201,20 @@ class OpenCL:
             return self.devices[self.kind][self.device]
 
     def GetDeviceName(self):
+        _dict = None
+        if self.kind == self.GPU_T:
+            _dict = self.DiscoverGPUs()
+        if self.kind == self.CPU_T:
+            _dict = self.DiscoverCPUs()
+            
+        return {'Name': _dict[self.device]['Name'],
+                'Device': str(self.device),
+                'Memory':  str(_dict[self.device]['Memory']), 
+                'Kind': str(self.kind), 
+                'DrvVersion': _dict[self.device]['DrvVersion'], 
+                'FP64': _dict[self.device]['Double']}
+
+    def GetDeviceNameOld(self):
         _dict = None
         if self.kind == self.GPU_T:
             _dict = self.DiscoverGPUs()

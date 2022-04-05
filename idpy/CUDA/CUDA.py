@@ -3,12 +3,8 @@ Provides a minimal interface for the use of pycuda
 methods names, if shared, match those of idpy.OpenCL.OpenCL class
 """
 
-import pycuda as cu
-import pycuda.driver as cu_driver
-from collections import defaultdict
-
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,6 +30,12 @@ __maintainer__ = "Matteo Lulli"
 __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
+
+import pycuda as cu
+import pycuda.driver as cu_driver
+from collections import defaultdict
+from idpy.IdpyCode import CUDA_T
+
 '''
 The main idea is to create the child classes
 neede to make the Tenet class work homogenously
@@ -54,7 +56,22 @@ class Tenet:
         return self.mem_pool.active_bytes
 
     def GetKind(self):
-        return self.GPU_T    
+        return self.GPU_T
+
+    def GetDeviceName(self):
+        return self.device_name['Name']
+
+    def GetDeviceNumber(self):
+        return self.device_name['Device']
+
+    def GetDeviceMemory(self):
+        return self.device_name['Memory']
+
+    def GetDrvVersion(self):
+        return str(self.device_name['DrvVersion'])
+
+    def GetLang(self):
+        return CUDA_T                      
 
     def End(self, memory_dict = None):
         self.mem_pool.free_held()
@@ -102,9 +119,10 @@ class CUDA:
     def GetDeviceName(self):
         _dict = self.DiscoverGPUs()
             
-        return ("Device: " + str(self.device) + " " +
-                _dict[self.device]['Name'] +
-                " Memory:" +  str(_dict[self.device]['Memory']))
+        return {'Name': _dict[self.device]['Name'],
+                'Device': str(self.device),
+                'Memory':  str(_dict[self.device]['Memory']), 
+                'DrvVersion': _dict[self.device]['DrvVersion']}
 
             
     def DiscoverGPUs(self):
