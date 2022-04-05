@@ -88,11 +88,11 @@ class ManageData:
         if kind == 'json':
             self.DumpJson(indent = indent)
 
-    def Read(self, kind = 'dill'):
+    def Read(self, kind = 'dill', full_key = None):
         if kind not in ['hdf5', 'dill', 'json']:
             raise Exception("Parameter 'kind' must be in ['hdf5','dill','json']")        
         if kind == 'hdf5':
-            return self.ReadHDF5()        
+            return self.ReadHDF5(full_key)
         if kind == 'dill':
             return self.ReadDill()
         if kind == 'json':
@@ -123,10 +123,12 @@ class ManageData:
             if _key not in _grp:
                 print(_key)
                 if type(self.data_dictionary[_key]) is not dict:
-                    _grp.create_dataset(_key, data = self.data_dictionary[_key])
+                    _grp.create_dataset(_key, data = self.data_dictionary[_key], 
+                                        maxshape=(None,))
                 else:
                     _grp.create_dataset(_key,
-                                        data = np.string_(str(self.data_dictionary[_key])))
+                                        data = np.string_(str(self.data_dictionary[_key])), 
+                                        maxshape=(None,))
             
         _out_f.close()
         
@@ -158,18 +160,21 @@ class ManageData:
             file_name = self.dump_file + '.hdf5'
         else:
             file_name = self.dump_file
-        
-        _in_f = h5py.File(file_name, "r")
-        _sims_class_name = list(_in_f.keys())[0]
-        if _sims_class_name != self.__class__.__name__:
-            raise Exception("The file you are reading has been created by another class!")
 
-        if not full_key in _in_f:
-            raise Exception("Key", full_key, "cannot be found in", file_name)
+        if os.path.isfile(file_name):
+            _in_f = h5py.File(file_name, "r")
+            _sims_class_name = list(_in_f.keys())[0]
+            if _sims_class_name != self.__class__.__name__:
+                raise Exception("The file you are reading has been created by another class!")
 
-        _swap_data = np.array(_in_f.get(full_key))
-        _in_f.close()
-        return _swap_data
+            if not full_key in _in_f:
+                raise Exception("Key", full_key, "cannot be found in", file_name)
+
+            _swap_data = np.array(_in_f.get(full_key))
+            _in_f.close()
+            return _swap_data
+        else:
+            return False
 
     def CleanDump(self):
         if os.path.isfile(self.dump_file):
