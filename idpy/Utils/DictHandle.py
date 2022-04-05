@@ -85,6 +85,18 @@ def Edit_Int64ToInt(elem = None, verbose = False):
 	else:
 		return elem, None
 
+def Edit_Float64ToFloat(elem = None, verbose = False):
+	if type(elem) == np.float64:
+		return float(elem), True
+	else:
+		return elem, None
+
+def Edit_Float32ToFloat(elem = None, verbose = False):
+	if type(elem) == np.float32:
+		return float(elem), True
+	else:
+		return elem, None
+
 def Check_WhichNDArray(elem = None, verbose = False):
 	return elem, type(elem) == np.ndarray
 
