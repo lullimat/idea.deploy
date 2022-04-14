@@ -192,6 +192,7 @@ class ShanChen:
             print("eps_val:", self.eps_val)
                 
             self.beta_val = self.PTensor.p_consts_wf['\beta'](self.PTensor.py_stencil.w_sol[which_sol])
+            print("beta_val:", self.beta_val)
             self.sigma_c_val = self.PTensor.p_consts_wf['\sigma_c'](self.PTensor.py_stencil.w_sol[which_sol])
             self.tolman_c_val = self.PTensor.p_consts_wf['t_c'](self.PTensor.py_stencil.w_sol[which_sol])
             self.dndx = None
@@ -396,14 +397,14 @@ class ShanChen:
             self.chi_i_c, self.chi_t_c, self.chi_n_c = [0] * 25, [0] * 25, [0] * 25
             
             # alpha
-            self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 2, 4, 4
-            self.alpha_c[9], self.alpha_c[10] = 12, 24
-            self.alpha_c[13], self.alpha_c[16], self.alpha_c[17] = Rational(88, 3), 40, 80
+            self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 24, 48, 48
+            self.alpha_c[9], self.alpha_c[10] = 144, 288
+            self.alpha_c[13], self.alpha_c[16], self.alpha_c[17] = 336, 480, 960
             # beta
             self.beta_c[1], self.beta_c[2], self.beta_c[4], self.beta_c[5], self.beta_c[8] = \
-                Rational("1/2"), 1, 6, 13, 12
-            self.beta_c[9], self.beta_c[10] = Rational(57, 2), 58
-            self.beta_c[13], self.beta_c[16], self.beta_c[17] = Rational(203, 3), 88, 177
+                6, 12, 72, 156, 144
+            self.beta_c[9], self.beta_c[10] = 342, 696
+            self.beta_c[13], self.beta_c[16], self.beta_c[17] = 828, 1056, 2124
             # gamma
             self.gamma_c[5], self.gamma_c[8], self.gamma_c[10] = 1, 4, Rational(8, 3)
             self.gamma_c[13], self.gamma_c[17] = Rational(68, 3), 5
@@ -417,7 +418,7 @@ class ShanChen:
             # sigma_c
             self.sigma_c_c[1], self.sigma_c_c[4], self.sigma_c_c[5] = -6, -96, -108
             self.sigma_c_c[9], self.sigma_c_c[10] = -486, -768
-            self.sigma_c_c[13], self.sigma_c_c[16], self.sigma_c_c[17] = -300, -1536, 2700
+            self.sigma_c_c[13], self.sigma_c_c[16], self.sigma_c_c[17] = -300, -1536, -2700
             # tolman_c
             self.tolman_c_c[1], self.tolman_c_c[4], self.tolman_c_c[5] = \
                 -Rational('1/2'), -6, -6
@@ -460,11 +461,11 @@ class ShanChen:
             self.p_consts_w = {}
             self.p_consts_w['\alpha'] = 0
             for len2 in self.py_stencil.len_2s:
-                self.p_consts_w['\alpha'] += -12*self.alpha_c[len2] * self.w_sym[len2]
+                self.p_consts_w['\alpha'] += -self.alpha_c[len2] * self.w_sym[len2]
 
             self.p_consts_w['\beta'] = 0
             for len2 in self.py_stencil.len_2s:
-                self.p_consts_w['\beta'] += 12*self.beta_c[len2] * self.w_sym[len2]
+                self.p_consts_w['\beta'] += self.beta_c[len2] * self.w_sym[len2]
             
             self.p_consts_w['\gamma'] = 0
             for len2 in self.py_stencil.len_2s:
