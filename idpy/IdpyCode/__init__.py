@@ -94,7 +94,15 @@ _file_swap.close()
 '''
 Language Types and metaTypes
 '''
-CUDA_T, OCL_T, CTYPES_T, IDPY_T = "pycuda", "pyopencl", "ctypes", "idpy"
+
+from idpy.OpenCL import OCL_T
+from idpy.CUDA import CUDA_T
+from idpy.CTypes import CTYPES_T
+
+IDPY_T = "idpy"
+
+if False:
+    CUDA_T, OCL_T, CTYPES_T, IDPY_T = "pycuda", "pyopencl", "ctypes", "idpy"
 idpy_langs_dict = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}
 
 idpy_langs_human_dict = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes"}
