@@ -34,7 +34,6 @@ __status__ = "Development"
 import pycuda as cu
 import pycuda.driver as cu_driver
 from collections import defaultdict
-from idpy.IdpyCode import CUDA_T
 
 '''
 The main idea is to create the child classes
