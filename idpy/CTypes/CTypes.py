@@ -56,6 +56,9 @@ class Tenet:
     def SetDeviceName(self, device_name):
         self.device_name = device_name
 
+    def GetLang(self):
+        return CTYPES_T                   
+
 class CTypes:
     '''
     class CTypes:
