@@ -32,7 +32,6 @@ methods names, if shared, match those of idpy.CUDA.CUDA class
 
 import pyopencl as cl
 from collections import defaultdict
-from idpy.IdpyCode import OCL_T
 
 '''
 The main idea is to create the child classes
