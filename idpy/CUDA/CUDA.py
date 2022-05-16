@@ -35,6 +35,8 @@ import pycuda as cu
 import pycuda.driver as cu_driver
 from collections import defaultdict
 
+from . import CUDA_T
+
 '''
 The main idea is to create the child classes
 neede to make the Tenet class work homogenously
