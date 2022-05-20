@@ -19,6 +19,9 @@ PYPI_SERVERS[1]=pypi.douban.com
 PYHOSTED_SERVERS[0]=files.pythonhosted.org
 PYHOSTED_SERVERS[1]=pypi.tuna.tsinghua.edu.cn
 
+PIP_SERVER_OPTION_LIST[0]=""
+PIP_SERVER_OPTION_LIST[1]="-i https://${PYPI_SERVERS[1]}/simple"
+
 # ALIASES
 LOAD_ALIAS_STRING="alias idpy-load='source ${VENV_BIN}/activate'"
 LOAD_ALIAS_STRING_SED=$(echo ${LOAD_ALIAS_STRING} | sed 's/\//\\\//g' | sed 's/\ /\\ /g')
