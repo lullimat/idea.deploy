@@ -26,13 +26,7 @@ The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'
 - github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
 ## Available Preprints
-### **A Mesoscale Perspective on the Tolman Length**
-- arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
-- github link: [https://github.com/lullimat/arXiv-2105.08772](https://github.com/lullimat/arXiv-2105.08772)
-
-### **Mesoscale Modelling of the Tolman Length in Multi-component Systems**
-- arXiv link: [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574)
-- github link: [https://github.com/lullimat/arXiv-2112.02574.git](https://github.com/lullimat/arXiv-2112.02574.git)
+Will populate this section soon...
 
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
