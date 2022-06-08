@@ -22,3 +22,4 @@ kaleido
 ipyparallel
 py-cpuinfo
 einsteinpy
+jupyterlab
