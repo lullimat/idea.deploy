@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -53,6 +53,17 @@ def _codify(_expr):
     return str(_expr)
 
 _codify_newl = '\n'
+_codify_tab = (' ' * 4) ##'\t'
+_codify_curly_open = '{'
+_codify_curly_close = '}'
+
+def _codify_prepend_tabs(code, n_tabs=1):
+    _split_lines = code.splitlines()
+    _swap_code = """"""
+    for _line in _split_lines:
+        _swap_code += (_codify_tab * n_tabs) + _line + _codify_newl
+
+    return _swap_code
 
 def _codify_comment(_expr):
     return '// ' + _codify(_expr) + '\n'
@@ -151,6 +162,102 @@ def _codify_assignment_type_check(_var_str, _expr, _type = None,
 _codify_assignments = {'add': _codify_add_assignment, 'sub': _codify_sub_assignment,
                        'mul': _codify_mul_assignment, 'div': _codify_div_assignment,
                        None: _codify_assignment}
+
+
+_conds_list = ['<', '>', '<=', '>=', '==', '!=']
+
+def _codify_for_loop_head(
+    declared_variables, declared_constants, 
+    root_index='i', index_type='unsigned int', condition='<',
+    start_value=0, end_value=None, increment=None):
+
+    if condition not in _conds_list:
+        raise Exception("Parameter 'condition' must be in", _conds_list)
+    
+    _swap_code = """"""
+    # Open round bracket
+    _swap_code += "for("
+    _swap_code += \
+        _codify_assignment_type_check(
+            _var_str=root_index, _expr=start_value, _type=index_type,
+            declared_variables=declared_variables,
+            declared_constants=declared_constants,
+            declare_const_flag=False, assignment_type=None
+            )[:-1] + " "
+    _swap_code += root_index + ' ' + condition + ' ' + end_value + '; '
+
+    if increment is None or increment == '++':
+        _swap_code += root_index + '++'
+    elif increment == '--':
+        _swap_code += root_index + '--'
+    else:
+        _assignment_f = _codify_assignments['add' if increment > 0 else 'sub']
+        _swap_code += _assignment_f(root_index, increment)[:-2]
+
+    # Close round bracket
+    _swap_code += "){"
+    _swap_code += _codify_newl
+
+    return _swap_code
+
+def _codify_swap(
+    declared_variables, declared_constants, 
+    a, b, swap_type):
+
+    '''
+    Putting code in a different scope to avoid name clashed with the swap variable
+    which like this can be declared as constant, hoping that the compiler does a good job
+    '''
+    _swap_code = _codify_curly_open + _codify_newl
+    _swap_code += \
+        _codify_assignment_type_check(
+            "codify_swap_var", a, _type=swap_type,
+            declared_variables=declared_variables,
+            declared_constants=declared_constants,
+            declare_const_flag=True,
+            assignment_type=None)
+    _swap_code += \
+        _codify_assignment_type_check(
+            a, b, _type=None,
+            declared_variables=declared_variables,
+            declared_constants=declared_constants,
+            declare_const_flag=None,
+            assignment_type=None)
+    _swap_code += \
+        _codify_assignment_type_check(
+            b, "codify_swap_var", _type=None,
+            declared_variables=declared_variables,
+            declared_constants=declared_constants,
+            declare_const_flag=None,
+            assignment_type=None)
+    _swap_code += _codify_curly_close + _codify_newl
+    return _swap_code
+
+
+def _codify_array_assignement_check(
+    declared_variables, declared_constants,
+    array_type='ArrayType', array_name='array', 
+    array_elements=[], declare_const_flag=False):
+
+    if array_name not in declared_variables[0] and array_name not in declared_constants[0]:
+        if len(array_elements) == 0:
+            raise Exception("Parameter 'array_elements' must contain a list of variables names")
+        
+        _swap_code = """"""
+
+        if declare_const_flag:
+            _swap_code += "const "
+        _swap_code += array_type + " " + array_name + "[" + str(len(array_elements)) + "] = "
+        _swap_code += \
+            _codify_curly_open + reduce(lambda x, y: x + ', ' + y, array_elements) + _codify_curly_close + ";"
+        _swap_code += _codify_newl
+
+        if declare_const_flag:
+            declared_constants[0] += [array_name]
+        else:
+            declared_variables[0] += [array_name]
+
+        return _swap_code
 
 '''
 _get_cartesian_coordinates_macro
@@ -466,6 +573,11 @@ def _neighbors_register_pressure_macro(_declared_variables, _declared_constants,
         if _i == 0 and _exclude_zero_norm:
             _swap_elem = _codify_sympy(_swap_elem).replace('n_' + _root_coordinate + '_0', _lexicographic_index)
 
+        '''
+        This part should be better parametrized: risky to leave the definition
+        of the name of the variables of the neighbors directly defined in the code
+        like this
+        '''
         _sx_hnd = 'n_' + _root_coordinate + '_' + str(_i)
         _dx_hnd = str(_swap_elem)
         _macro_neighbors += _codify_declaration_const_check(_sx_hnd, _dx_hnd, _custom_type,
