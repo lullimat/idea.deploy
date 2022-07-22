@@ -39,15 +39,18 @@ import numpy as np
 from collections import defaultdict
 from pathlib import Path
 
+from functools import reduce
+
 from idpy.IdpyCode.IdpyConsts import AddrQualif, KernQualif, FuncQualif
 
 from idpy.IdpyCode import idpy_nvcc_path, idpy_langs_list
 from idpy.IdpyCode import idpy_langs_dict_sym, idpy_langs_sys
-from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
+from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T, CTYPES_T
 from idpy.IdpyCode import idpy_opencl_macro_spacing
 from idpy.IdpyCode import idpy_copyright
 
 from idpy.IdpyCode.IdpyUnroll import _codify_comment
+from idpy.Utils.SimpleTiming import SimpleTiming
 
 if idpy_langs_sys[CUDA_T]:
     from idpy.IdpyCode.IdpyMemory import IdpyArrayCUDA
@@ -69,6 +72,13 @@ if idpy_langs_sys[OCL_T]:
     import pyopencl.array as cl_array
     from idpy.OpenCL.OpenCL import Tenet as CLTenet
     from idpy.OpenCL.OpenCL import OpenCL
+
+if idpy_langs_sys[CTYPES_T]:
+    import ctypes
+    from numpy import array as ct_array
+    from idpy.CTypes.CTypes import Tenet as CTTenet
+    from idpy.CTypes.CTypes import CTypes
+    from idpy.CTypes.CTypes import CTYPES_N_THREAD
 
 class IdpyKernel:
     '''
@@ -131,6 +141,11 @@ class IdpyKernel:
         self.lthread_id_coords_code, self.block_coords_code = \
             lthread_id_coords_code, block_coords_code
 
+        '''
+        Setting the default return type to 'int' which can be changed when inheriting
+        '''
+        self.return_type = 'int'
+
         self.kernels_qualifiers = KernQualif()
         self.AddrQ = AddrQualif()
 
@@ -172,8 +187,9 @@ class IdpyKernel:
         if lang == CUDA_T:
             self.macros = []
             # Constants
-            for const in self.constants:
-                self.macros.append("-D " + const + "=" + str(self.constants[const]))
+            if self.declare_macros == 'macro':
+                for const in self.constants:
+                    self.macros.append("-D " + const + "=" + str(self.constants[const]))
                 
             # Types
             if self.declare_types == 'macro':
@@ -189,8 +205,9 @@ class IdpyKernel:
         if lang == OCL_T:
             self.macros = ''
             # Constants
-            for const in self.constants:
-                self.macros += (" -D " + const + "=" + str(self.constants[const]))
+            if self.declare_macros == 'macro':
+                for const in self.constants:
+                    self.macros += (" -D " + const + "=" + str(self.constants[const]))
                 
             # Types
             # https://stackoverflow.com/questions/13531100/escaping-space-in-opencl-compiler-arguments
@@ -201,10 +218,37 @@ class IdpyKernel:
             if self.optimizer_flag is False:
                 self.macros += " -cl-opt-disable"
                 
+            ##if self.macros == '':
+            ##    self.macros = None
+                
+            return self.macros
+
+        if lang == CTYPES_T:
+            self.macros = ''
+            # Constants
+            if self.declare_macros == 'macro':            
+                for const in self.constants:
+                    self.macros += (" -D " + const + "=" + str(self.constants[const]))
+                
+            # Types
+            # https://stackoverflow.com/questions/13531100/escaping-space-in-opencl-compiler-arguments
+            if self.declare_types == 'macro':
+                for c_type in self.custom_types:
+                    self.macros += (" -D " + c_type + "=" + '\"' + str(self.custom_types[c_type]).replace(" ", idpy_opencl_macro_spacing) + '\"')
+
+            if self.optimizer_flag is True:
+                self.macros += " -O3"
+
+            '''
+            link agains the math library if math.h is included
+            '''
+            if self.headers_files is not None and 'math.h' in self.headers_files:
+                self.macros += " -lm"
+                
             if self.macros == '':
                 self.macros = None
                 
-            return self.macros    
+            return self.macros             
 
     def GetCodeFlags(self):
         return self.code_flags
@@ -220,7 +264,15 @@ class IdpyKernel:
 
     def UnsetCodeFlags(self, key):
         self.code_flags[key] = False
-        
+
+    def SetReturnType(self, type_str):
+        self.return_type = type_str
+
+    '''
+    For the moment this method applies only to the 'global thread id'
+    turning the parallel execution of threads into a loop over the 
+    global thread id variable
+    '''        
     def SetGlobalThreadId(self):
         _swap = {}
         _swap[CUDA_T] = ("""unsigned int """ + self.gthread_id_code + """ = """ + \
@@ -233,6 +285,12 @@ class IdpyKernel:
                         """\n
                         get_global_id(0) + 
                         (get_global_id(1) + get_global_id(2) * get_global_size(1)) * get_global_size(0);\n""")
+
+        ## For CTypes we need to implement a loop, so we also need to close it at the end
+        _swap[CTYPES_T] = \
+            ("""for(unsigned int """ + self.gthread_id_code + """=0; """ + 
+                self.gthread_id_code + """< """ + CTYPES_N_THREAD + """; """ + self.gthread_id_code + """++){\n""")
+
         return _swap
 
     def SetLocalThreadId(self):
@@ -337,8 +395,18 @@ class IdpyKernel:
         AddrQ = self.AddrQ[lang]
         self.ResetCode()
         # Inserting headers
+        ## Checking for 'math.h'
+
         if self.headers_files is not None:
+            _swap_headers_files = self.headers_files.copy()
+
+            if lang == CUDA_T or lang == OCL_T:
+                if 'math.h' in self.headers_files:
+                    self.headers_files.remove('math.h')
+
             self.code += self.IncludeHeaders()
+            self.headers_files = _swap_headers_files.copy()
+
         # Inserting macros
         if self.declare_macros == 'header':
             self.code += self.DeclareMacros()
@@ -351,7 +419,11 @@ class IdpyKernel:
             self.code += function.Code(lang = lang)
             self.code += "\n"
         # Kernel Qualifier and Kernel name
-        self.code += self.kernels_qualifiers[lang] + " " + self.name
+        if lang != CTYPES_T:
+            self.code += self.kernels_qualifiers[lang] + " " + self.name
+        else:
+            self.code += self.return_type + " " + self.name
+
         # Kernel Paremeters
         self.code += WriteCodeParams(self.params, AddrQ)
 
@@ -376,9 +448,18 @@ class IdpyKernel:
         else:
             self.code += self.kernels[IDPY_T]
 
-        # Closing function
-        self.code += """return;\n}\n"""
-        
+        ## if CTypes and global thread id: close loop
+        if lang == CTYPES_T and self.code_flags[self.gthread_id_code]:
+            self.code += """\n}\n"""
+
+        ## Closing function
+        if lang != CTYPES_T:
+            self.code += """return;\n}\n"""
+        elif lang == CTYPES_T and CTYPES_T not in self.kernels:
+            self.code += """return 0;\n}\n"""
+        elif lang == CTYPES_T and CTYPES_T in self.kernels:
+            self.code += """\n}\n"""
+
         return self.code
 
     def __call__(self, tenet = None,
@@ -483,6 +564,43 @@ class IdpyKernel:
             return Idea({'_kernel_function': _kernel_function, '_kernel_name': self.name,
                          'tenet': tenet, 'grid': grid, 'block': block})
 
+        if idpy_langs_sys[CTYPES_T] and isinstance(tenet, CTTenet):
+
+            grid = tuple(map(lambda x, y: x * y, block, grid))
+            n_threads = reduce(lambda x, y: x * y, grid)
+
+            if self.code_flags[self.gthread_id_code]:
+                self.constants[CTYPES_N_THREAD] = n_threads
+
+            _kernel_module = \
+                tenet.GetKernelModule(
+                    params=self.params, 
+                    code=self.Code(CTYPES_T), 
+                    options=self.SetMacros(CTYPES_T)
+                    )
+
+            _kernel_function = _kernel_module.GetKernelFunction(self.name, self.custom_types)
+
+            class Idea:
+                def __init__(self, k_dict = None):
+                    self.k_dict, self.lang = k_dict, CTYPES_T
+                    self.st = SimpleTiming()
+                    
+                def Deploy(self, args_list = None, idpy_stream = None):
+                    self.k_dict['_kernel_function'](*args_list)
+                    return None
+
+                def DeployProfiling(self, args_list = None, idpy_stream = None):                    
+                    self.st.Start()
+                    self.k_dict['_kernel_function'](*args_list)
+                    self.st.End()
+                    _time_sec = self.st.GetElapsedTime()['time_s']
+                    return None, _time_sec
+                
+                
+            return Idea({'_kernel_function': _kernel_function, '_kernel_name': self.name,
+                         'tenet': tenet, 'grid': grid, 'block': block})            
+
     def ResetCode(self):
         self.code = ""
                         
@@ -570,6 +688,8 @@ class IdpyMethod:
             self.lang = OCL_T
         if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
             self.lang = CUDA_T
+        if idpy_langs_sys[CTYPES_T] and isinstance(tenet, CTTenet):
+            self.lang = CTYPES_T
 
         '''
         Mocking the kernels variables
@@ -587,7 +707,7 @@ class IdpyMethod:
             else:
                 return idpy_stream[0]
 
-        if self.lang == CUDA_T:
+        if self.lang == CUDA_T or self.lang == CTYPES_T:
             return None
 
 
@@ -610,11 +730,18 @@ class IdpyLoop:
                 return cu_driver.Stream()
             else:
                 raise Exception("CUDA not present on the system")
+
         if seq[0][0].lang == OCL_T:
             if idpy_langs_sys[OCL_T]:
                 return [None for _ in range(len(seq))]
             else:
                 raise Exception("OpenCL not present on the system")
+
+        if seq[0][0].lang == CTYPES_T:
+            if idpy_langs_sys[CTYPES_T]:
+                return [None for _ in range(len(seq))]
+            else:
+                raise Exception("CTypes not present on the system")                
 
     def SetLang(self, seq):
         return seq[0][0].lang
@@ -679,6 +806,22 @@ class IdpyLoop:
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
 
+
+                '''
+                CTYPES
+                '''
+                if self.langs[seq_i] == CTYPES_T:                
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        _stream = self.meta_streams[seq_i]                        
+                        '''
+                        Deploying
+                        '''
+                        Idea.Deploy(_args, idpy_stream = _stream)
+                        self.PutArgs(seq_i, _indices, _args)                        
+
         '''
         Synchronizing with device: can this be done better? Are we waisting time?
         '''
@@ -738,6 +881,14 @@ def IdpyProfile(idea_object = None, args_list = [], idpy_stream = None):
         _end.synchronize()
         _time_sec = _start.time_till(_end)*1e-3
         return idpy_stream, _time_sec
+
+    if _lang == CTYPES_T:
+        _st = SimpleTiming()
+        _st.Start()
+        idea_object.Deploy(args_list, idpy_stream)
+        _st.End()
+        _time_sec = _st.GetElapsedTime()['time_s']
+        return idpy_stream, _time_sec        
                         
 
 class IdpyLoopProfile:
@@ -764,6 +915,11 @@ class IdpyLoopProfile:
                 return [None for _ in range(len(seq))]
             else:
                 raise Exception("OpenCL not present on the system")
+        if seq[0][0].lang == CTYPES_T:
+            if idpy_langs_sys[CTYPES_T]:
+                return [None for _ in range(len(seq))]
+            else:
+                raise Exception("OpenCL not present on the system")                
 
     def SetLang(self, seq):
         return seq[0][0].lang
@@ -850,6 +1006,23 @@ class IdpyLoopProfile:
                             Idea.DeployProfiling(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
                         _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
+
+                '''
+                CTYPES
+                '''            
+                if self.langs[seq_i] == CTYPES_T:
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        _stream = self.meta_streams[seq_i]                        
+                        '''
+                        Deploying
+                        '''
+                        _stream_swap, _time_swap = \
+                            Idea.DeployProfiling(_args, idpy_stream = _stream)
+                        self.PutArgs(seq_i, _indices, _args)
+                        _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]                        
 
         '''
         Collecting profiling values
