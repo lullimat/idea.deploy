@@ -42,7 +42,7 @@ class K_ComputeDensityPsiMeta(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, 
                  XIStencil = None, use_ptrs = False, ordering_lambda = None,
-                 psi_code = None):
+                 psi_code = None, headers_files=['math.h']):
         
         self.expect_lambda_args = 2
         
@@ -61,7 +61,8 @@ class K_ComputeDensityPsiMeta(IdpyKernel):
         self.idpy_stencil = IdpyStencil(XIStencil)
         
         IdpyKernel.__init__(self, custom_types = custom_types, constants = constants, 
-                            f_classes = f_classes, optimizer_flag = optimizer_flag)
+                            f_classes = f_classes, optimizer_flag = optimizer_flag, 
+                            headers_files=headers_files)
         
         '''
         Kernel Parameters declaration
