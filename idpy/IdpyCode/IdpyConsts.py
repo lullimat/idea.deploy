@@ -67,7 +67,7 @@ class AddrQualif:
         self.qualifiers[CTYPES_T] = {'global': '',
                                      'const': """const""",
                                      'local': '',
-                                     'restrict': '',
+                                     'restrict': """__restrict__""",
                                      'shared': '',
                                      'device': ''}        
 
@@ -89,7 +89,7 @@ class KernQualif:
         '''
         self.qualifiers = {CUDA_T: """__global__ void""",
                            OCL_T: """__kernel void""",
-                           CTYPES_T: """ """}
+                           CTYPES_T: """"""}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
