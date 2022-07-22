@@ -39,4 +39,17 @@ append to sys path in order to avoid relative imports
 '''
 sys.path.append(_idea_dot_deploy_path)
 
+from idpy import idpy_os_found
+
 CTYPES_T = "ctypes"
+
+idpy_ctypes_compiler_string_h = None
+if idpy_os_found == "linux":
+    idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -std=c99'
+if idpy_os_found == "darwin":
+    idpy_ctypes_compiler_string_h = 'clang -fPIC -shared -arch x86_64 -std=c99'
+if idpy_os_found == "win32":
+    idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -std=c99'
+
+from pathlib import Path
+idpy_ctypes_cache_dir = Path('/tmp/idpy_ctypes_kernels')
