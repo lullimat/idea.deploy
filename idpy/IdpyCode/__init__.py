@@ -28,17 +28,24 @@ __status__ = "Development"
 # https://stackoverflow.com/questions/50499/how-do-i-get-the-path-and-name-of-the-file-that-is-currently-executing/50905#50905
 
 import inspect, os, sys
-from sys import platform
+
+_module_abs_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+_idea_dot_deploy_path = os.path.dirname(os.path.abspath(_module_abs_path + "../../"))
 '''
-find os
+append to sys path in order to avoid relative imports
 '''
-idpy_os_found = None
-if platform == "linux" or platform == "linux2":
-    idpy_os_found = "linux"
-elif platform == "darwin":
-    idpy_os_found = "darwin"
-elif platform == "win32":
-    idpy_os_found == "win32"
+sys.path.append(_idea_dot_deploy_path)
+
+from idpy import idpy_os_found
+
+if False:
+    idpy_os_found = None
+    if platform == "linux" or platform == "linux2":
+        idpy_os_found = "linux"
+    elif platform == "darwin":
+        idpy_os_found = "darwin"
+    elif platform == "win32":
+        idpy_os_found == "win32"
 
 idpy_opencl_macro_spacing = None
 if idpy_os_found == "linux":
@@ -47,21 +54,6 @@ if idpy_os_found == "darwin":
     idpy_opencl_macro_spacing = '\ '
 if idpy_os_found == "win32":
     idpy_opencl_macro_spacing = '\ '
-
-idpy_ctypes_compiler_string_h = None
-if idpy_os_found == "linux":
-    idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -o'
-if idpy_os_found == "darwin":
-    idpy_ctypes_compiler_string_h = 'clang -fPIC -shared -arch x86_64 -o'
-if idpy_os_found == "win32":
-    idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -o'
-
-_module_abs_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-_idea_dot_deploy_path = os.path.dirname(os.path.abspath(_module_abs_path + "../../"))
-'''
-append to sys path in order to avoid relative imports
-'''
-sys.path.append(_idea_dot_deploy_path)
 
 '''
 Define some virtual environment variables
