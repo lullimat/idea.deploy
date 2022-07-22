@@ -75,7 +75,7 @@ def SetAxTicksFont(ax, fs):
     for tick in ax.yaxis.get_major_ticks():
         tick.label.set_fontsize(fs)
         
-def SetAxPanelLabel(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos = None):
+def SetAxPanelLabel(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos=None, *args, **kwargs):
     if pos is not None and pos == 'ul':
         x_pos, y_pos = x_pos, y_pos
     if pos is not None and pos == 'll':
@@ -85,4 +85,16 @@ def SetAxPanelLabel(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos = None):
     if pos is not None and pos == 'lr':
         x_pos, y_pos = y_pos, x_pos
         
-    ax.text(x_pos, y_pos, label, transform = ax.transAxes, fontsize=fs)
+    ax.text(x_pos, y_pos, label, transform = ax.transAxes, fontsize=fs, *args, **kwargs)
+
+def SetAxPanelLabelCoords(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos=None, *args, **kwargs):
+    if pos is not None and pos == 'ul':
+        x_pos, y_pos = x_pos, y_pos
+    if pos is not None and pos == 'll':
+        x_pos, y_pos = x_pos, x_pos + 0.03
+    if pos is not None and pos == 'ur':
+        x_pos, y_pos = y_pos, y_pos
+    if pos is not None and pos == 'lr':
+        x_pos, y_pos = y_pos, x_pos
+        
+    ax.text(x_pos, y_pos, label, fontsize=fs, *args, **kwargs)
