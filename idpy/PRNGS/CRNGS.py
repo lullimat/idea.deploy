@@ -34,7 +34,7 @@ from idpy.Utils.CustomTypes import CustomTypes
 
 from idpy.IdpyCode import GetParamsClean, GetTenet
 from idpy.IdpyCode import IdpyMemory
-from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
+from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, IDPY_T
 from idpy.IdpyCode import idpy_langs_sys, idpy_tenet_types
 
 from idpy.IdpyCode.IdpyUnroll import _codify_newl, _codify_comment
@@ -110,7 +110,7 @@ class CRNGS(IdpySims):
         CUDA and OpenCL
         '''
         if self.sims_vars['kind'] == 'MINSTD':
-            if self.params_dict['lang'] == CUDA_T:
+            if self.params_dict['lang'] == CUDA_T or self.params_dict['lang'] == CTYPES_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned int',
                                                  'UINT64': 'unsigned long long int'})
             if self.params_dict['lang'] == OCL_T:
@@ -119,7 +119,7 @@ class CRNGS(IdpySims):
         if self.sims_vars['kind'] == 'NUMREC':
             self.custom_types = CustomTypes({'CRNGType': 'unsigned int'})
         if self.sims_vars['kind'] == 'MMIX':
-            if self.params_dict['lang'] == CUDA_T:
+            if self.params_dict['lang'] == CUDA_T or self.params_dict['lang'] == CTYPES_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned long long int'})
             if self.params_dict['lang'] == OCL_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned long'})
@@ -673,7 +673,7 @@ def _codify_flat(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_declaration_const_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX - 1))',
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX + 1))',
             rand_type,
             declared_variables,
             declared_constants,
@@ -682,6 +682,51 @@ def _codify_flat(declared_variables = None, declared_constants = None,
     _swap_code += _codify_newl
     
     return _swap_code
+
+def _codify_flat_integers_biased(
+        declared_variables = None, declared_constants = None, 
+        min_int = None, max_int = None,
+        root_seed = 'lseed', root_int = 'rand_int', assignment_type = None, 
+        crng_kind = None, rand_type = 'RANDType', const_out = False):
+
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+                                      declared_variables, declared_constants)
+
+    if crng_kind is None:
+        raise Exception("Missing argument 'crng_kind' !")
+    if crng_kind not in _codify_CRNGS_list:
+        raise Exception("Argument 'crng_kind' must be in the list", _codify_CRNGS_list)
+
+    if min_int is None or max_int is None:
+        raise Exception("Missing argument(s) 'max_int', 'min_int'")
+
+    _swap_code = """"""
+    _swap_code += _codify_comment("Generating an integer in the range [min_int, max_int - 1]")
+    _swap_code += _codify_comment("WARNING: This method will yield a biased result!")
+    _swap_code += _codify_comment("Invoking the PRNG")
+    _swap_code += \
+        _codify_CRNGS[crng_kind](
+            declared_variables=declared_variables, 
+            declared_constants=declared_constants, 
+            root_seed=root_seed
+            )
+    _swap_code += _codify_comment("Generating an integer in the range [0,max_int-min_int-1] and then shift")
+    _swap_code += \
+        _codify_assignment_type_check(
+            root_int, str(min_int) + " + " + root_seed + 
+            " % (" + str(max_int) + "-" + str(min_int) + ")",
+            rand_type,
+            declared_variables,
+            declared_constants,
+            const_out,
+            assignment_type            
+            )
+
+    return _swap_code
+
+def _codify_flat_integers_unbiased():
+    pass
 
 def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
                           root_seed = 'lseed', root_flat = 'lflat',
@@ -716,7 +761,7 @@ def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_assignment_type_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX - 1) + (' + str(_shift) + \
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX + 1) + (' + str(_shift) + \
             ')) * ' + str(_delta),
             rand_type,
             declared_variables,
@@ -1187,7 +1232,7 @@ class F_Norm(IdpyFunction):
         self.params = {'CRNGType * l_seed': []}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) (*l_seed)) / (ID_RANDMAX - 1);
+        return ((RANDType) (*l_seed)) / (ID_RANDMAX + 1);
         """        
 
 class F_GaussianCos(IdpyFunction):
@@ -1253,7 +1298,7 @@ class F_Integers(IdpyFunction):
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX - 1));
+        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX + 1));
         """
 
 '''
@@ -1269,7 +1314,7 @@ class F_CustomHITORMISS(IdpyFunction):
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX - 1));
+        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX + 1));
         """
     
 '''
