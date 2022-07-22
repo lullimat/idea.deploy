@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,6 +34,7 @@ Simulations are tested in their own directories
 import unittest
 
 import numpy as np
+import ctypes
 import sys, os, filecmp, inspect
 from functools import reduce
 _file_abs_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -153,6 +154,34 @@ class TestNpTypes(unittest.TestCase):
                                  list_1 == lists_out[1]]))
 
 '''
+testing module Utils.NpTypes
+'''
+from idpy.Utils.CTypesTypes import CTypesTypes
+
+class TestCTypesTypes(unittest.TestCase):
+    def setUp(self):
+        self.known_c_types = \
+            {
+                'double': ctypes.c_double, 'float': ctypes.c_float,
+                'int': ctypes.c_int32, 'unsigned int': ctypes.c_uint32,
+                'long long int': ctypes.c_int64,
+                'unsigned long': ctypes.c_uint64,
+                'unsigned long long int': ctypes.c_uint64,
+                'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte
+            }
+        self.known_ctypes_types = {value: key for (key, value) in self.known_c_types.items()}
+
+    def test_CTypesTypes_ToList(self):
+        np_c = CTypesTypes()
+        lists_out = np_c.ToList()
+
+        list_0 = [key for key in self.known_c_types]
+        list_1 = [key for key in self.known_ctypes_types]
+
+        self.assertTrue(AllTrue([list_0 == lists_out[0],
+                                 list_1 == lists_out[1]]))
+
+'''
 testing module CUDA.CUDA
 '''
 if IsModuleThere('pycuda'):
@@ -224,6 +253,22 @@ if IsModuleThere('pyopencl'):
             self.assertTrue(check_type)
 
 '''
+testing module CTypes.CTypes
+'''
+if IsModuleThere('ctypes'):
+    from idpy.CTypes.CTypes import CTypes
+    from idpy.CTypes.CTypes import Tenet as CTTenet
+
+    class TestCTypes(unittest.TestCase):
+        def test_OpenCL_ManageTenet(self):
+            ctp = CTypes()
+            tenet = ctp.GetTenet()
+            check_type = isinstance(tenet, CTTenet)
+            tenet.End()
+            del ctp
+            self.assertTrue(check_type)            
+
+'''
 testing variables in IdpyCode.__init__.py
 '''
 
@@ -291,7 +336,7 @@ class TestIdpyConsts(unittest.TestCase):
 
         dict_check = {CUDA_T: """__global__ void""",
                       OCL_T: """__kernel void""",
-                      CTYPES_T: """ """}
+                      CTYPES_T: """"""}
         
         for lang in idpy_langs_list:
             checks += [kq[lang] == dict_check[lang]]
@@ -425,6 +470,54 @@ if IsModuleThere('pyopencl'):
             
             tenet.End()            
             self.assertTrue(AllTrue(checks))
+
+if IsModuleThere('ctypes'):
+    from idpy.CTypes.CTypes import CTypes
+    from idpy.CTypes.CTypes import Tenet as CTTenet
+    
+    class TestIdpyArrayCT(unittest.TestCase):
+        def setUp(self):
+            self.constant = -2
+            
+        def test_IdpyArray(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            ct = CTypes()
+            ##ct.SetDevice()
+            tenet = ct.GetTenet()
+            rand_mem = IdpyMemory.Array(10, dtype = np.int32, tenet = tenet)
+            on_dev_range = IdpyMemory.OnDevice(np.arange(10, dtype = np.int32), tenet = tenet)
+            zeros = IdpyMemory.Zeros(10, dtype = np.float32, tenet = tenet)
+            i_range = IdpyMemory.Range(10, tenet = tenet)
+            const = IdpyMemory.Const(10, dtype = np.int32,
+                                     const = self.constant, tenet = tenet)
+            print()
+            print("rand_mem:\t", rand_mem.D2H(), rand_mem.dtype)
+            print("on_dev_range:\t", on_dev_range.D2H(), on_dev_range.dtype)
+            print("zeros:\t", zeros.D2H(), zeros.dtype)
+            print("i_range:\t", i_range.D2H(), i_range.dtype)
+            print("const:\t", const.D2H(), const.dtype)
+            int_buffer = np.zeros(10, dtype = np.int32)
+            const.D2H(int_buffer)
+            print("int_buffer: ", int_buffer, int_buffer.dtype)
+
+            '''
+            checks
+            '''
+            checks = []
+
+            checks += [AllTrue(list(on_dev_range.D2H() == np.arange(10, dtype = np.int32)))]
+            checks += [AllTrue(list(zeros.D2H() == np.zeros(10, dtype = np.float32)))]
+            checks += [AllTrue(list(i_range.D2H() == np.arange(10, dtype = np.int32)))]
+
+            chk_const = np.zeros(10, dtype = np.int32)
+            chk_const.fill(self.constant)
+                        
+            checks += [AllTrue(list(const.D2H() == chk_const))]
+            
+            tenet.End()            
+            self.assertTrue(AllTrue(checks))            
         
 '''
 testing IdpyCode.IdpyCode
@@ -1131,7 +1224,300 @@ class TestIdpyCode(unittest.TestCase):
             checks += [AllTrue(list(mem_dict['ones'].D2H() == check_ones))]
 
             tenet.End()
+            self.assertTrue(AllTrue(checks))
+
+    if IsModuleThere('ctypes'):
+        from idpy.CTypes.CTypes import CTypes
+        from idpy.CTypes.CTypes import Tenet as CTTenet
+
+        def test_IdpyKernelFuncLoopMultStreamCT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
+            ct = CTypes()
+            tenet = ct.GetTenet()
+            
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+            
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumTwoArrConst = self.K_SumTwoArrays(custom_types = myTypes.Push(),
+                                                 constants = {'DATA_N': self.n},
+                                                 f_classes = [self.F_SumTwoArraysPtr,
+                                                              self.F_SumTwoArraysRet,
+                                                              self.F_SumTwoArraysVal])
+
+            SumConst = self.K_SumConst(custom_types = myTypes.Push(), constants = {'DATA_N': self.n})
+
+            A = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 0, tenet = tenet)
+
+            B = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 1, tenet = tenet)
+
+            C = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 2, tenet = tenet)
+
+            D = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 3, tenet = tenet)
+
+            print()
+            print("A: ", A.D2H(), A.dtype)
+            print("B: ", B.D2H(), B.dtype)
+            print("C: ", C.D2H(), C.dtype)
+            print("D: ", D.D2H(), D.dtype)
+            '''
+            Checking result
+            '''
+            a, b, c, cc = A.D2H()[0], B.D2H()[0], C.D2H()[0], self.in_const
+            d = D.D2H()[0]
+            
+            for i in range(2):
+                '''first stream'''
+                c += cc
+                c += a + b
+                c += a + b
+                c += a + b + cc
+                a, c = c, a
+                '''second stream'''
+                d += cc
+
+            # https://stackoverflow.com/questions/5710690/pycuda-passing-variable-by-value-to-kernel
+            ##
+            mem_dict_0 = {'A': A, 'B': B, 'C': C, 'const': np_c.C[myTypes['SpinType']](self.in_const)}
+            mem_dict_1 = {'D': D, 'const': np_c.C[myTypes['SpinType']](self.in_const)}
+            SumTwoArrConst_Loop = IdpyLoop(
+                [mem_dict_0, mem_dict_1],
+                [
+                    [
+                        (SumTwoArrConst(tenet = tenet,
+                                        grid = grid, block = block),
+                         ['A', 'B', 'C', 'const']),
+                        (self.M_SwapArrays(tenet), ['A', 'C'])
+                    ],
+                    [
+                        (SumConst(tenet = tenet, grid = grid, block = block),
+                         ['D', 'const']),
+                    ]
+                ])
+            
+            print()
+            print("SumTwoArrConst_Loop.Run(range(2))")
+            SumTwoArrConst_Loop.Run(range(2))
+
+            print("A: ", A.D2H(), A.dtype, a)
+            print("B: ", B.D2H(), B.dtype, b)
+            print("C: ", C.D2H(), C.dtype, c)
+            print("D: ", D.D2H(), D.dtype, d)
+            
+            checks = []
+            check_array = np.full(self.n, a, dtype = np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(A.D2H() == check_array)]
+            check_array = np.full(self.n, b, dtype = np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(B.D2H() == check_array)]
+            check_array = np.full(self.n, c, dtype = np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(C.D2H() == check_array)]
+            check_array = np.full(self.n, d, dtype = np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(D.D2H() == check_array)]
+            
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
+
+        def test_IdpyKernelLoopConstCT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
+            ct = CTypes()
+            tenet = ct.GetTenet()
+            
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+            
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumConst = self.K_SumConst(custom_types = myTypes.Push(),
+                                       constants = {'DATA_N': self.n})
+            
+            A = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 0, tenet = tenet)
+            mem_dict = {'A': A, 'const': np.int32(self.in_const)}
+            # https://stackoverflow.com/questions/5710690/pycuda-passing-variable-by-value-to-kernel
+            SumOne_Loop = IdpyLoop([mem_dict],
+                                   [
+                                       [
+                                           (SumConst(tenet = tenet,
+                                                     grid = grid,
+                                                     block = block), ['A', 'const'])
+                                       ]
+                                   ])
+
+            print()
+            print("A: ", A.D2H(), A.dtype)
+            print("SumOne_Loop.Run(range(1))")
+            SumOne_Loop.Run(range(1))            
+            print("A: ", A.D2H(), A.dtype)
+            print("SumOne_Loop.Run(range(8))")
+            SumOne_Loop.Run(range(8))            
+            print("A: ", A.D2H(), A.dtype)
+
+            check_array = np.zeros(self.n, dtype = np_c.C[myTypes['SpinType']])
+            check_array.fill(self.in_const * 9)
+            
+            checks = []
+            checks += [AllTrue(A.D2H() == check_array)]
+            
+            tenet.End()
             self.assertTrue(AllTrue(checks))        
+
+        def test_IdpyKernelLoopCT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
+            ct = CTypes()
+            tenet = ct.GetTenet()
+            
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+            
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumOne = self.K_SumOne(custom_types = myTypes.Push(),
+                                   constants = {'DATA_N': self.n})
+
+            A = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 0, tenet = tenet)
+            mem_dict = {'A': A}
+            SumOne_Loop = IdpyLoop([mem_dict],
+                                   [
+                                       [
+                                           (SumOne(tenet = tenet,
+                                                   grid = grid,
+                                                   block = block), ['A'])
+                                       ]
+                                   ])
+
+            print()
+            print("A: ", A.D2H(), A.dtype)
+            print("SumOne_Loop.Run(range(1))")
+            SumOne_Loop.Run(range(1))            
+            print("A: ", A.D2H(), A.dtype)
+            print("SumOne_Loop.Run(range(8))")
+            SumOne_Loop.Run(range(8))            
+            print("A: ", A.D2H(), A.dtype)
+
+            check_array = np.zeros(self.n, dtype = np_c.C[myTypes['SpinType']])
+            check_array.fill(9)
+            
+            checks = []
+            checks += [AllTrue(A.D2H() == check_array)]
+            
+            tenet.End()
+            self.assertTrue(AllTrue(checks))        
+
+        def test_IdpyKernelCT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
+            ct = CTypes()
+            tenet = ct.GetTenet()
+            
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+            
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumOne = self.K_SumOne(custom_types = myTypes.Push(),
+                                   constants = {'DATA_N': self.n})
+            SumOne_Idea = SumOne(tenet = tenet, grid = grid, block = block)
+
+            A = IdpyMemory.Const(self.n, dtype = np_c.C[myTypes['SpinType']],
+                                 const = 0, tenet = tenet)
+            print()
+            print("A: ", A.D2H(), A.dtype)
+            print("SumOne_Idea.Deploy([A])")
+            SumOne_Idea.Deploy([A])            
+            print("A: ", A.D2H(), A.dtype)
+
+            check_array = np.zeros(self.n, dtype = np_c.C[myTypes['SpinType']])
+            check_array.fill(1)
+
+            checks = [AllTrue(A.D2H() == check_array)]
+            
+            tenet.End()
+            self.assertTrue(AllTrue(checks))        
+
+        def test_IdpyMethodCT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
+            ct = CTypes()
+            tenet = ct.GetTenet()
+            SwapArrays = self.M_SwapArrays(tenet)
+            zeros = IdpyMemory.Const(self.n, dtype = np.int32, const = 0, tenet = tenet)
+            ones = IdpyMemory.Const(self.n, dtype = np.int32, const = 1, tenet = tenet)
+            mem_list = [zeros, ones]
+            print()
+            print("[0]: ", mem_list[0].D2H(), mem_list[0].dtype)
+            print("[1]: ", mem_list[1].D2H(), mem_list[1].dtype)
+            print("Swapping")
+            SwapArrays.Deploy(mem_list)
+            print("[0]: ", mem_list[0].D2H(), mem_list[0].dtype)
+            print("[1]: ", mem_list[1].D2H(), mem_list[1].dtype)
+
+            check_1 = np.zeros(self.n, dtype = np.int32)
+            check_0 = np.zeros(self.n, dtype = np.int32)
+            check_0.fill(1)
+
+            checks = []
+            checks += [AllTrue(mem_list[0].D2H() == check_0)]
+            checks += [AllTrue(mem_list[1].D2H() == check_1)]
+            
+            tenet.End()
+            self.assertTrue(AllTrue(checks))  
+
+        def test_IdpyMethodLoopCT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])            
+            ct = CTypes()
+            tenet = ct.GetTenet()
+            
+            zeros = IdpyMemory.Const(self.n, dtype = np.int32, const = 0, tenet = tenet)
+            ones = IdpyMemory.Const(self.n, dtype = np.int32, const = 1, tenet = tenet)
+            mem_dict = {'zeros': zeros, 'ones': ones}
+            SwapArraysLoop = IdpyLoop([mem_dict],
+                                          [
+                                              [
+                                                  (self.M_SwapArrays(tenet), ['zeros', 'ones'])
+                                              ]
+                                          ])
+            print()
+            print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
+            print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
+            print("SwapArraysLoop(range(1))")
+            SwapArraysLoop.Run(range(1))
+            print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
+            print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
+            print("SwapArraysLoop(range(4))")
+            SwapArraysLoop.Run(range(4))
+            print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
+            print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
+            print("SwapArraysLoop(range(7))")
+            SwapArraysLoop.Run(range(7))
+            print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
+            print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
+            checks = []
+            checks += [AllTrue(list(mem_dict['zeros'].D2H() == np.zeros(self.n, dtype = np.int32)))]
+            check_ones = np.zeros(self.n, dtype = np.int32)
+            check_ones.fill(1)
+            checks += [AllTrue(list(mem_dict['ones'].D2H() == check_ones))]
+
+            tenet.End()
+            self.assertTrue(AllTrue(checks))                          
+
         
 if __name__ == '__main__':
     unittest.main()
