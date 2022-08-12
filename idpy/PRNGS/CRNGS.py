@@ -673,7 +673,7 @@ def _codify_flat(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_declaration_const_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX + 1))',
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX))',
             rand_type,
             declared_variables,
             declared_constants,
@@ -761,7 +761,7 @@ def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_assignment_type_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX + 1) + (' + str(_shift) + \
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX) + (' + str(_shift) + \
             ')) * ' + str(_delta),
             rand_type,
             declared_variables,
@@ -1232,7 +1232,7 @@ class F_Norm(IdpyFunction):
         self.params = {'CRNGType * l_seed': []}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) (*l_seed)) / (ID_RANDMAX + 1);
+        return ((RANDType) (*l_seed)) / (ID_RANDMAX);
         """        
 
 class F_GaussianCos(IdpyFunction):
@@ -1298,7 +1298,7 @@ class F_Integers(IdpyFunction):
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX + 1));
+        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX));
         """
 
 '''
@@ -1314,7 +1314,7 @@ class F_CustomHITORMISS(IdpyFunction):
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX + 1));
+        return ((RANDType) *l_seed) / ((RANDType) (ID_RANDMAX));
         """
     
 '''
