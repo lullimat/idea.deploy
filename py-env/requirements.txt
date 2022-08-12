@@ -4,7 +4,7 @@ scipy
 numpy
 sympy
 matplotlib
-pybind11
+pybind11==2.9.2
 jupyter
 mako
 dill
