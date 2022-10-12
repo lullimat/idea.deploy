@@ -121,10 +121,11 @@ class ManageData:
             
         for _key in self.data_dictionary:
             if _key not in _grp:
-                print(_key)
+                ##print(_key)
                 if type(self.data_dictionary[_key]) is not dict:
+                    _dim = len(self.data_dictionary[_key].shape)
                     _grp.create_dataset(_key, data = self.data_dictionary[_key], 
-                                        maxshape=(None,))
+                                        maxshape=(None,) * _dim)
                 else:
                     _grp.create_dataset(_key,
                                         data = np.string_(str(self.data_dictionary[_key])), 

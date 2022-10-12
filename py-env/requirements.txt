@@ -23,3 +23,5 @@ ipyparallel
 py-cpuinfo
 einsteinpy
 jupyterlab
+python-sat[pblib,aiger]
+networkx[all]

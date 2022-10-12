@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 def CreateFiguresPanels(_nx, _ny, _x_size = 6.5, _y_size = 4.8):
     return plt.figure(figsize = (_nx * _x_size, _ny * _y_size))
 
-def SetMatplotlibLatexParamas(rc, rcParams):
+def SetMatplotlibLatexParamas(rc, rcParams, mathfont='sourcesanspro'):
     if type(rc) != list:
         raise Exception("Parameter 'rc' must be a list, typically passed as [rc]")
 
@@ -42,7 +42,11 @@ def SetMatplotlibLatexParamas(rc, rcParams):
     #rcParams[0]['text.usetex'] = True
     rc[0]('text', usetex=True)
     #rcParams[0]['text.latex.preview'] = True
-    rcParams[0]['text.latex.preamble']=[r"\usepackage{amsmath, sourcesanspro}"]
+    if mathfont == 'sourcesanspro':
+        rcParams[0]['text.latex.preamble']=[r"\usepackage{amsmath, sourcesanspro}"]
+    elif mathfont == 'ams':
+        print("Setting 'ams' font")
+        rcParams[0]['text.latex.preamble']=[r"\usepackage{eucal}"]
 
 def SetDefaultFonts(rc, 
                     font_size = 20, legend_font_size = 17, 
