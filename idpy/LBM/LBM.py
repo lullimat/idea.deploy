@@ -51,6 +51,8 @@ from idpy.LBM.LBMKernelsMeta import K_MRTCollideStreamMeta, K_SRTCollideStreamMe
 from idpy.LBM.LBMKernelsMeta import K_StreamPeriodicMeta
 from idpy.IdpyCode.IdpyUnroll import _get_seq_macros
 
+from idpy.IdpyStencils.IdpyStencils import IdpyStencil
+
 import matplotlib.pyplot as plt
 
 if idpy_langs_sys[OCL_T]:
@@ -591,6 +593,15 @@ class RootLB(IdpySims):
                               custom_types = self.custom_types)
 
     def GetWalls(self, walls):
+        if 'xi_opposite' not in self.sims_idpy_memory:
+            _swap_idpy_stencil=IdpyStencil(self.params_dict['xi_stencil'])
+            _swap_opposite = np.zeros(self.sims_vars['Q'], dtype=NPT.C[self.custom_types['SType']])
+            for q in _swap_idpy_stencil.opposite:
+                _swap_opposite[q]=_swap_idpy_stencil.opposite[q]
+
+            self.sims_idpy_memory['xi_opposite'] = \
+                IdpyMemory.OnDevice(_swap_opposite, tenet = self.tenet)
+
         if 'walls' not in self.sims_idpy_memory:
             self.sims_idpy_memory['walls'] = \
                 IdpyMemory.Const(
