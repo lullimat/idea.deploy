@@ -599,14 +599,9 @@ class RootLB(IdpySims):
                     const = 1, 
                     tenet = self.tenet)
 
-        if len(walls.shape) == self.sims_vars['DIM']:
-            if AllTrue(
-                    list(
-                        map(lambda x, y: x == y, 
-                            np.flip(walls.shape), self.sims_vars['dim_sizes'])
-                        )
-                    ):
-                self.sims_idpy_memory['walls'].H2D(np.ravel(walls))
+        if walls.shape == self.sims_vars['DIM']:
+            _walls_swap = np.array(walls, dtype=NPT.C[self.custom_types['FlagType']])
+            self.sims_idpy_memory['walls'].H2D(np.ravel(_walls_swap))
 
 
     def GetDensityField(self):
