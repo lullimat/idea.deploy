@@ -148,6 +148,44 @@ class K_StreamPeriodic(IdpyKernel):
         }
         """
 
+class K_HalfWayBounceBack(IdpyKernel):
+    def __init__(self, custom_types = None, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+        self.SetCodeFlags('g_tid')
+        self.params = {'PopType * pop': ['global', 'restrict'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const'], 
+                       'FlagType * walls': ['global', 'restrict', 'const'], 
+                       'SType * xi_opposite': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && walls[g_tid] == 0){
+            SType dst_pos[DIM], src_pos[DIM];
+            F_PosFromIndex(src_pos, dim_sizes, dim_strides, g_tid);
+
+            // zero-th population
+            pop[g_tid] = 0.;
+            for(int q=1; q<Q; q++){
+                int q_dest = xi_opposite[q];
+
+                for(int d=0; d<DIM; d++){
+                    dst_pos[d] = ((src_pos[d] + XI_list[d + q_dest * DIM] + dim_sizes[d]) % dim_sizes[d]);
+                }
+                SType dst_index = F_IndexFromPos(dst_pos, dim_strides);
+
+                if(walls[dst_index] == 1){
+                    pop[dst_index + q_dest * V] = pop[g_tid + q * V];
+                }
+                pop[g_tid + q * V] = 0.;
+                // pop[g_tid + q * V] = pop[g_tid + q * V];
+            }
+        }
+        """    
+
 class K_ComputeMoments(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None):
@@ -180,6 +218,40 @@ class K_ComputeMoments(IdpyKernel):
             for(int d=0; d<DIM; d++){ u[g_tid + d * V] = lu[d]/ln;}
         }
         """
+
+class K_ComputeMomentsWalls(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'NType * n': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'PopType * pop': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const'], 
+                       'FlagType * walls': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && walls[g_tid]){
+            UType lu[DIM];
+            for(int d=0; d<DIM; d++){ lu[d] = 0.; }
+
+            NType ln = 0.;
+            for(int q=0; q<Q; q++){
+                PopType lpop = pop[g_tid + q * V];
+                ln += lpop;
+                for(int d=0; d<DIM; d++){
+                    lu[d] += lpop * XI_list[d + q * DIM];
+                }
+            }
+            n[g_tid] = ln;
+            for(int d=0; d<DIM; d++){ u[g_tid + d * V] = lu[d]/ln;}
+        }
+        """        
         
 class K_InitPopulations(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
@@ -226,6 +298,51 @@ class K_InitPopulations(IdpyKernel):
         }
         """
 
+class K_CleanPopulationsWalls(IdpyKernel):
+    def __init__(self, custom_types = None, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {'PopType * pop': ['global', 'restrict'],
+                       'NType * n': ['global', 'restrict', 'const'],
+                       'UType * u': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            NType ln = n[g_tid];
+
+            UType lu[DIM], u_dot_u = 0.;
+            // Copying the velocity
+            for(int d=0; d<DIM; d++){
+                lu[d] = u[g_tid + d * V]; u_dot_u += lu[d] * lu[d];
+            }
+
+            // Loop over the populations
+            for(int q=0; q<Q; q++){
+
+                UType u_dot_xi = 0.;
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1.;
+                leq_pop += u_dot_xi * CM2;
+                leq_pop += 0.5 * u_dot_xi * u_dot_xi * CM4;
+                leq_pop -= 0.5 * u_dot_u * CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+                pop[g_tid + q * V] = leq_pop;
+
+            }
+        
+        }
+        """        
+
 class K_SetPopulationSpike(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None):
@@ -239,7 +356,7 @@ class K_SetPopulationSpike(IdpyKernel):
         if(g_tid < V){
             for(int q=0; q<Q; q++){
                 if(g_tid == pos_index){
-                    pop[g_tid + q * V] = 1.;
+                    pop[g_tid + q * V] = ((PopType)q);
                 }else{
                     pop[g_tid + q * V] = 0.;
                 }
