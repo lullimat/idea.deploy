@@ -610,7 +610,9 @@ class RootLB(IdpySims):
                     const = 1, 
                     tenet = self.tenet)
 
-        if walls.shape == self.sims_vars['DIM']:
+        _dim_sizes_rev = list(self.sims_vars['dim_sizes'])
+        _dim_sizes_rev.reverse()
+        if list(walls.shape) == _dim_sizes_rev:
             _walls_swap = np.array(walls, dtype=NPT.C[self.custom_types['FlagType']])
             self.sims_idpy_memory['walls'].H2D(np.ravel(_walls_swap))
 
