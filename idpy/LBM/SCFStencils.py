@@ -188,6 +188,8 @@ class SCFStencils:
             for _ in self.typ_eq_s:
                 for __ in self.typ_eq_s[_]:
                     eqs_list.append(__)
+
+            ##print(eqs_list)
                     
         if len(eqs_list) != len(self.w_sym_list) and not override:
             print("Number of equations %d != Number of weights: %d; %s" %
