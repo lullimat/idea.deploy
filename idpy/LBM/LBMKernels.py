@@ -177,9 +177,7 @@ class K_HalfWayBounceBack(IdpyKernel):
                 }
                 SType dst_index = F_IndexFromPos(dst_pos, dim_strides);
 
-                if(walls[dst_index] == 1){
-                    pop[dst_index + q_dest * V] = pop[g_tid + q * V];
-                }
+                pop[dst_index + q_dest * V] = pop[g_tid + q * V];
                 pop[g_tid + q * V] = 0.;
                 // pop[g_tid + q * V] = pop[g_tid + q * V];
             }
@@ -298,7 +296,7 @@ class K_InitPopulations(IdpyKernel):
         }
         """
 
-class K_CleanPopulationsWalls(IdpyKernel):
+class K_SetPopulationsFlatInletUX(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
                  optimizer_flag = None):
         IdpyKernel.__init__(self, custom_types = custom_types,
@@ -340,6 +338,27 @@ class K_CleanPopulationsWalls(IdpyKernel):
 
             }
         
+        }
+        """
+
+class K_CleanPopulationsWalls(IdpyKernel):
+    def __init__(self, custom_types = None, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+
+        self.SetCodeFlags('g_tid')
+
+        self.params = {
+            'PopType * pop': ['global', 'restrict'],
+            'FlagType * walls': ['global', 'restrict', 'const']}
+
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && walls[g_tid] == 0){
+            for(int q=0; q<Q; q++){
+                pop[g_tid + q * V] = 0.;
+            }
         }
         """        
 
