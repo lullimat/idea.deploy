@@ -636,6 +636,21 @@ class RootLB(IdpySims):
             
         _u_swap = _u_swap.reshape(_u_dims)
         return _u_swap
+
+    def GetPopulations(self):
+        if 'set_ordering' not in self.params_dict:
+            raise Exception("Variable 'set_ordering' not present in 'params_dict'")
+        
+        _pop_swap = self.sims_idpy_memory['pop'].D2H()
+
+        _pop_dims = None
+        if self.params_dict['set_ordering'] == 'cpu':
+            _pop_dims = np.flip(np.append([self.sims_vars['Q']], self.sims_vars['dim_sizes']))
+        if self.params_dict['set_ordering'] == 'gpu':
+            _pop_dims = np.flip(np.append(self.sims_vars['dim_sizes'], [self.sims_vars['Q']]))
+            
+        _pop_swap = _pop_swap.reshape(_pop_dims)
+        return _pop_swap
     
     def SRTCollisionPushStreamMeta(self):
         _K_SRTCollideStreamMeta = \
