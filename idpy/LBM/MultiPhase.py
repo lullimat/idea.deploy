@@ -38,7 +38,9 @@ from idpy.IdpyCode.IdpyUnroll import _get_cartesian_coordinates_macro
 from idpy.LBM.LBM import RootLB, LBMTypes, InitFStencilWeights, NPT
 from idpy.LBM.LBMKernels import F_PosFromIndex, F_IndexFromPos
 from idpy.LBM.LBMKernels import K_InitPopulations, K_ComputeMoments
-from idpy.LBM.LBMKernels import K_StreamPeriodic, M_SwapPop
+from idpy.LBM.LBMKernels import K_StreamPeriodic, K_HalfWayBounceBack, M_SwapPop
+from idpy.LBM.LBMKernels import K_ComputeMomentsWalls
+
 '''
 Importing LBM Meta Kernels
 '''
@@ -55,7 +57,8 @@ from idpy.LBM.MultiPhaseKernels import F_PointDistance
 Importing IdpyKernel's
 '''
 from idpy.LBM.MultiPhaseKernels import K_Collision_ShanChenGuoMultiPhase
-from idpy.LBM.MultiPhaseKernels import K_ComputePsi, K_InitFlatInterface
+from idpy.LBM.MultiPhaseKernels import K_Collision_ShanChenGuoMultiPhaseWalls
+from idpy.LBM.MultiPhaseKernels import K_ComputePsi, K_ComputePsiWalls, K_InitFlatInterface
 from idpy.LBM.MultiPhaseKernels import K_InitRadialInterface, K_InitCylinderInterface
 
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiMeta
@@ -143,6 +146,123 @@ class ShanChenMultiPhase(RootLB):
                           'XI_list',
                           'dim_sizes',
                           'dim_strides']),
+
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_f in convergence_functions:
+                    checks.append(c_f(self))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None
+
+    def MainLoopSimpleWalls(self, time_steps, convergence_functions = [], profiling = False):
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+        
+        _K_ComputeMomentsWalls = \
+            K_ComputeMomentsWalls(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                optimizer_flag = self.optimizer_flag)
+
+        _K_ComputePsiWalls = \
+            K_ComputePsiWalls(
+                    custom_types = self.custom_types.Push(),
+                    constants = self.constants,
+                    psi_code = self.params_dict['psi_code'],
+                    optimizer_flag = self.optimizer_flag)
+
+        _K_Collision_ShanChenGuoMultiPhaseWalls = \
+            K_Collision_ShanChenGuoMultiPhaseWalls(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+        
+        _K_StreamPeriodic = \
+            K_StreamPeriodic(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _K_HalfWayBounceBack = \
+            K_HalfWayBounceBack(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [
+                        (_K_ComputeMomentsWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['n', 'u', 'pop',
+                          'XI_list', 'W_list', 'walls']),
+
+                        (_K_ComputePsiWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']), ['psi', 'n', 'walls']),
+
+                        (_K_Collision_ShanChenGuoMultiPhaseWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['pop', 'u', 'n', 'psi',
+                          'XI_list', 'W_list',
+                          'E_list', 'EW_list',
+                          'dim_sizes', 'dim_strides', 'walls']),
+                        
+                        (_K_StreamPeriodic(tenet = self.tenet,
+                                           grid = self.sims_vars['grid'],
+                                           block = self.sims_vars['block']),
+                         ['pop_swap', 'pop',
+                          'XI_list',
+                          'dim_sizes',
+                          'dim_strides']),
+
+                        (_K_HalfWayBounceBack(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']), 
+                        ['pop_swap', 'XI_list', 'dim_sizes', 'dim_strides', 
+                        'walls', 'xi_opposite']),
+
                         (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
                     ]
                 ]
@@ -430,8 +550,8 @@ class ShanChenMultiPhase(RootLB):
                             idpy_stream = _stream)
 
         self.init_status['n'] = True
-        self.init_status['u'] = True        
-        
+        self.init_status['u'] = True
+
     def InitPopulations(self):
         if not AllTrue([self.init_status['n'], self.init_status['u']]):
             raise Exception("Fields u and n are not initialized")
