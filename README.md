@@ -1,6 +1,12 @@
 # Welcome to the **idea.deploy** project!
 
-**Changes are being pushed quite frequently. Please, keep on checking for updates.**
+**Changes are being pushed quite frequently.**
+**Please, keep on pulling the updates, either with your git manager software of choice or by means of the command**
+```bash
+$ git pull
+```
+**in order to be able to use the latest paper repository for the work "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
+
 
 Thanks for passing by! If you are visiting this repository it is likely because of the first two preprints making use of it (see below).
 
