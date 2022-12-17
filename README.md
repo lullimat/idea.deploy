@@ -1,5 +1,7 @@
 # Welcome to the **idea.deploy** project!
 
+**Thanks for passing by! If you are visiting this repository it is likely because of the four papers making use of it (see below).**
+
 **Changes are being pushed quite frequently.**
 **Please, keep on pulling the updates, either with your git manager software of choice or by means of the command**
 ```bash
@@ -7,8 +9,6 @@ $ git pull
 ```
 **in order to be able to use the latest paper repository for the work "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
 
-
-Thanks for passing by! If you are visiting this repository it is likely because of the first two preprints making use of it (see below).
 
 The repository is at an early stage in this moment and will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
 
