@@ -58,6 +58,10 @@ IDStencils['Ising']['NN_D4'] = {'XIs': ((1, 0, 0, 0), (0, 1, 0, 0), (-1, 0, 0, 0
                                        sp.Rational(1, 8), sp.Rational(1, 8), sp.Rational(1, 8), sp.Rational(1, 8)),
                                 'e2': 1}
 
+IDStencils['LBM']['XI_D1Q3'] = {'XIs': ((0,), (1,), (-1,)), 
+                                'Ws': (sp.Rational(2, 3), sp.Rational(1, 6), sp.Rational(1, 6)), 
+                                'c2': sp.Rational(1, 3)}
+
 IDStencils['LBM']['XI_D2Q9'] = {'XIs': ((0, 0),
                                         (1, 0), (0, 1), (-1, 0), (0, -1),
                                         (1, 1), (-1, 1), (-1, -1), (1, -1)),
@@ -107,6 +111,10 @@ IDStencils['LBM']['XI_D3Q27'] = {'XIs': ((0, 0, 0),
                                         sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216),
                                         sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216), sp.Rational(1, 216)),
                                  'c2': sp.Rational(1, 3)}
+
+IDStencils['LBM']['SC_D1Q2'] = {'XIs': ((1,), (-1,)),
+                                'Ws': (sp.Rational(1, 2), sp.Rational(1, 2)), 
+                                'e2': 1}                                 
 
 IDStencils['LBM']['SC_D2E4'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
                                         (1, 1), (-1, 1), (-1, -1), (1, -1)),
