@@ -26,7 +26,9 @@ The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'
 - github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
 ## Available Preprints
-Will populate this section soon...
+### **Metastable and Unstable Dynamics in multi-phase lattice Boltzmann**
+- arXiv link: [https://arxiv.org/abs/2212.07848](https://arxiv.org/abs/2212.07848)
+- GitHub link: [https://github.com/lullimat/arXiv-2212.07848](https://github.com/lullimat/arXiv-2212.07848)
 
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
@@ -73,7 +75,7 @@ Clearly, I am willing to collaborate with those researchers who would like to po
 ## To do (short-term)
 At the moment the scripts can create a python virtual environment only for Linux and MacOS: no testing of the **idpy-init.sh** and **idpy-clean.sh** has been performed so far on Windows Linux Subsystem. Most probably the best approach will be to rewrite the above scripts in python so that they will be Os independent. However, quite a few implementation details depend on the operative system, especially as far as compilers are concerned, e.g. escaping spaces when passing options flags and so on.
 
-Matteo Lulli, June 1st 2022
+Matteo Lulli, December 17th 2022
 [www.ideadeploy.io](www.ideadeploy.io)
 [www.lullimat.org](https://www.lullimat.org)
 matteo.lulli@gmail.com
