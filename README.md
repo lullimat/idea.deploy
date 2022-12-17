@@ -30,6 +30,8 @@ The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'
 - arXiv link: [https://arxiv.org/abs/2212.07848](https://arxiv.org/abs/2212.07848)
 - GitHub link: [https://github.com/lullimat/arXiv-2212.07848](https://github.com/lullimat/arXiv-2212.07848)
 
+The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal from the root directory of 'idea.deploy' the command ```git checkout devel``` before using it.
+
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
 For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina/Big Sur/Monterey for both Intel and M1 machines.
