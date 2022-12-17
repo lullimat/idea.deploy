@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -64,7 +64,8 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia",
                          "Xiaowen Shan"],
-             "doi": "", "doi-dir": "",
+             "doi": "10.1103/PhysRevE.105.015301",
+             "doi-dir": "doi-10.1103-PhysRevE.105.015301",
              "git": "https://github.com/lullimat/arXiv-2105.08772.git"}
 
         self.arxiv_papers['arXiv-2112.02574'] = \
@@ -75,6 +76,13 @@ class IdpyPapers:
              "doi": "", "doi-dir": "",
              "git": "https://github.com/lullimat/arXiv-2112.02574.git"}
         
+        self.arxiv_papers['arXiv-2212.07848'] = \
+            {"Title": "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann",
+             "Authors": ["Matteo Lulli", "Luca Biferale",
+                         "Giacomo Falcucci", "Mauro Sbragaglia", "Dong Yang",
+                         "Xiaowen Shan"],
+             "doi": "", "doi-dir": "",
+             "git": "https://github.com/lullimat/arXiv-2212.07848.git"}
 
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
