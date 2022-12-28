@@ -26,6 +26,7 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 import sympy as sp
+import numpy as np
 
 from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
 
@@ -65,6 +66,19 @@ from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeVelocityAfterForceSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamSCMP_MRTMeta
+
+'''
+Fluctuating Hydrodynamics kernels
+'''
+from idpy.LBM.MultiPhaseKernelsMeta import K_ForceGross2011CollideStreamSCMPMeta
+from idpy.LBM.Fluctuations import GrossShanChenMultiPhase
+
+from idpy.Utils.CustomTypes import CustomTypes
+
+'''
+Importing Congruential Pseudo-Random numbers generator
+'''
+from idpy.PRNGS.CRNGS import CRNGS
 
 class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
@@ -471,7 +485,155 @@ class ShanChenMultiPhase(RootLB):
         if profiling:
             return _profiling_results
         else:
-            return None        
+            return None
+
+    def MainLoopGross2011SRT(self, time_steps, convergence_functions = [],
+                             profiling = False,
+                             kBT = None, n0 = None, print_flag = True):
+
+        if kBT is None:
+            raise Exception("Missing parameter 'kBT'")
+        elif kBT < 0:
+            raise Exception("Paramter 'kBT' must be positive")
+        
+        if n0 is None:
+            raise Exception("Missing parameter 'n0'")
+
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")    
+
+        _compile_flag = True
+        if 'LoopGross2011SRT_once' not in self.sims_vars:
+            self.sims_vars['LoopGross2011SRT_once'] = True
+            self.sims_vars['LoopGross2011SRT_n0'] = n0
+            self.sims_vars['LoopGross2011SRT_kBT'] = kBT
+        else:
+            if (self.sims_vars['LoopGross2011SRT_n0'] == n0 and
+                self.sims_vars['LoopGross2011SRT_kBT'] == kBT):
+                _compile_flag = False
+            else:
+                self.sims_vars['LoopGross2011SRT_n0'] = n0
+                self.sims_vars['LoopGross2011SRT_kBT'] = kBT
+
+        '''
+        Trying to save time on the generation and compilation of the meta kernels
+        another possibility would be that of saving the kernel objects in 
+        sims_vars, so that at least the algebra is saved but then I do not pass kBT as
+        a parameter
+        '''
+        if _compile_flag:
+            _K_ComputeDensityPsiMeta = \
+                K_ComputeDensityPsiMeta(
+                    custom_types = self.custom_types.Push(), 
+                    constants = self.constants, f_classes = [], 
+                    XIStencil = self.params_dict['xi_stencil'], 
+                    use_ptrs = self.params_dict['use_ptrs'],
+                    ordering_lambda = self.sims_vars['ordering']['pop'], 
+                    psi_code = self.params_dict['psi_code']
+                )
+
+            _K_ForceGross2011CollideStreamSCMPMeta = \
+                K_ForceGross2011CollideStreamSCMPMeta(
+                    custom_types = self.custom_types.Push(), 
+                    constants = self.constants, 
+                    f_classes = [], optimizer_flag = self.optimizer_flag,
+                    XIStencil = self.params_dict['xi_stencil'], 
+                    SCFStencil = self.params_dict['f_stencil'], 
+                    use_ptrs = self.params_dict['use_ptrs'],
+                    ordering_lambda_pop = self.sims_vars['ordering']['pop'], 
+                    ordering_lambda_u = self.sims_vars['ordering']['u'],
+                    ordering_lambda_prng = \
+                    lambda _i: self.sims_vars['ordering']['crng']('g_tid', _i), 
+                    kBT = kBT, n0 = n0,
+                    distribution =  self.params_dict['prng_distribution'],
+                    generator = self.params_dict['prng_kind'],
+                    parallel_streams = self.constants['N_PRNG_STREAMS'],
+                    collect_mul = False, pressure_mode = 'compute',
+                    root_dim_sizes = self.params_dict['root_dim_sizes'],
+                    root_strides = self.params_dict['root_strides'],
+                    root_coord = self.params_dict['root_coord']
+                )
+
+            _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+
+            ### return _K_ComputeDensityPsiMeta, _K_ForceCollideStreamSCMPMeta
+
+            self._MainLoop = \
+                _loop_class(
+                    [{**self.sims_idpy_memory, **self.crng.sims_idpy_memory}],
+                    [
+                        [
+                            (_K_ComputeDensityPsiMeta(tenet = self.tenet,
+                                                      grid = self.sims_vars['grid'],
+                                                      block = self.sims_vars['block']),
+                             ['n', 'psi', 'pop']),
+
+                            (_K_ForceGross2011CollideStreamSCMPMeta(
+                                tenet = self.tenet,
+                                grid = self.sims_vars['grid'],
+                                block = self.sims_vars['block']
+                            ),
+                             ['pop_swap', 'seeds', 'pop', 'n', 'psi']),
+
+                            (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                        ]
+                    ]
+                )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        '''
+        Deaclaring a list for the time steps
+        '''
+        self.sims_vars['time_steps'] = []
+
+        if print_flag:
+            for step in time_steps[1:]:
+                print("Step:", step)
+                '''
+                Very simple timing, reasonable for long executions
+                '''
+                _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+                self.sims_vars['time_steps'] += [step]
+                
+                old_step = step
+                if len(convergence_functions):
+                    checks = []
+                    for c_f in convergence_functions:
+                        checks.append(c_f(self))
+                    
+                    if OneTrue(checks):
+                        break
+        else:
+            for step in time_steps[1:]:
+                '''
+                Very simple timing, reasonable for long executions
+                '''
+                _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+                self.sims_vars['time_steps'] += [step]
+                
+                old_step = step
+                if len(convergence_functions):
+                    checks = []
+                    for c_f in convergence_functions:
+                        checks.append(c_f(self))
+
+                    if OneTrue(checks):
+                        break
+
+        self.sims_vars['time_steps'] = np.array(self.sims_vars['time_steps'])
+
+        if profiling:
+            return _profiling_results
+        else:
+            return _K_ForceGross2011CollideStreamSCMPMeta            
         
     def ComputeMoments(self):
         if not self.init_status['pop']:
@@ -802,6 +964,15 @@ class ShanChenMultiPhase(RootLB):
         self.sims_vars['psi_sym'] = self.params_dict['psi_sym']
         self.sims_vars['n_sym'] = sp.symbols('n')
 
+        if self.params_dict['fluctuations'] is not None:
+            '''
+            Setting up the ordering lambdas
+            '''
+            self.sims_vars['ordering_lambdas']['gpu']['crng'] = \
+                lambda _pos, _i: str(_pos) + ' + ' + str(_i) + ' * V'
+            self.sims_vars['ordering_lambdas']['cpu']['crng'] = \
+                lambda _pos, _i: str(_i) + ' + ' + str(_pos) + ' * N_PRNG_STREAMS'        
+
         _device_type = self.tenet.GetKind()
         if self.params_dict['set_ordering'] is not None:
             _device_type = self.params_dict['set_ordering']
@@ -865,6 +1036,41 @@ class ShanChenMultiPhase(RootLB):
         self.sims_idpy_memory['EW_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['EW_list'], tenet = self.tenet)
 
+        if self.params_dict['fluctuations'] is not None:       
+            _n_prngs = 0
+            '''
+            Gross2011
+            '''
+            if self.params_dict['fluctuations'] == 'Gross2011':
+                _n_rand_mom = self.sims_vars['Q'] - (self.sims_vars['DIM'] + 1)
+                if self.params_dict['prng_distribution'] == 'flat':
+                    _n_prngs = _n_rand_mom * self.sims_vars['V']
+                    self.constants['N_PRNG_STREAMS'] = _n_rand_mom
+                    
+                if self.params_dict['prng_distribution'] == 'gaussian':
+                    if self.params_dict['indep_gaussian']:
+                        _n_prngs = 2 * _n_rand_mom * self.sims_vars['V']
+                        self.constants['N_PRNG_STREAMS'] = 2 * _n_rand_mom
+                    else:
+                        _n_prngs = _n_rand_mom * self.sims_vars['V']
+                        self.constants['N_PRNG_STREAMS'] = _n_rand_mom
+                
+                
+            self.crng = CRNGS(n_prngs = _n_prngs,
+                              kind = self.params_dict['prng_kind'],
+                              init_from = self.params_dict['prng_init_from'],
+                              lang = self.params_dict['lang'],
+                              cl_kind = self.params_dict['cl_kind'],
+                              device = self.params_dict['device'],
+                              tenet = self.tenet,
+                              init_seed = self.params_dict['init_seed'])
+
+            self.constants = {**self.constants, **self.crng.constants}
+            self.custom_types = \
+                CustomTypes(types_dict = {**self.custom_types.Push(),
+                                          **self.crng.custom_types.Push()})
+
+
     def GridAndBlocks(self):
         '''
         looks pretty general
@@ -897,7 +1103,10 @@ class ShanChenMultiPhase(RootLB):
                  'f_stencil', 'psi_code', 'SC_G',
                  'tau', 'optimizer_flag', 'e2_val',
                  'psi_sym', 'empty_sim',
-                 'set_ordering', 'use_ptrs']
+                 'set_ordering', 'use_ptrs',
+                 'fluctuations', 'prng_kind', 'init_seed',
+                 'prng_init_from', 'prng_distribution',
+                 'indep_gaussian']
             )
 
         if 'f_stencil' not in self.params_dict:
