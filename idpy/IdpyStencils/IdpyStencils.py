@@ -114,6 +114,14 @@ IDStencils['LBM']['SC_D2E4'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
                                        sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12), sp.Rational(1, 12)), 
                                 'e2': 1}
 
+IDStencils['LBM']['SC_D2E6'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
+                                        (1, 1), (-1, 1), (-1, -1), (1, -1),
+                                        (2, 0), (0, 2), (-2, 0), (0, -2)),
+                                'Ws': (sp.Rational(4, 15), sp.Rational(4, 15), sp.Rational(4, 15), sp.Rational(4, 15),
+                                       sp.Rational(1, 10), sp.Rational(1, 10), sp.Rational(1, 10), sp.Rational(1, 10),
+                                       sp.Rational(1, 120), sp.Rational(1, 120), sp.Rational(1, 120), sp.Rational(1, 120)), 
+                                'e2': 1}
+
 IDStencils['LBM']['SC_D2E8'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
                                         (1, 1), (-1, 1), (-1, -1), (1, -1),
                                         (2, 0), (0, 2), (-2, 0), (0, -2),
