@@ -1,30 +1,46 @@
 # Welcome to the **idea.deploy** project!
 
-**Changes are being pushed quite frequently. Please, keep on checking for updates.**
+**Thanks for passing by! If you are visiting this repository it is likely because of the four papers making use of it (see below).**
 
-1. **The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772) "A Mesoscale Perspective on the Tolman Length" is ready!**
-2. **The Jupyter notebook for the reproducibility of the results contained in [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574) "Mesoscale Modelling of the Tolman Length in Multi-component Systems" is ready!**
+**Changes are being pushed quite frequently.**
+**Please, keep on pulling the updates, either with your git manager software of choice or by means of the command**
+```bash
+$ git pull
+```
+**in order to be able to use the latest paper repository for the work "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
 
-Thanks for passing by! If you are visiting this repository it is likely because of the first two preprints making use of it (see below).
 
 The repository is at an early stage in this moment and will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
 
 For reproducing the papers results please look below in the **Installation** Section and in **Typical usage for reproducing the results reported in a paper** Subsection.
 
 ## Available Peer-Reviewed Papers
+### **Mesoscale Modelling of the Tolman Length in Multi-component Systems**
+- Publisher link: to be announced: accepted for publication on **Proceedings of the Conference "The Legacy of Carlo Cercignani: from Kinetic Theory to Turbulence Modeling"**
+- arXiv link: [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574)
+- github link: [https://github.com/lullimat/arXiv-2112.02574.git](https://github.com/lullimat/arXiv-2112.02574.git)
+
+The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal from the root directory of 'idea.deploy' the command ```git checkout devel``` before using it.
+### **Mesoscale Perspective on the Tolman Length**
+- Publisher link: [https://journals.aps.org/pre/abstract/10.1103/PhysRevE.105.015301](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.105.015301)
+- arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
+- github link: [https://github.com/lullimat/arXiv-2105.08772.git](https://github.com/lullimat/arXiv-2105.08772.git)
+
 ### **Structure and Isotropy of Lattice Pressure Tensors for Multi-range Potentials**
 - Publisher link: [https://journals.aps.org/pre/abstract/10.1103/PhysRevE.103.063309](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.103.063309)
 - arXiv link: [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522)
 - github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
 ## Available Preprints
-### **A Mesoscale Perspective on the Tolman Length**
-- arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
-- github link: [https://github.com/lullimat/arXiv-2105.08772](https://github.com/lullimat/arXiv-2105.08772)
+### **Metastable and Unstable Dynamics in multi-phase lattice Boltzmann**
+- arXiv link: [https://arxiv.org/abs/2212.07848](https://arxiv.org/abs/2212.07848)
+- GitHub link: [https://github.com/lullimat/arXiv-2212.07848](https://github.com/lullimat/arXiv-2212.07848)
+
+The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal from the root directory of 'idea.deploy' the command ```git checkout devel``` before using it.
 
 ## Installation
 ### Install idea.deploy python virtual environment: idpy-env
-For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina.
+For the time being the project has been tested only on some Linux platforms (opensuse and ubuntu) and on MacOS Catalina/Big Sur/Monterey for both Intel and M1 machines.
 
 At the moment the main code base for the project is written in python and it heavily relies, among other modules, on PyCUDA [(https://documen.tician.de/pycuda/)](https://documen.tician.de/pycuda/), PyOpenCL [(https://documen.tician.de/pyopencl/)](https://documen.tician.de/pyopencl/) and numpy [(https://numpy.org)](https://numpy.org). In order to keep the user computer as clean as possible a python virtual environment is created through the script **idpy-init.sh** and the necessary dependencies downloaded and installed. PyCUDA and PyOpenCL are both compiled from source when possible. The python environment and the other optional system modifications (like new aliases in the .bashrc) can be cleaned by using the script **idpy-clean.sh**. Since erasing files must be taken with care, each "rm" command is executed only after the user reviews the files/directories that will be removed (please check the terms of the license). The purpose is to fully clean the changes performed by the use of **idpy-init.sh**
 
@@ -67,6 +83,7 @@ Clearly, I am willing to collaborate with those researchers who would like to po
 ## To do (short-term)
 At the moment the scripts can create a python virtual environment only for Linux and MacOS: no testing of the **idpy-init.sh** and **idpy-clean.sh** has been performed so far on Windows Linux Subsystem. Most probably the best approach will be to rewrite the above scripts in python so that they will be Os independent. However, quite a few implementation details depend on the operative system, especially as far as compilers are concerned, e.g. escaping spaces when passing options flags and so on.
 
-Matteo Lulli, December 31st 2021
-matteo.lulli@gmail.com
+Matteo Lulli, December 17th 2022
+[www.ideadeploy.io](www.ideadeploy.io)
 [www.lullimat.org](https://www.lullimat.org)
+matteo.lulli@gmail.com

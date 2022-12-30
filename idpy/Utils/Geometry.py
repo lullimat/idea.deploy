@@ -48,6 +48,9 @@ def GetDimStrides(_dim_sizes):
 def GetLen2Pos(pos):
     return reduce(lambda x, y: x + y, map(lambda x: x ** 2, pos))
 
+def GetDiffPos(A, B):
+    return tuple(map(lambda x, y: x - y, A, B))
+
 from idpy.Utils.Statements import AllTrue
 
 def IsOppositeVector(A, B):

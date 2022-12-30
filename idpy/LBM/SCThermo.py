@@ -583,7 +583,13 @@ class ShanChanEquilibriumCache(ManageData):
 
             _e2_expr = stencil.e_expr[2]
             self.e2_lambda = sp_lambdify([w_sym_list], _e2_expr)
+            _e4_expr = stencil.e_expr[4]
+            self.e4_lambda = sp_lambdify([w_sym_list], _e4_expr)
 
+            '''
+            This part expects the weights to be provided in order
+            starting from w(1)...need to change it
+            '''
             _weights_list = None
             if len(stencil.w_sol[0]) != 10:
                 len_diff = 10 - len(stencil.w_sol[0])
@@ -592,6 +598,10 @@ class ShanChanEquilibriumCache(ManageData):
                 _weights_list = stencil.w_sol[0] + [0 for i in range(len_diff)]
             else:
                 _weights_list = stencil.w_sol[0]
+
+            print("e2:", self.e2_lambda(_weights_list))
+            print("e4:", self.e4_lambda(_weights_list))
+            print()
 
             _shan_chen = \
                 ShanChen(psi_f = psi_f, G_val = G,

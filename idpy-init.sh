@@ -291,7 +291,7 @@ then
 	echo "Downloading pycuda source:..."
 	if((ISTHERE_WGET))
 	then
-	    wget -P ${VENV_SRC} ${WGET_PYCUDA}	    
+	    wget -P ${VENV_SRC} ${WGET_PYCUDA} --no-check-certificate
 	elif((ISTHERE_CURL))
 	then
 	    mkdir ${VENV_SRC}
@@ -337,7 +337,7 @@ then
 	echo "Downloading pyopencl source:..."
 	if((ISTHERE_WGET))
 	then
-	    wget -P ${VENV_SRC} ${WGET_PYOPENCL}
+	    wget -P ${VENV_SRC} ${WGET_PYOPENCL} --no-check-certificate
 	elif((ISTHERE_CURL))
 	then	    
 	    mkdir ${VENV_SRC}

@@ -51,6 +51,8 @@ from idpy.LBM.LBMKernelsMeta import K_MRTCollideStreamMeta, K_SRTCollideStreamMe
 from idpy.LBM.LBMKernelsMeta import K_StreamPeriodicMeta
 from idpy.IdpyCode.IdpyUnroll import _get_seq_macros
 
+from idpy.IdpyStencils.IdpyStencils import IdpyStencil
+
 import matplotlib.pyplot as plt
 
 if idpy_langs_sys[OCL_T]:
@@ -591,6 +593,15 @@ class RootLB(IdpySims):
                               custom_types = self.custom_types)
 
     def GetWalls(self, walls):
+        if 'xi_opposite' not in self.sims_idpy_memory:
+            _swap_idpy_stencil=IdpyStencil(self.params_dict['xi_stencil'])
+            _swap_opposite = np.zeros(self.sims_vars['Q'], dtype=NPT.C[self.custom_types['SType']])
+            for q in _swap_idpy_stencil.opposite:
+                _swap_opposite[q]=_swap_idpy_stencil.opposite[q]
+
+            self.sims_idpy_memory['xi_opposite'] = \
+                IdpyMemory.OnDevice(_swap_opposite, tenet = self.tenet)
+
         if 'walls' not in self.sims_idpy_memory:
             self.sims_idpy_memory['walls'] = \
                 IdpyMemory.Const(
@@ -599,14 +610,11 @@ class RootLB(IdpySims):
                     const = 1, 
                     tenet = self.tenet)
 
-        if len(walls.shape) == self.sims_vars['DIM']:
-            if AllTrue(
-                    list(
-                        map(lambda x, y: x == y, 
-                            np.flip(walls.shape), self.sims_vars['dim_sizes'])
-                        )
-                    ):
-                self.sims_idpy_memory['walls'].H2D(np.ravel(walls))
+        _dim_sizes_rev = list(self.sims_vars['dim_sizes'])
+        _dim_sizes_rev.reverse()
+        if list(walls.shape) == _dim_sizes_rev:
+            _walls_swap = np.array(walls, dtype=NPT.C[self.custom_types['FlagType']])
+            self.sims_idpy_memory['walls'].H2D(np.ravel(_walls_swap))
 
 
     def GetDensityField(self):
@@ -628,6 +636,21 @@ class RootLB(IdpySims):
             
         _u_swap = _u_swap.reshape(_u_dims)
         return _u_swap
+
+    def GetPopulations(self):
+        if 'set_ordering' not in self.params_dict:
+            raise Exception("Variable 'set_ordering' not present in 'params_dict'")
+        
+        _pop_swap = self.sims_idpy_memory['pop'].D2H()
+
+        _pop_dims = None
+        if self.params_dict['set_ordering'] == 'cpu':
+            _pop_dims = np.flip(np.append([self.sims_vars['Q']], self.sims_vars['dim_sizes']))
+        if self.params_dict['set_ordering'] == 'gpu':
+            _pop_dims = np.flip(np.append(self.sims_vars['dim_sizes'], [self.sims_vars['Q']]))
+            
+        _pop_swap = _pop_swap.reshape(_pop_dims)
+        return _pop_swap
     
     def SRTCollisionPushStreamMeta(self):
         _K_SRTCollideStreamMeta = \

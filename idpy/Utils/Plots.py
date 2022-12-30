@@ -38,8 +38,9 @@ def SetMatplotlibLatexParamas(rc, rcParams, mathfont='sourcesanspro'):
         raise Exception("Parameter 'rcParams' must be a list, typically passed as [rcParams]")
 
     rc[0]('font',**{'family':'STIXGeneral'})
+    ##rc[0]('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
     rc[0]('mathtext', **{'fontset': 'stix'})
-    #rcParams[0]['text.usetex'] = True
+    rcParams[0]['text.usetex'] = True
     rc[0]('text', usetex=True)
     #rcParams[0]['text.latex.preview'] = True
     if mathfont == 'sourcesanspro':
@@ -89,7 +90,7 @@ def SetAxPanelLabel(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos=None, *args,
     if pos is not None and pos == 'lr':
         x_pos, y_pos = y_pos, x_pos
         
-    ax.text(x_pos, y_pos, label, transform = ax.transAxes, fontsize=fs, *args, **kwargs)
+    ax.text(x_pos, y_pos, label, transform=ax.transAxes, fontsize=fs, *args, **kwargs)
 
 def SetAxPanelLabelCoords(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos=None, *args, **kwargs):
     if pos is not None and pos == 'ul':
