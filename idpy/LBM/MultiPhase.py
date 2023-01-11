@@ -97,6 +97,13 @@ class ShanChenMultiPhase(RootLB):
                             'u': False,
                             'pop': False}
 
+    def GetWalls(self, walls, psi_w):
+        _psi_w_swap = np.array(psi_w, dtype=NPT.C[self.custom_types['PsiType']])
+        print(_psi_w_swap)
+        self.sims_idpy_memory['psi'].H2D(np.ravel(_psi_w_swap))
+
+        RootLB.GetWalls(self, walls)
+
 
     def MainLoopSimple(self, time_steps, convergence_functions = [], profiling = False):
         _all_init = []
@@ -1055,6 +1062,10 @@ class ShanChenMultiPhase(RootLB):
                         _n_prngs = _n_rand_mom * self.sims_vars['V']
                         self.constants['N_PRNG_STREAMS'] = _n_rand_mom
                 
+            optional_seed = \
+                {} if self.params_dict['prng_init_from'] == 'urandom' else \
+                {'init_seed': self.params_dict['init_seed']}
+
                 
             self.crng = CRNGS(n_prngs = _n_prngs,
                               kind = self.params_dict['prng_kind'],
@@ -1062,8 +1073,8 @@ class ShanChenMultiPhase(RootLB):
                               lang = self.params_dict['lang'],
                               cl_kind = self.params_dict['cl_kind'],
                               device = self.params_dict['device'],
-                              tenet = self.tenet,
-                              init_seed = self.params_dict['init_seed'])
+                              tenet = self.tenet, 
+                              **optional_seed)
 
             self.constants = {**self.constants, **self.crng.constants}
             self.custom_types = \
@@ -1150,6 +1161,9 @@ class ShanChenMultiPhase(RootLB):
             self.custom_types = self.params_dict['custom_types']
         else:
             self.custom_types = LBMTypes
+
+        if 'fluctuations' not in self.params_dict:
+            self.params_dict['fluctuations'] = None
 
         self.custom_types = \
             CheckOCLFP(tenet = self.tenet, custom_types = self.custom_types)
