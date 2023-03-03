@@ -296,31 +296,38 @@ class K_InitPopulations(IdpyKernel):
         }
         """
 
-class K_SetPopulationsFlatInletUX(IdpyKernel):
-    def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
-        IdpyKernel.__init__(self, custom_types = custom_types,
-                            constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
-
+class K_SetPopNUXInletDutyCycle(IdpyKernel):
+    def __init__(self, custom_types=None, constants={}, 
+                 f_classes=[], optimizer_flag=None):
+        IdpyKernel.__init__(self, custom_types=custom_types, constants=constants, 
+                            f_classes=f_classes, optimizer_flag=optimizer_flag)
+        
         self.SetCodeFlags('g_tid')
-
-        self.params = {'PopType * pop': ['global', 'restrict'],
-                       'NType * n': ['global', 'restrict', 'const'],
-                       'UType * u': ['global', 'restrict', 'const'],
+        
+        self.params = {'PopType * pop': ['global', 'restrict'], 
+                       'NType * n': ['global', 'restrict'], 
+                       'UType * u': ['global', 'restrict'],
                        'SType * XI_list': ['global', 'restrict', 'const'],
-                       'WType * W_list': ['global', 'restrict', 'const']}
-
+                       'WType * W_list': ['global', 'restrict', 'const'],
+                       'FlagType * walls': ['global', 'restrict', 'const'],
+                       'int idloop_k': ['const']}
+        
         self.kernels[IDPY_T] = """
-        if(g_tid < V){
-            NType ln = n[g_tid];
+        if(g_tid < V && walls[g_tid] == 2){
+            NType ln = N_IN;
+            
+            UType u_swap = \
+                idloop_k <= TAU_IN ? (U_IN / TAU_IN) * idloop_k : \
+                idloop_k > TAU_IN && idloop_k <= 3 * TAU_IN ? U_IN : \
+                idloop_k > 3 * TAU_IN ? (U_IN / TAU_IN) * (4 * TAU_IN - idloop_k) : 0.;
 
             UType lu[DIM], u_dot_u = 0.;
-            // Copying the velocity
-            for(int d=0; d<DIM; d++){
-                lu[d] = u[g_tid + d * V]; u_dot_u += lu[d] * lu[d];
+            // Setting the velocity
+            lu[0] = u_swap; u_dot_u += u_swap * u_swap;
+            for(int d=1; d<DIM; d++){
+                lu[d] = 0.;
             }
-
+            
             // Loop over the populations
             for(int q=0; q<Q; q++){
 
@@ -335,9 +342,60 @@ class K_SetPopulationsFlatInletUX(IdpyKernel):
                 leq_pop -= 0.5 * u_dot_u * CM2;
                 leq_pop = leq_pop * ln * W_list[q];
                 pop[g_tid + q * V] = leq_pop;
-
             }
+        }
+        """        
+
+class K_SetPopNUOutletNoGradient(IdpyKernel):
+    def __init__(self, custom_types=None, constants={}, 
+                 f_classes=[], optimizer_flag=None):
+        IdpyKernel.__init__(self, custom_types=custom_types, constants=constants, 
+                            f_classes=f_classes, optimizer_flag=optimizer_flag)
         
+        self.SetCodeFlags('g_tid')
+        
+        self.params = {'PopType * pop': ['global', 'restrict'], 
+                       'NType * n': ['global', 'restrict'], 
+                       'UType * u': ['global', 'restrict'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const'],
+                       'FlagType * walls': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const']}
+        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && walls[g_tid] == 3){
+            SType dst_pos[DIM], src_pos[DIM];
+            // Getting the position of the thread
+            F_PosFromIndex(dst_pos, dim_sizes, dim_strides, g_tid);
+
+            // Setting the position of the neighbor
+            src_pos[0] = dst_pos[0] - 1;
+            for(int d=1; d<DIM; d++){ src_pos[d] = dst_pos[d]; }
+            
+            // Getting the index of the neighbor
+            SType src_index = F_IndexFromPos(src_pos, dim_strides);
+        
+            // Copying the neighbor density and velocity
+            NType ln = n[src_index];
+            UType lu[DIM], u_dot_u = 0.;
+            for(int d=0; d<DIM; d++){ lu[d] = u[src_index + d * V]; u_dot_u += lu[d] * lu[d]; }
+                        
+            // Setting the Populations
+            for(int q=0; q<Q; q++){
+
+                UType u_dot_xi = 0.;
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1.;
+                leq_pop += u_dot_xi * CM2;
+                leq_pop += 0.5 * u_dot_xi * u_dot_xi * CM4;
+                leq_pop -= 0.5 * u_dot_u * CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+                pop[g_tid + q * V] = leq_pop;
+            }
         }
         """
 
