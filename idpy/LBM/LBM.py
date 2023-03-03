@@ -507,6 +507,13 @@ class RootLB(IdpySims):
             self.sims_vars['dim_strides'], self.sims_vars['dim_center'], \
             self.sims_vars['V'] = InitDimSizesStridesVolume(dim_sizes, custom_types)
 
+        '''
+        Managing one-dimensional case
+        '''
+        if len(self.sims_vars['dim_strides']) == 0:
+            self.sims_vars['dim_strides'] = self.sims_vars['dim_sizes']
+
+
         self.sims_vars['Q'], self.sims_vars['XI_list'], \
             self.sims_vars['W_list'], self.sims_vars['c2'] = \
                 InitStencilWeights(xi_stencil, custom_types)
@@ -549,8 +556,15 @@ class RootLB(IdpySims):
             self.constants[_swap_macros_sizes[_i]] = _
 
         ## dim_strides
+        '''
         _swap_macros_strides = \
             _get_seq_macros(self.sims_vars['DIM'] - 1, self.params_dict['root_strides'])
+        '''
+        _swap_macros_strides = \
+            _get_seq_macros(
+                len(self.sims_vars['dim_strides']), 
+                self.params_dict['root_strides'])
+            
         for _i, _ in enumerate(self.sims_vars['dim_strides']):
             self.constants[_swap_macros_strides[_i]] = _
 
@@ -564,16 +578,16 @@ class RootLB(IdpySims):
                                  'XI_list': None,
                                  'W_list': None}
         
-    def InitMemory(self, tenet, custom_types): 
+    def InitMemory(self, tenet, custom_types):
         self.sims_idpy_memory['pop'] = \
             IdpyMemory.Zeros(shape = self.sims_vars['V'] * self.sims_vars['Q'],
                              dtype = NPT.C[custom_types['PopType']],
                              tenet = tenet)
-        
+
         self.sims_idpy_memory['dim_sizes'] = \
             IdpyMemory.OnDevice(self.sims_vars['dim_sizes'],
                                 tenet = tenet)
-        
+
         self.sims_idpy_memory['dim_strides'] = \
             IdpyMemory.OnDevice(self.sims_vars['dim_strides'],
                                 tenet = tenet)
@@ -581,10 +595,10 @@ class RootLB(IdpySims):
         self.sims_idpy_memory['dim_center'] = \
             IdpyMemory.OnDevice(self.sims_vars['dim_center'],
                                 tenet = tenet)
-        
+
         self.sims_idpy_memory['XI_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['XI_list'], tenet = tenet)
-        
+    
         self.sims_idpy_memory['W_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['W_list'], tenet = tenet)
 
