@@ -151,7 +151,10 @@ class K_ForceCollideStreamSCMPMeta(IdpyKernel):
         self.SetDeclaredVariables()
         self.SetDeclaredConstants()
         self.dim_sizes_macros = _get_seq_macros(self.constants['DIM'], root_dim_sizes)
-        self.dim_strides_macros = _get_seq_macros(self.constants['DIM'] - 1, root_strides)
+        self.dim_strides_macros = \
+            _get_seq_macros(
+                self.constants['DIM'] - 1 if self.constants['DIM'] > 1 else 1, 
+                root_strides)
 
         '''
         Kernel Body
@@ -328,7 +331,10 @@ class K_ForceCollideStreamWallsSCMPMeta(IdpyKernel):
         self.SetDeclaredVariables()
         self.SetDeclaredConstants()
         self.dim_sizes_macros = _get_seq_macros(self.constants['DIM'], root_dim_sizes)
-        self.dim_strides_macros = _get_seq_macros(self.constants['DIM'] - 1, root_strides)
+        self.dim_strides_macros = \
+            _get_seq_macros(
+                self.constants['DIM'] - 1 if self.constants['DIM'] > 1 else 1, 
+                root_strides)
 
         '''
         Kernel Body
@@ -512,7 +518,10 @@ class K_ForceCollideStreamSCMP_MRTMeta(IdpyKernel):
         self.SetDeclaredVariables()
         self.SetDeclaredConstants()
         self.dim_sizes_macros = _get_seq_macros(self.constants['DIM'], root_dim_sizes)
-        self.dim_strides_macros = _get_seq_macros(self.constants['DIM'] - 1, root_strides)
+        self.dim_strides_macros = \
+            _get_seq_macros(
+                self.constants['DIM'] - 1 if self.constants['DIM'] > 1 else 1, 
+                root_strides)
 
         '''
         Kernel Body
@@ -694,7 +703,10 @@ class K_ComputeVelocityAfterForceSCMPMeta(IdpyKernel):
         self.SetDeclaredVariables()
         self.SetDeclaredConstants()
         self.dim_sizes_macros = _get_seq_macros(self.constants['DIM'], root_dim_sizes)
-        self.dim_strides_macros = _get_seq_macros(self.constants['DIM'] - 1, root_strides)
+        self.dim_strides_macros = \
+            _get_seq_macros(
+                self.constants['DIM'] - 1 if self.constants['DIM'] > 1 else 1, 
+                root_strides)
 
         '''
         Kernel Body
@@ -848,7 +860,10 @@ class K_ForceGross2011CollideStreamSCMPMeta(IdpyKernel):
         self.SetDeclaredVariables()
         self.SetDeclaredConstants()
         self.dim_sizes_macros = _get_seq_macros(self.constants['DIM'], root_dim_sizes)
-        self.dim_strides_macros = _get_seq_macros(self.constants['DIM'] - 1, root_strides)
+        self.dim_strides_macros = \
+            _get_seq_macros(
+                self.constants['DIM'] - 1 if self.constants['DIM'] > 1 else 1, 
+                root_strides)
 
         '''
         Kernel Body
