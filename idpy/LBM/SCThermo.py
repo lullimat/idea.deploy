@@ -41,6 +41,7 @@ from sympy.solvers.solveset import nonlinsolve
 from sympy.solvers import solve
 from functools import reduce
 import math
+import sympy as sp
 
 from idpy.LBM.SCFStencils import SCFStencils
 from idpy.Utils.ManageData import ManageData
@@ -114,7 +115,7 @@ class ShanChen:
         P_subs_swap = self.P.subs(self.psi, self.psi_f)
         P_subs_swap = P_subs_swap.subs(self.theta, self.theta_val)
         P_subs_swap = P_subs_swap.subs(self.e2, self.e2_val)
-        
+            
         self.d_P = diff(P_subs_swap, self.n)
         self.dd_P = diff(self.d_P, self.n)
         #print([self.d_P, self.dd_P])
