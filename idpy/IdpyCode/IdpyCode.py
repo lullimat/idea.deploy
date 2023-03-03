@@ -719,8 +719,13 @@ class IdpyLoop:
     automatically creating streams and events in order to allow
     the concurrent execution of these lists
     '''
-    def __init__(self, args_dicts = None, sequences = None):
-        self.args_dicts, self.sequences = args_dicts, sequences
+    def __init__(self, args_dicts = None, sequences = None, idloop_k_type=np.int32):
+        '''
+        Insert 'idpy_loop_counter' in 'args_dict'
+        '''
+        self.idloop_k_type = idloop_k_type
+        self.args_dicts = [{**args_dict, **{'idloop_k': idloop_k_type(0)}} for args_dict in args_dicts]
+        self.sequences = sequences
         self.meta_streams, self.langs = [], []
         self.first_run = True
 
@@ -759,7 +764,7 @@ class IdpyLoop:
         else:
             raise Exception("List of arguments keys cannot be empty!")    
 
-    def Run(self, loop_range = None, profiling = False):
+    def Run(self, loop_range = None, profiling = False, idloop_k_offset=0):
         '''
         Begin by setting up meta_streams and langs
         Neet to do this only once to avoid re-allocating (CUDA) streams
@@ -770,8 +775,13 @@ class IdpyLoop:
                 self.langs.append(self.SetLang(seq))
             self.first_run = False
 
-        for step in loop_range:
+        idloop_k_offset = self.idloop_k_type(idloop_k_offset)
+
+        for step_k, step in enumerate(loop_range):
+
             for seq_i in range(len(self.sequences)):
+                self.args_dicts[seq_i]['idloop_k'] = idloop_k_offset + self.idloop_k_type(step_k)
+
                 seq_len = len(self.sequences[seq_i])                
                 '''
                 OpenCL
