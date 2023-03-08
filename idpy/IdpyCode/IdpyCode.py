@@ -724,6 +724,7 @@ class IdpyLoop:
         Insert 'idpy_loop_counter' in 'args_dict'
         '''
         self.idloop_k_type = idloop_k_type
+        self.idloop_k_offset = 0
         self.args_dicts = [{**args_dict, **{'idloop_k': idloop_k_type(0)}} for args_dict in args_dicts]
         self.sequences = sequences
         self.meta_streams, self.langs = [], []
@@ -780,7 +781,9 @@ class IdpyLoop:
         for step_k, step in enumerate(loop_range):
 
             for seq_i in range(len(self.sequences)):
-                self.args_dicts[seq_i]['idloop_k'] = idloop_k_offset + self.idloop_k_type(step_k)
+                self.args_dicts[seq_i]['idloop_k'] = \
+                    idloop_k_offset + self.idloop_k_type(step_k) + \
+                    self.idloop_k_offset
 
                 seq_len = len(self.sequences[seq_i])                
                 '''
@@ -830,7 +833,10 @@ class IdpyLoop:
                         Deploying
                         '''
                         Idea.Deploy(_args, idpy_stream = _stream)
-                        self.PutArgs(seq_i, _indices, _args)                        
+                        self.PutArgs(seq_i, _indices, _args)
+
+        self.idloop_k_offset += loop_range[-1] - loop_range[0] + 1
+        ## print("self.idloop_k_offset", self.idloop_k_offset)                      
 
         '''
         Synchronizing with device: can this be done better? Are we waisting time?
