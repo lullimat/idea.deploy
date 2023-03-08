@@ -319,7 +319,7 @@ class K_SetPopNUXInletDutyCycle(IdpyKernel):
             UType u_swap = \
                 idloop_k <= TAU_IN ? (U_IN / TAU_IN) * idloop_k : \
                 idloop_k > TAU_IN && idloop_k <= 3 * TAU_IN ? U_IN : \
-                idloop_k > 3 * TAU_IN ? (U_IN / TAU_IN) * (4 * TAU_IN - idloop_k) : 0.;
+                idloop_k > 3 * TAU_IN && idloop_k <= 4 * TAU_IN ? (U_IN / TAU_IN) * (4 * TAU_IN - idloop_k) : 0.;
 
             UType lu[DIM], u_dot_u = 0.;
             // Setting the velocity
@@ -377,24 +377,12 @@ class K_SetPopNUOutletNoGradient(IdpyKernel):
             SType src_index = F_IndexFromPos(src_pos, dim_strides);
         
             // Copying the neighbor density and velocity
-            NType ln = n[src_index];
-            UType lu[DIM], u_dot_u = 0.;
-            for(int d=0; d<DIM; d++){ lu[d] = u[src_index + d * V]; u_dot_u += lu[d] * lu[d]; }
-                        
-            // Setting the Populations
+            n[g_tid] = n[src_index];
+            for(int d=0; d<DIM; d++){ u[g_tid + d * V] = u[src_index + d * V]; }
+
+            // ...and populations
             for(int q=0; q<Q; q++){
-
-                UType u_dot_xi = 0.;
-                for(int d=0; d<DIM; d++){
-                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
-                }
-
-                PopType leq_pop = 1.;
-                leq_pop += u_dot_xi * CM2;
-                leq_pop += 0.5 * u_dot_xi * u_dot_xi * CM4;
-                leq_pop -= 0.5 * u_dot_u * CM2;
-                leq_pop = leq_pop * ln * W_list[q];
-                pop[g_tid + q * V] = leq_pop;
+                pop[g_tid + q * V] = pop[src_index + q * V];
             }
         }
         """
