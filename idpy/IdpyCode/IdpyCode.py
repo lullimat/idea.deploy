@@ -724,7 +724,7 @@ class IdpyLoop:
         Insert 'idpy_loop_counter' in 'args_dict'
         '''
         self.idloop_k_type = idloop_k_type
-        self.idloop_k_offset = 0
+        self.idloop_k_offset = self.idloop_k_type(0)
         self.args_dicts = [{**args_dict, **{'idloop_k': idloop_k_type(0)}} for args_dict in args_dicts]
         self.sequences = sequences
         self.meta_streams, self.langs = [], []
@@ -835,7 +835,8 @@ class IdpyLoop:
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
 
-        self.idloop_k_offset += loop_range[-1] - loop_range[0] + 1
+        self.idloop_k_offset += \
+            self.idloop_k_type(loop_range[-1] - loop_range[0] + 1)
         ## print("self.idloop_k_offset", self.idloop_k_offset)                      
 
         '''
