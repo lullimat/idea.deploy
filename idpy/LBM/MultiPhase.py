@@ -400,8 +400,8 @@ class ShanChenMultiPhase(RootLB):
                             block = self.sims_vars['block']),
                          ['pop', 'n', 'u',
                           'XI_list', 'W_list', 'walls', 
-                          'dim_sizes', 'dim_strides']),
-
+                          'dim_sizes', 'dim_strides']),                        
+                    
                         (_K_ComputeMomentsWalls(
                             tenet = self.tenet,
                             grid = self.sims_vars['grid'],
@@ -422,7 +422,7 @@ class ShanChenMultiPhase(RootLB):
                           'XI_list', 'W_list',
                           'E_list', 'EW_list',
                           'dim_sizes', 'dim_strides', 'walls']),
-                        
+
                         (_K_StreamPeriodic(tenet = self.tenet,
                                            grid = self.sims_vars['grid'],
                                            block = self.sims_vars['block']),
@@ -772,7 +772,8 @@ class ShanChenMultiPhase(RootLB):
         else:
             return None
 
-    def MainLoopGross2011SRT(self, time_steps, convergence_functions = [],
+    def MainLoopGross2011SRT(self, time_steps, 
+                             convergence_functions = [], convergence_functions_args = [],
                              profiling = False,
                              kBT = None, n0 = None, print_flag = True):
 
@@ -891,8 +892,8 @@ class ShanChenMultiPhase(RootLB):
                 old_step = step
                 if len(convergence_functions):
                     checks = []
-                    for c_f in convergence_functions:
-                        checks.append(c_f(self))
+                    for c_i, c_f in enumerate(convergence_functions):
+                        checks.append(c_f(self, **convergence_functions_args[c_i]))
                     
                     if OneTrue(checks):
                         break
