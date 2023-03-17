@@ -43,11 +43,12 @@ def SetMatplotlibLatexParamas(rc, rcParams, mathfont='sourcesanspro'):
     rcParams[0]['text.usetex'] = True
     rc[0]('text', usetex=True)
     #rcParams[0]['text.latex.preview'] = True
-    if mathfont == 'sourcesanspro':
-        rcParams[0]['text.latex.preamble']=[r"\usepackage{amsmath, sourcesanspro}"]
-    elif mathfont == 'ams':
-        print("Setting 'ams' font")
-        rcParams[0]['text.latex.preamble']=[r"\usepackage{eucal}"]
+    if False:
+        if mathfont == 'sourcesanspro':
+            rcParams[0]['text.latex.preamble']=[r"\usepackage{amsmath, sourcesanspro}"]
+        elif mathfont == 'ams':
+            print("Setting 'ams' font")
+            rcParams[0]['text.latex.preamble']=[r"\usepackage{eucal}"]
 
 def SetDefaultFonts(rc, 
                     font_size = 20, legend_font_size = 17, 
