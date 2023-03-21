@@ -14,7 +14,7 @@ copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENTMainL SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
@@ -65,6 +65,8 @@ from idpy.LBM.MultiPhaseKernels import K_Collision_ShanChenGuoMultiPhaseWalls
 from idpy.LBM.MultiPhaseKernels import K_ComputePsi, K_ComputePsiWalls, K_InitFlatInterface
 from idpy.LBM.MultiPhaseKernels import K_InitSingleFlatInterface
 from idpy.LBM.MultiPhaseKernels import K_InitRadialInterface, K_InitCylinderInterface
+from idpy.LBM.MultiPhaseKernels import K_Collision_ShanChenMultiPhase
+from idpy.LBM.MultiPhaseKernels import K_Collision_ShanChenMultiPhaseWalls
 
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeVelocityAfterForceSCMPMeta
@@ -201,6 +203,100 @@ class ShanChenMultiPhase(RootLB):
         else:
             return None
 
+    def MainLoopSimpleSC(self, time_steps, convergence_functions = [], profiling = False):
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+        
+        _K_ComputeMoments = K_ComputeMoments(custom_types = self.custom_types.Push(),
+                                             constants = self.constants,
+                                             optimizer_flag = self.optimizer_flag)
+
+        _K_ComputePsi = K_ComputePsi(custom_types = self.custom_types.Push(),
+                                     constants = self.constants,
+                                     psi_code = self.params_dict['psi_code'],
+                                     optimizer_flag = self.optimizer_flag)
+
+        _K_Collision_ShanChenMultiPhase = \
+            K_Collision_ShanChenMultiPhase(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+        
+        _K_StreamPeriodic = K_StreamPeriodic(custom_types = self.custom_types.Push(),
+                                             constants = self.constants,
+                                             f_classes = [F_PosFromIndex,
+                                                          F_IndexFromPos],
+                                             optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [
+                        (_K_ComputeMoments(tenet = self.tenet,
+                                           grid = self.sims_vars['grid'],
+                                           block = self.sims_vars['block']),
+                         ['n', 'u', 'pop',
+                          'XI_list', 'W_list']),
+                        (_K_ComputePsi(tenet = self.tenet,
+                                       grid = self.sims_vars['grid'],
+                                       block = self.sims_vars['block']), ['psi', 'n']),
+
+                        (_K_Collision_ShanChenMultiPhase(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['pop', 'u', 'n', 'psi',
+                          'XI_list', 'W_list',
+                          'E_list', 'EW_list',
+                          'dim_sizes', 'dim_strides']),
+                        
+                        (_K_StreamPeriodic(tenet = self.tenet,
+                                           grid = self.sims_vars['grid'],
+                                           block = self.sims_vars['block']),
+                         ['pop_swap', 'pop',
+                          'XI_list',
+                          'dim_sizes',
+                          'dim_strides']),
+
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_f in convergence_functions:
+                    checks.append(c_f(self))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None            
+
     def MainLoopSimpleWalls(self, time_steps, convergence_functions = [], profiling = False):
         _all_init = []
         for key in self.init_status:
@@ -317,9 +413,125 @@ class ShanChenMultiPhase(RootLB):
         else:
             return None
 
+    def MainLoopSimpleWallsSC(self, time_steps, convergence_functions = [], profiling = False):
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+        
+        _K_ComputeMomentsWalls = \
+            K_ComputeMomentsWalls(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                optimizer_flag = self.optimizer_flag)
+
+        _K_ComputePsiWalls = \
+            K_ComputePsiWalls(
+                    custom_types = self.custom_types.Push(),
+                    constants = self.constants,
+                    psi_code = self.params_dict['psi_code'],
+                    optimizer_flag = self.optimizer_flag)
+
+        _K_Collision_ShanChenMultiPhaseWalls = \
+            K_Collision_ShanChenMultiPhaseWalls(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+        
+        _K_StreamPeriodic = \
+            K_StreamPeriodic(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _K_HalfWayBounceBack = \
+            K_HalfWayBounceBack(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [
+                        (_K_ComputeMomentsWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['n', 'u', 'pop',
+                          'XI_list', 'W_list', 'walls']),
+
+                        (_K_ComputePsiWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']), ['psi', 'n', 'walls']),
+
+                        (_K_Collision_ShanChenMultiPhaseWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['pop', 'u', 'n', 'psi',
+                          'XI_list', 'W_list',
+                          'E_list', 'EW_list',
+                          'dim_sizes', 'dim_strides', 'walls']),
+                        
+                        (_K_StreamPeriodic(tenet = self.tenet,
+                                           grid = self.sims_vars['grid'],
+                                           block = self.sims_vars['block']),
+                         ['pop_swap', 'pop',
+                          'XI_list',
+                          'dim_sizes',
+                          'dim_strides']),
+
+                        (_K_HalfWayBounceBack(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']), 
+                        ['pop_swap', 'XI_list', 'dim_sizes', 'dim_strides', 
+                        'walls', 'xi_opposite']),
+
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_f in convergence_functions:
+                    checks.append(c_f(self))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None            
+
     def MainLoopSimpleWallsInletOutlet(
         self, time_steps, convergence_functions = [], profiling = False,
-        n_in=1, u_in=0, tau_in=100):
+        n_in=1, u_in=0, tau_in=100, max_mult=2):
 
         _all_init = []
         for key in self.init_status:
@@ -328,6 +540,7 @@ class ShanChenMultiPhase(RootLB):
         self.constants['N_IN'] = n_in
         self.constants['U_IN'] = u_in
         self.constants['TAU_IN'] = tau_in
+        self.constants['MAX_MULT'] = max_mult
 
         if not AllTrue(_all_init):
             print(self.init_status)
@@ -401,7 +614,7 @@ class ShanChenMultiPhase(RootLB):
                          ['pop', 'n', 'u',
                           'XI_list', 'W_list', 'walls', 
                           'dim_sizes', 'dim_strides']),                        
-                    
+
                         (_K_ComputeMomentsWalls(
                             tenet = self.tenet,
                             grid = self.sims_vars['grid'],
@@ -466,7 +679,160 @@ class ShanChenMultiPhase(RootLB):
         if profiling:
             return _profiling_results
         else:
-            return None            
+            return None
+
+    def MainLoopSimpleWallsInletOutletSC(
+        self, time_steps, 
+        convergence_functions = [], convergence_functions_args = [], 
+        profiling = False,
+        n_in=1, u_in=0, tau_in=100, max_mult=2):
+
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        self.constants['N_IN'] = n_in
+        self.constants['U_IN'] = u_in
+        self.constants['TAU_IN'] = tau_in
+        self.constants['MAX_MULT'] = max_mult
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+        
+        _K_SetPopNUXInletDutyCycle = \
+            K_SetPopNUXInletDutyCycle(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes=[F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _K_SetPopNUOutletNoGradient = \
+            K_SetPopNUOutletNoGradient(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes=[F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)            
+
+        _K_ComputeMomentsWalls = \
+            K_ComputeMomentsWalls(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                optimizer_flag = self.optimizer_flag)            
+
+        _K_ComputePsiWalls = \
+            K_ComputePsiWalls(
+                    custom_types = self.custom_types.Push(),
+                    constants = self.constants,
+                    psi_code = self.params_dict['psi_code'],
+                    optimizer_flag = self.optimizer_flag)
+
+        _K_Collision_ShanChenMultiPhaseWalls = \
+            K_Collision_ShanChenMultiPhaseWalls(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+        
+        _K_StreamPeriodic = \
+            K_StreamPeriodic(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _K_HalfWayBounceBack = \
+            K_HalfWayBounceBack(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex, F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [
+                        (_K_SetPopNUOutletNoGradient(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['pop', 'n', 'u',
+                          'XI_list', 'W_list', 'walls', 
+                          'dim_sizes', 'dim_strides']),
+
+                        (_K_SetPopNUXInletDutyCycle(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['pop', 'n', 'u',
+                          'XI_list', 'W_list', 'walls', 
+                          'dim_sizes', 'dim_strides', 'idloop_k']),                                               
+
+                        (_K_StreamPeriodic(tenet = self.tenet,
+                                           grid = self.sims_vars['grid'],
+                                           block = self.sims_vars['block']),
+                         ['pop_swap', 'pop', 'XI_list',
+                          'dim_sizes', 'dim_strides']),
+
+                        (_K_HalfWayBounceBack(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']), 
+                        ['pop_swap', 'XI_list', 'dim_sizes', 'dim_strides', 'walls', 'xi_opposite']),
+
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop']),
+
+                        (_K_ComputeMomentsWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['n', 'u', 'pop',
+                          'XI_list', 'W_list', 'walls']),
+
+                        (_K_ComputePsiWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']), ['psi', 'n', 'walls']),
+
+                        (_K_Collision_ShanChenMultiPhaseWalls(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']),
+                         ['pop', 'u', 'n', 'psi',
+                          'XI_list', 'W_list',
+                          'E_list', 'EW_list',
+                          'dim_sizes', 'dim_strides', 'walls']),
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_i, c_f in enumerate(convergence_functions):
+                    checks.append(c_f(self, **convergence_functions_args[c_i]))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None                        
 
     def MainLoopSimpleWallsGravity(
         self, time_steps, convergence_functions = [], 
