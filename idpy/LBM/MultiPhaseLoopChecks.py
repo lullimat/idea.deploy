@@ -91,7 +91,7 @@ def CheckMinMaxAveN(lbm):
     print(np.mean(_u_swap), np.amax(_u_swap), np.amin(_u_swap))
     return False
 
-def CheckUConvergenceSCMP(lbm, skip_exit_condition=False):
+def CheckUConvergenceSCMP(lbm, skip_exit_condition=False, print_flag=True):
     first_flag = False
 
     if 'old_u' not in lbm.sims_idpy_memory:
@@ -146,8 +146,9 @@ def CheckUConvergenceSCMP(lbm, skip_exit_condition=False):
 
     _u_threshold = 1e-12 if NPT.C[lbm.custom_types['UType']] == np.float64 else 1e-5
 
-    print('u_conv: ', u_conv, 'max_u: ', max_u)
-    print("Conv!", u_conv < _u_threshold, first_flag)
+    if print_flag:
+        print('u_conv: ', u_conv, 'max_u: ', max_u)
+        print("Conv!", u_conv < _u_threshold, first_flag)
     
     if not skip_exit_condition:
         if not first_flag and u_conv < _u_threshold:

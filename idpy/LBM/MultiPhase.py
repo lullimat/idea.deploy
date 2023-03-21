@@ -1246,39 +1246,29 @@ class ShanChenMultiPhase(RootLB):
         '''
         self.sims_vars['time_steps'] = []
 
-        if print_flag:
-            for step in time_steps[1:]:
+        for step in time_steps[1:]:
+            if print_flag:
                 print("Step:", step)
-                '''
-                Very simple timing, reasonable for long executions
-                '''
-                _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
-                self.sims_vars['time_steps'] += [step]
-                
-                old_step = step
-                if len(convergence_functions):
-                    checks = []
+            elif (step % (2 ** 20)) == 0:
+                print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            self.sims_vars['time_steps'] += [step]
+
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                if len(convergence_functions_args):
                     for c_i, c_f in enumerate(convergence_functions):
                         checks.append(c_f(self, **convergence_functions_args[c_i]))
-                    
-                    if OneTrue(checks):
-                        break
-        else:
-            for step in time_steps[1:]:
-                '''
-                Very simple timing, reasonable for long executions
-                '''
-                _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
-                self.sims_vars['time_steps'] += [step]
-                
-                old_step = step
-                if len(convergence_functions):
-                    checks = []
+                else:
                     for c_f in convergence_functions:
                         checks.append(c_f(self))
 
-                    if OneTrue(checks):
-                        break
+                if OneTrue(checks):
+                    break
 
         self.sims_vars['time_steps'] = np.array(self.sims_vars['time_steps'])
 
