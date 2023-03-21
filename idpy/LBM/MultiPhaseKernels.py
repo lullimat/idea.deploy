@@ -129,6 +129,179 @@ class F_PointDistance(IdpyFunction):
 '''
 Kernels
 '''
+class K_Collision_ShanChenMultiPhase(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+        self.SetCodeFlags('g_tid')
+        self.params = {'PopType * pop': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'NType * n': ['global', 'restrict', 'const'],
+                       'PsiType * psi': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const'],
+                       'SType * E_list': ['global', 'restrict', 'const'],
+                       'WType * EW_list': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const']}
+        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+            // Getting thread position
+            SType g_tid_pos[DIM];
+            F_PosFromIndex(g_tid_pos, dim_sizes, dim_strides, g_tid);
+
+            // Computing Shan-Chen Force
+            SCFType F[DIM]; SType neigh_pos[DIM]; UType lu_post[DIM];
+            for(int d=0; d<DIM; d++){F[d] = lu_post[d] = 0.;}
+
+            PsiType lpsi = psi[g_tid];
+
+            for(int qe=0; qe<QE; qe++){
+                // Compute neighbor position
+                for(int d=0; d<DIM; d++){
+                    neigh_pos[d] = ((g_tid_pos[d] + E_list[d + qe*DIM] + dim_sizes[d]) % dim_sizes[d]);
+                }
+                // Compute neighbor index
+                SType neigh_index = F_IndexFromPos(neigh_pos, dim_strides);
+                // Get the pseudopotential value
+                PsiType npsi = psi[neigh_index];
+                // Add partial contribution
+                for(int d=0; d<DIM; d++){F[d] += E_list[d + qe*DIM] * EW_list[qe] * npsi;}
+            }
+            for(int d=0; d<DIM; d++){F[d] *= -SC_G * lpsi;}
+
+            // Local density and velocity for shift and equilibrium
+            NType ln = n[g_tid]; UType lu[DIM];
+
+            // Shan-Chen velocity shift & Copy to global memory
+            for(int d=0; d<DIM; d++){ 
+                lu[d] = u[g_tid + V*d] + F[d] / ln / OMEGA;
+            }
+
+            // Compute square norm of Guo shifted velocity
+            UType u_dot_u = 0.;
+            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d];}
+
+            // Cycle over the populations: equilibrium + Shan Chen
+            for(int q=0; q<Q; q++){
+                UType u_dot_xi = 0.; 
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1.;
+
+                // Equilibrium population
+                leq_pop += + u_dot_xi*CM2 + 0.5*u_dot_xi*u_dot_xi*CM4;
+                leq_pop += - 0.5*u_dot_u*CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+
+                pop[g_tid + q*V] = \
+                    pop[g_tid + q*V]*(1. - OMEGA) + leq_pop*OMEGA;
+
+                for(int d=0; d<DIM; d++){
+                   lu_post[d] += pop[g_tid + q*V] * XI_list[d + q*DIM];
+                }
+
+             }
+
+            for(int d=0; d<DIM; d++){ 
+                u[g_tid + V*d] = 0.5 * (u[g_tid + V*d] + lu_post[d] / ln);
+            }
+
+        }
+        """
+
+class K_Collision_ShanChenMultiPhaseWalls(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None):
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag)
+        self.SetCodeFlags('g_tid')
+        self.params = {'PopType * pop': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'NType * n': ['global', 'restrict', 'const'],
+                       'PsiType * psi': ['global', 'restrict', 'const'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const'],
+                       'SType * E_list': ['global', 'restrict', 'const'],
+                       'WType * EW_list': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const'], 
+                       'FlagType * walls': ['global', 'restrict', 'const']}
+        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && walls[g_tid] == 1){
+            // Getting thread position
+            SType g_tid_pos[DIM];
+            F_PosFromIndex(g_tid_pos, dim_sizes, dim_strides, g_tid);
+
+            // Computing Shan-Chen Force
+            SCFType F[DIM]; SType neigh_pos[DIM]; UType lu_post[DIM];
+            for(int d=0; d<DIM; d++){F[d] = lu_post[d] = 0.;}
+
+            PsiType lpsi = psi[g_tid];
+
+            for(int qe=0; qe<QE; qe++){
+                // Compute neighbor position
+                for(int d=0; d<DIM; d++){
+                    neigh_pos[d] = ((g_tid_pos[d] + E_list[d + qe*DIM] + dim_sizes[d]) % dim_sizes[d]);
+                }
+                // Compute neighbor index
+                SType neigh_index = F_IndexFromPos(neigh_pos, dim_strides);
+                // Get the pseudopotential value
+                PsiType npsi = psi[neigh_index];
+                // Add partial contribution
+                for(int d=0; d<DIM; d++){F[d] += E_list[d + qe*DIM] * EW_list[qe] * npsi;}
+            }
+            for(int d=0; d<DIM; d++){F[d] *= -SC_G * lpsi;}
+
+            // Local density and velocity for shift and equilibrium
+            NType ln = n[g_tid]; UType lu[DIM];
+
+            // Shan-Chen velocity shift & Copy to global memory
+            for(int d=0; d<DIM; d++){ 
+                lu[d] = u[g_tid + V*d] + F[d] / ln / OMEGA;
+            }
+
+            // Compute square norm of Guo shifted velocity
+            UType u_dot_u = 0.;
+            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d];}
+
+            // Cycle over the populations: equilibrium + Shan Chen
+            for(int q=0; q<Q; q++){
+                UType u_dot_xi = 0.; 
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1.;
+
+                // Equilibrium population
+                leq_pop += + u_dot_xi*CM2 + 0.5*u_dot_xi*u_dot_xi*CM4;
+                leq_pop += - 0.5*u_dot_u*CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+
+                pop[g_tid + q*V] = \
+                    pop[g_tid + q*V]*(1. - OMEGA) + leq_pop*OMEGA;
+
+                for(int d=0; d<DIM; d++){
+                   lu_post[d] += pop[g_tid + q*V] * XI_list[d + q*DIM];
+                }
+
+             }
+
+            for(int d=0; d<DIM; d++){ 
+                u[g_tid + V*d] = 0.5 * (u[g_tid + V*d] + lu_post[d] / ln);
+            }
+
+        }
+        """
+
 class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None):
