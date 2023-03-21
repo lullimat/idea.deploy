@@ -234,7 +234,7 @@ class K_ComputeMomentsWalls(IdpyKernel):
                        'FlagType * walls': ['global', 'restrict', 'const']}
 
         self.kernels[IDPY_T] = """
-        if(g_tid < V && walls[g_tid]){
+        if(g_tid < V && walls[g_tid] == 1){
             UType lu[DIM];
             for(int d=0; d<DIM; d++){ lu[d] = 0.; }
 
@@ -310,22 +310,36 @@ class K_SetPopNUXInletDutyCycle(IdpyKernel):
                        'SType * XI_list': ['global', 'restrict', 'const'],
                        'WType * W_list': ['global', 'restrict', 'const'],
                        'FlagType * walls': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const'],
                        'int idloop_k': ['const']}
         
         self.kernels[IDPY_T] = """
         if(g_tid < V && walls[g_tid] == 2){
-            NType ln = N_IN;
+            SType dst_pos[DIM], src_pos[DIM];
+            // Getting the position of the thread
+            F_PosFromIndex(dst_pos, dim_sizes, dim_strides, g_tid);
+
+            // Setting the position of the neighbor
+            src_pos[0] = dst_pos[0] + 1;
+            for(int d=1; d<DIM; d++){ src_pos[d] = dst_pos[d]; }
+            
+            // Getting the index of the neighbor
+            SType src_index = F_IndexFromPos(src_pos, dim_strides);
+
+            NType ln = n[g_tid] = n[src_index];
             
             UType u_swap = \
                 idloop_k <= TAU_IN ? (U_IN / TAU_IN) * idloop_k : \
-                idloop_k > TAU_IN && idloop_k <= 3 * TAU_IN ? U_IN : \
-                idloop_k > 3 * TAU_IN && idloop_k <= 4 * TAU_IN ? (U_IN / TAU_IN) * (4 * TAU_IN - idloop_k) : 0.;
+                idloop_k > TAU_IN && idloop_k <= (MAX_MULT + 1) * TAU_IN ? U_IN : \
+                idloop_k > (MAX_MULT + 1) * TAU_IN && idloop_k <= (MAX_MULT + 2) * TAU_IN ? \
+                (U_IN / TAU_IN) * ((MAX_MULT + 2) * TAU_IN - idloop_k) : 0.;
 
-            UType lu[DIM], u_dot_u = 0.;
+            UType lu[DIM], u_dot_u = u_swap * u_swap;
             // Setting the velocity
-            lu[0] = u_swap; u_dot_u += u_swap * u_swap;
+            lu[0] = u[g_tid + 0 * V] = u_swap;
             for(int d=1; d<DIM; d++){
-                lu[d] = 0.;
+                lu[d] = u[g_tid + d * V] = 0.;
             }
             
             // Loop over the populations
@@ -344,7 +358,7 @@ class K_SetPopNUXInletDutyCycle(IdpyKernel):
                 pop[g_tid + q * V] = leq_pop;
             }
         }
-        """        
+        """                
 
 class K_SetPopNUOutletNoGradient(IdpyKernel):
     def __init__(self, custom_types=None, constants={}, 
