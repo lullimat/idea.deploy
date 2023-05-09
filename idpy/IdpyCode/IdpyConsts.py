@@ -32,7 +32,7 @@ Provides classes containing language specific definitions
 from collections import defaultdict
 
 from idpy.Utils.IsModuleThere import AreModulesThere
-from . import CUDA_T, OCL_T, CTYPES_T, IDPY_T
+from . import CUDA_T, OCL_T, CTYPES_T, METAL_T, IDPY_T
 
 class AddrQualif:
     '''
@@ -69,6 +69,13 @@ class AddrQualif:
                                      'local': '',
                                      'restrict': """__restrict__""",
                                      'shared': '',
+                                     'device': ''}
+
+        self.qualifiers[METAL_T] = {'global': '',
+                                     'const': """const""",
+                                     'local': '',
+                                     'restrict': """__restrict__""",
+                                     'shared': '',
                                      'device': ''}        
 
     def __getitem__(self, lang):
@@ -89,7 +96,8 @@ class KernQualif:
         '''
         self.qualifiers = {CUDA_T: """__global__ void""",
                            OCL_T: """__kernel void""",
-                           CTYPES_T: """"""}
+                           CTYPES_T: """""", 
+                           METAL_T: """kernel"""}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
@@ -105,7 +113,8 @@ class FuncQualif:
         self.qualifiers = defaultdict(dict)
         self.qualifiers = {CUDA_T: """__device__""",
                            OCL_T: """ """,
-                           CTYPES_T: """ """}
+                           CTYPES_T: """ """, 
+                           METAL_T: """ """}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
