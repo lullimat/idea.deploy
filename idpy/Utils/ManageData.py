@@ -166,10 +166,14 @@ class ManageData:
             _in_f = h5py.File(file_name, "r")
             _sims_class_name = list(_in_f.keys())[0]
             if _sims_class_name != self.__class__.__name__:
+                _in_f.close()
                 raise Exception("The file you are reading has been created by another class!")
 
             if not full_key in _in_f:
-                raise Exception("Key", full_key, "cannot be found in", file_name)
+                ## raise Exception("Key", full_key, "cannot be found in", file_name)
+                print("Key", full_key, "cannot be found in", file_name)
+                _in_f.close()
+                return False
 
             _swap_data = np.array(_in_f.get(full_key))
             _in_f.close()
