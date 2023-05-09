@@ -100,6 +100,7 @@ PY3p7_F=$(command -v python3.7 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p8_F=$(command -v python3.8 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p9_F=$(command -v python3.9 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p10_F=$(command -v python3.10 >/dev/null 2>&1 && echo 1 || echo 0)
+PY3p11_F=$(command -v python3.11 >/dev/null 2>&1 && echo 1 || echo 0)
 
 ##
 if ((${PY3p10_F}))
