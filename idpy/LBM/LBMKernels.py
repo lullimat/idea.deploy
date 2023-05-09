@@ -327,6 +327,66 @@ class K_SetPopNUXInletDutyCycle(IdpyKernel):
             // Getting the index of the neighbor
             SType src_index = F_IndexFromPos(src_pos, dim_strides);
 
+            NType ln = n[g_tid] = 2.;
+            
+            UType u_swap = U_IN;
+
+            UType lu[DIM], u_dot_u = u_swap * u_swap;
+            // Setting the velocity
+            lu[0] = u[g_tid + 0 * V] = u_swap;
+            for(int d=1; d<DIM; d++){
+                lu[d] = u[g_tid + d * V] = 0.;
+            }
+            
+            // Loop over the populations
+            for(int q=0; q<Q; q++){
+
+                UType u_dot_xi = 0.;
+                for(int d=0; d<DIM; d++){
+                    u_dot_xi += lu[d] * XI_list[d + q*DIM];
+                }
+
+                PopType leq_pop = 1.;
+                leq_pop += u_dot_xi * CM2;
+                leq_pop += 0.5 * u_dot_xi * u_dot_xi * CM4;
+                leq_pop -= 0.5 * u_dot_u * CM2;
+                leq_pop = leq_pop * ln * W_list[q];
+                pop[g_tid + q * V] = leq_pop;
+            }
+        }
+        """
+
+class K_SetPopNUXInletDutyCycleOld(IdpyKernel):
+    def __init__(self, custom_types=None, constants={}, 
+                 f_classes=[], optimizer_flag=None):
+        IdpyKernel.__init__(self, custom_types=custom_types, constants=constants, 
+                            f_classes=f_classes, optimizer_flag=optimizer_flag)
+        
+        self.SetCodeFlags('g_tid')
+        
+        self.params = {'PopType * pop': ['global', 'restrict'], 
+                       'NType * n': ['global', 'restrict'], 
+                       'UType * u': ['global', 'restrict'],
+                       'SType * XI_list': ['global', 'restrict', 'const'],
+                       'WType * W_list': ['global', 'restrict', 'const'],
+                       'FlagType * walls': ['global', 'restrict', 'const'],
+                       'SType * dim_sizes': ['global', 'restrict', 'const'],
+                       'SType * dim_strides': ['global', 'restrict', 'const'],
+                       'int idloop_k': ['const']}
+        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && walls[g_tid] == 2){
+            SType dst_pos[DIM], src_pos[DIM];
+            // Getting the position of the thread
+            F_PosFromIndex(dst_pos, dim_sizes, dim_strides, g_tid);
+
+            // Setting the position of the neighbor
+            src_pos[0] = dst_pos[0] + 1;
+            for(int d=1; d<DIM; d++){ src_pos[d] = dst_pos[d]; }
+            
+            // Getting the index of the neighbor
+            SType src_index = F_IndexFromPos(src_pos, dim_strides);
+
             NType ln = n[g_tid] = n[src_index];
             
             UType u_swap = \
