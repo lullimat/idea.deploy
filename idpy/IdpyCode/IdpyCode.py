@@ -45,7 +45,7 @@ from idpy.IdpyCode.IdpyConsts import AddrQualif, KernQualif, FuncQualif
 
 from idpy.IdpyCode import idpy_nvcc_path, idpy_langs_list
 from idpy.IdpyCode import idpy_langs_dict_sym, idpy_langs_sys
-from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T, CTYPES_T
+from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T, CTYPES_T, METAL_T
 from idpy.IdpyCode import idpy_opencl_macro_spacing
 from idpy.IdpyCode import idpy_copyright
 
@@ -79,6 +79,11 @@ if idpy_langs_sys[CTYPES_T]:
     from idpy.CTypes.CTypes import Tenet as CTTenet
     from idpy.CTypes.CTypes import CTypes
     from idpy.CTypes.CTypes import CTYPES_N_THREAD
+
+if idpy_langs_sys[METAL_T]:
+    import metalcompute as mtc
+    from idpy.Metal.Metal import Tenet as MTTenet
+    from idpy.Metal.Metal import Metal
 
 class IdpyKernel:
     '''
