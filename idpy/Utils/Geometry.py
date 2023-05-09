@@ -26,6 +26,7 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 from functools import reduce
+import math
 
 def IndexFromPos(pos, dim_strides):
     index = pos[0]
@@ -33,7 +34,28 @@ def IndexFromPos(pos, dim_strides):
         index += pos[i] * dim_strides[i - 1]
     return index
 
-def PosFromIndex(index, dim_strides): 
+def PosFromIndex(index, dim_strides):
+    if len(dim_strides):
+        pos = [index%dim_strides[0]]
+        pos += [(index//dim_strides[stride_i]) % (dim_strides[stride_i + 1]//dim_strides[stride_i]) \
+                for stride_i in range(len(dim_strides) - 1)]
+        pos += [index//dim_strides[len(dim_strides) - 1]]
+    else:
+        pos = [index]
+    return tuple(pos)
+
+def PosFromIndexOOld(index, dim_strides):
+    if len(dim_strides):
+        pos = [index%dim_strides[0]]
+        pos += [(index//dim_strides[stride_i]) % (dim_strides[stride_i + 1]//dim_strides[stride_i]) \
+                if stride_i < len(dim_strides) - 1 else \
+                index//dim_strides[stride_i] \
+                for stride_i in range(len(dim_strides))]
+    else:
+        pos = [index]
+    return tuple(pos)    
+
+def PosFromIndexOld(index, dim_strides): 
     pos = [index%dim_strides[0]]
     pos += [(index//dim_strides[stride_i]) % (dim_strides[stride_i + 1]//dim_strides[stride_i]) \
             if stride_i < len(dim_strides) - 1 else \
@@ -41,12 +63,18 @@ def PosFromIndex(index, dim_strides):
             for stride_i in range(len(dim_strides))]
     return tuple(pos)
 
-def GetDimStrides(_dim_sizes):
+def GetDimStridesLambda(_dim_sizes):
     return [reduce(lambda x, y: x * y, _dim_sizes[0: i + 1]) 
                    for i in range(len(_dim_sizes) - 1)]
 
-def GetLen2Pos(pos):
+def GetDimStrides(_dim_sizes):
+    return [math.prod(_dim_sizes[0: i + 1]) for i in range(len(_dim_sizes) - 1)]
+
+def GetLen2PosLambda(pos):
     return reduce(lambda x, y: x + y, map(lambda x: x ** 2, pos))
+
+def GetLen2Pos(pos):
+    return sum(map(lambda x: x ** 2, pos))    
 
 def GetDiffPos(A, B):
     return tuple(map(lambda x, y: x - y, A, B))
@@ -74,3 +102,14 @@ Here U is supposed to be multiplyable by a scalar: sympy.Matrix works
 '''
 def ProjectVAlongU(V, U, prod):
     return U * ProjectionVAlongU(V, U, prod)
+
+def TriDet(triangle):
+    A, B, C = triangle[0], triangle[1], triangle[2]
+    _det = \
+        (A[0] - C[0]) * (B[1] - A[1]) - \
+        (A[0] - B[0]) * (C[1] - A[1])
+    
+    _det = None if abs(_det) < 1e-6 else _det
+    
+    return _det
+
