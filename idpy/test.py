@@ -272,8 +272,8 @@ if IsModuleThere('ctypes'):
 testing variables in IdpyCode.__init__.py
 '''
 
-from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, IDPY_T, idpy_langs_sys
-from idpy.IdpyCode import idpy_langs_dict, idpy_langs_human_dict
+from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, METAL_T, IDPY_T
+from idpy.IdpyCode import idpy_langs_sys, idpy_langs_dict, idpy_langs_human_dict
 from idpy.IdpyCode import idpy_langs_dict_sym, idpy_langs_list
 
 class TestIdpyCodeInit(unittest.TestCase):
@@ -283,26 +283,35 @@ class TestIdpyCodeInit(unittest.TestCase):
         Checking basic types
         '''
         checks += [CUDA_T == 'pycuda', OCL_T == 'pyopencl',
-                   CTYPES_T == 'ctypes', IDPY_T == 'idpy']
+                   CTYPES_T == 'ctypes', METAL_T == 'metalcompute', 
+                   IDPY_T == 'idpy']
         '''
         idpy_langs_dict
         '''
-        dict_check = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}
+        dict_check = \
+            {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 
+            'CTYPES_T': CTYPES_T, 'METAL_T': METAL_T}
         checks += [idpy_langs_dict == dict_check]
         '''
         idpy_langs_human_dict
         '''
-        dict_check = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes"}
+        dict_check = \
+            {CUDA_T: "CUDA", OCL_T: "OpenCL", 
+            CTYPES_T: "ctypes", METAL_T: "Metal"}
         checks += [idpy_langs_human_dict == dict_check]
         '''
         idpy_langs_dict_sym
         '''
-        dict_check = {CUDA_T: "CUDA_T", OCL_T: "OCL_T", CTYPES_T: "CTYPES_T"}
+        dict_check = \
+            {CUDA_T: "CUDA_T", OCL_T: "OCL_T", 
+            CTYPES_T: "CTYPES_T", METAL_T: "METAL_T"}
         checks += [idpy_langs_dict_sym == dict_check]
         '''
         idpy_langs_list
         '''
-        list_check = list({'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}.values())
+        list_check = \
+            list({'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 
+                'CTYPES_T': CTYPES_T, 'METAL_T': METAL_T}.values())
         checks += [idpy_langs_list == list_check]
         '''
         idpy_langs_sys
@@ -323,7 +332,8 @@ class TestIdpyConsts(unittest.TestCase):
 
         dict_check = {CUDA_T: """__device__""",
                       OCL_T: """ """,
-                      CTYPES_T: """ """}
+                      CTYPES_T: """ """, 
+                      METAL_T: """ """}
         
         for lang in idpy_langs_list:
             checks += [fq[lang] == dict_check[lang]]
@@ -336,7 +346,8 @@ class TestIdpyConsts(unittest.TestCase):
 
         dict_check = {CUDA_T: """__global__ void""",
                       OCL_T: """__kernel void""",
-                      CTYPES_T: """"""}
+                      CTYPES_T: """""", 
+                      METAL_T: """kernel"""}
         
         for lang in idpy_langs_list:
             checks += [kq[lang] == dict_check[lang]]
