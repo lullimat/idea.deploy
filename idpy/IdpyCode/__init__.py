@@ -90,13 +90,14 @@ Language Types and metaTypes
 from idpy.OpenCL import OCL_T
 from idpy.CUDA import CUDA_T
 from idpy.CTypes import CTYPES_T
+from idpy.Metal import METAL_T
 
 IDPY_T = "idpy"
 
-idpy_langs_dict = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T}
+idpy_langs_dict = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T, 'METAL_T': METAL_T}
 
-idpy_langs_human_dict = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes"}
-idpy_langs_dict_sym = {CUDA_T: "CUDA_T", OCL_T: "OCL_T", CTYPES_T: "CTYPES_T"}
+idpy_langs_human_dict = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes", METAL_T: "Metal"}
+idpy_langs_dict_sym = {CUDA_T: "CUDA_T", OCL_T: "OCL_T", CTYPES_T: "CTYPES_T", METAL_T: "METAL_T"}
 idpy_langs_list = list(idpy_langs_dict.values())
 
 from idpy.Utils.IsModuleThere import AreModulesThere
@@ -126,6 +127,11 @@ if idpy_langs_sys[CTYPES_T]:
     from idpy.CTypes.CTypes import CTypes
     from idpy.CTypes.CTypes import Tenet as CTTenet
     idpy_tenet_types[CTYPES_T] = CTTenet
+
+if idpy_langs_sys[METAL_T]:
+    from idpy.Metal.Metal import Metal
+    from idpy.Metal.Metal import Tenet as MTTenet
+    idpy_tenet_types[METAL_T] = MTTenet    
 
 
 '''
@@ -212,7 +218,7 @@ def GetParamsClean(kwargs, _a_params_dict, needed_params = None):
 
     return kwargs
 
-from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, IDPY_T
+from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, METAL_T, IDPY_T
 from idpy.IdpyCode import idpy_langs_sys, idpy_langs_list
 
 '''
@@ -265,7 +271,19 @@ def IdpyHardware():
         del c_types
         print()
         print("=" * 80)
-        print()        
+        print()
+
+
+    if idpy_langs_sys[METAL_T]:
+        from idpy.Metal.Metal import Metal
+        print("Metal Found!")
+        metal = Metal()
+        print("\nListing GPUs:")
+        print(metal.GetDeviceName())
+        del metal
+        print()
+        print("=" * 80)
+        print()                
 
 '''
 Methods: GridAndBlocks
