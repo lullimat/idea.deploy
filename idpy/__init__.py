@@ -26,13 +26,15 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 from sys import platform
+import os
 '''
 find os
 '''
-idpy_os_found = None
+idpy_os_found, idpy_mac_os_arch = None, None
 if platform == "linux" or platform == "linux2":
     idpy_os_found = "linux"
 elif platform == "darwin":
     idpy_os_found = "darwin"
+    idpy_mac_os_arch = os.uname().machine
 elif platform == "win32":
     idpy_os_found == "win32"
