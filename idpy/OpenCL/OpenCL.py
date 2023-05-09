@@ -164,12 +164,24 @@ class OpenCL:
         # Getting platform and devices infos
         for platform in self.platforms:
             # CPUS
-            if len(platform.get_devices(cl.device_type.CPU)):
+            cpu_devices, gpu_devices = [], []
+            try:
+                cpu_devices = platform.get_devices(cl.device_type.CPU)
+            except:
+                print("There is some issue for pyopencl to list cpu's")
+
+            try:
+                gpu_devices = platform.get_devices(cl.device_type.GPU)
+            except:
+                print("There is some issue for pyopencl to list gpu's")
+
+
+            if len(cpu_devices):
                 self.devices[self.CPU_T] = []
                 for cpu in platform.get_devices(cl.device_type.CPU):
                     self.devices[self.CPU_T].append(cpu)
             # GPUS
-            if len(platform.get_devices(cl.device_type.GPU)):
+            if len(gpu_devices):
                 self.devices[self.GPU_T] = []
                 for gpu in platform.get_devices(cl.device_type.GPU):
                     self.devices[self.GPU_T].append(gpu)
