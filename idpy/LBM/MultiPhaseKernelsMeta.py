@@ -801,7 +801,7 @@ class K_ForceGross2011CollideStreamSCMPMeta(IdpyKernel):
                  collect_mul = False, stream_mode = 'push', pressure_mode = 'compute',
                  root_dim_sizes = 'L', root_strides = 'STR', root_coord = 'x',
                  distribution = 'flat', which_box_m = 'cos', parallel_streams = 1,
-                 generator = 'MMIX'):
+                 generator = 'MMIX', headers_files=['math.h']):
         
         self.expect_lambda_args = 2
 
@@ -842,7 +842,8 @@ class K_ForceGross2011CollideStreamSCMPMeta(IdpyKernel):
             GrossShanChenMultiPhase(self.idpy_equilibria)
         
         IdpyKernel.__init__(self, custom_types = custom_types, constants = constants,
-                            f_classes = f_classes, optimizer_flag = optimizer_flag)
+                            f_classes = f_classes, optimizer_flag = optimizer_flag, 
+                            headers_files=headers_files)
 
         '''
         Kernel Parameters declaration
