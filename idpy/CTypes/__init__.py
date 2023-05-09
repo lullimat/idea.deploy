@@ -39,7 +39,7 @@ append to sys path in order to avoid relative imports
 '''
 sys.path.append(_idea_dot_deploy_path)
 
-from idpy import idpy_os_found
+from idpy import idpy_os_found, idpy_mac_os_arch
 
 CTYPES_T = "ctypes"
 
@@ -47,7 +47,7 @@ idpy_ctypes_compiler_string_h = None
 if idpy_os_found == "linux":
     idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -std=c99'
 if idpy_os_found == "darwin":
-    idpy_ctypes_compiler_string_h = 'clang -fPIC -shared -arch x86_64 -std=c99'
+    idpy_ctypes_compiler_string_h = 'clang -fPIC -shared -arch ' + idpy_mac_os_arch + ' -std=c99'
 if idpy_os_found == "win32":
     idpy_ctypes_compiler_string_h = 'gcc -fPIC -shared -std=c99'
 
