@@ -926,15 +926,15 @@ class TestIdpyCode(unittest.TestCase):
             SwapArraysLoop.Run(range(4))
             print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
             print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
-            print("SwapArraysLoop(range(7))")
-            SwapArraysLoop.Run(range(7))
+            print("SwapArraysLoop(range(8))")
+            SwapArraysLoop.Run(range(8))
             print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
             print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
             checks = []
-            checks += [AllTrue(list(mem_dict['zeros'].D2H() == np.zeros(self.n, dtype = np.int32)))]
+            checks += [AllTrue(list(mem_dict['ones'].D2H() == np.zeros(self.n, dtype = np.int32)))]
             check_ones = np.zeros(self.n, dtype = np.int32)
             check_ones.fill(1)
-            checks += [AllTrue(list(mem_dict['ones'].D2H() == check_ones))]
+            checks += [AllTrue(list(mem_dict['zeros'].D2H() == check_ones))]
 
             tenet.End()
             self.assertTrue(AllTrue(checks))        
@@ -1224,15 +1224,15 @@ class TestIdpyCode(unittest.TestCase):
             SwapArraysLoop.Run(range(4))
             print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
             print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)              
-            print("SwapArraysLoop(range(7))")
-            SwapArraysLoop.Run(range(7))
+            print("SwapArraysLoop(range(8))")
+            SwapArraysLoop.Run(range(8))
             print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
             print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)              
             checks = []
-            checks += [AllTrue(list(mem_dict['zeros'].D2H() == np.zeros(self.n, dtype = np.int32)))]
+            checks += [AllTrue(list(mem_dict['ones'].D2H() == np.zeros(self.n, dtype = np.int32)))]
             check_ones = np.zeros(self.n, dtype = np.int32)
             check_ones.fill(1)
-            checks += [AllTrue(list(mem_dict['ones'].D2H() == check_ones))]
+            checks += [AllTrue(list(mem_dict['zeros'].D2H() == check_ones))]
 
             tenet.End()
             self.assertTrue(AllTrue(checks))
@@ -1516,15 +1516,15 @@ class TestIdpyCode(unittest.TestCase):
             SwapArraysLoop.Run(range(4))
             print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
             print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
-            print("SwapArraysLoop(range(7))")
-            SwapArraysLoop.Run(range(7))
+            print("SwapArraysLoop(range(8))")
+            SwapArraysLoop.Run(range(8))
             print("['zeros']: ", mem_dict['zeros'].D2H(), mem_dict['zeros'].dtype)
             print("['ones']: ", mem_dict['ones'].D2H(), mem_dict['ones'].dtype)
             checks = []
-            checks += [AllTrue(list(mem_dict['zeros'].D2H() == np.zeros(self.n, dtype = np.int32)))]
+            checks += [AllTrue(list(mem_dict['ones'].D2H() == np.zeros(self.n, dtype = np.int32)))]
             check_ones = np.zeros(self.n, dtype = np.int32)
             check_ones.fill(1)
-            checks += [AllTrue(list(mem_dict['ones'].D2H() == check_ones))]
+            checks += [AllTrue(list(mem_dict['zeros'].D2H() == check_ones))]
 
             tenet.End()
             self.assertTrue(AllTrue(checks))                          
