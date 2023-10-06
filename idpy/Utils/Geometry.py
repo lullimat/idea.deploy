@@ -113,3 +113,48 @@ def TriDet(triangle):
     
     return _det
 
+def EScalarProduct(v1, v2):
+    return reduce(lambda x, y: x + y, map(lambda a, b: a * b, v1, v2))
+
+def ENorm2(pos):
+    return EScalarProduct(pos, pos)
+
+def ENorm(pos):
+    return math.sqrt(ENorm2(pos))
+
+def GetRelCosine(rel, ref):
+    output = EScalarProduct(rel, ref) / ENorm(rel) / ENorm(ref)
+    output = 1 if (abs(output) - 1) > 0 else output
+    return output
+
+def GetRelSine(rel, ref):
+    tri = [(0,) * len(ref), ref, rel]
+    output = TriDet(tri) / ENorm(rel) / ENorm(ref)
+    output = 1 if (abs(output) - 1) > 0 else output
+    return output
+
+def FindTwoPiAngle(rel, ref):
+    cosine, sine = GetRelCosine(rel, ref), GetRelSine(rel, ref)
+    ##print('cosine, sine', cosine, sine)
+    '''
+    First Quadrant
+    '''
+    if cosine >= 0 and sine >= 0:
+        return math.asin(sine)
+    '''
+    Second Quadrant
+    '''
+    if cosine < 0 and sine >= 0:
+        return math.acos(cosine)
+    '''
+    Third Quadrant
+    '''
+    if cosine < 0 and sine < 0:
+        return math.pi - math.asin(sine)
+    '''
+    Fourth Quadrant
+    '''
+    if cosine >= 0 and sine < 0:
+        return 2 * math.pi + math.asin(sine)
+
+
