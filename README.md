@@ -7,7 +7,7 @@
 ```bash
 $ git pull
 ```
-**in order to be able to use the latest paper repository for the work "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
+**in order to be able to use the latest paper repository for the works "The exact evaluation of hexagonal spin-networks and topological quantum neural networks" and "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
 
 
 The repository is at an early stage in this moment and will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
@@ -32,6 +32,10 @@ The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'
 - github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
 ## Available Preprints
+### **The exact evaluation of hexagonal spin-networks and topological quantum neural networks**
+- arXiv link: [https://arxiv.org/abs/2310.03632](https://arxiv.org/abs/2310.03632)
+- GitHub link: [https://github.com/lullimat/arXiv-2310.03632](https://github.com/lullimat/arXiv-2310.03632)
+
 ### **Metastable and Unstable Dynamics in multi-phase lattice Boltzmann**
 - arXiv link: [https://arxiv.org/abs/2212.07848](https://arxiv.org/abs/2212.07848)
 - GitHub link: [https://github.com/lullimat/arXiv-2212.07848](https://github.com/lullimat/arXiv-2212.07848)
