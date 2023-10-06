@@ -573,7 +573,7 @@ class BGK:
             root_dim_sizes = 'L', root_strides = 'STR', 
             root_coord = 'x', lex_index = 'g_tid', 
             declare_const_dict = {'cartesian_coord_neigh': False},
-            rnd_pops = None, walls_array_var = 'walls'
+            rnd_pops = None, walls_array_var = 'walls', off_mirror_index = 1
     ):
 
         '''
@@ -756,6 +756,415 @@ class BGK:
                 
             
         return _swap_code
+
+    def SRTCollisionPlusGuoPushStreamWallsMirrorsCode(
+            self, declared_variables = None, declared_constants = None,
+            ordering_lambda = None, order = 2,
+            dst_arrays_var = 'pop_swap',
+            stencil_obj = None, eq_obj = None,
+            guo_obj = None,
+            neq_pop = 'pop', pressure_mode = 'compute',
+            tuples_eq = [], tuples_guo = [],
+            pos_type = 'int', 
+            use_ptrs = False, collect_mul = False,
+            root_dim_sizes = 'L', root_strides = 'STR', 
+            root_coord = 'x', lex_index = 'g_tid', 
+            declare_const_dict = {'cartesian_coord_neigh': False},
+            rnd_pops = None, walls_array_var = 'walls'
+    ):
+
+        '''
+        Checking that the list of declared variables is available
+        '''
+        if declared_variables is None:
+            raise Exception("Missing argument 'declared_variables'")
+        if type(declared_variables) != list:
+            raise Exception("Argument 'declared_variables' must be a list containing one list")
+        if len(declared_variables) == 0 or type(declared_variables[0]) != list:
+            raise Exception("List 'declared_variables' must contain another list!")
+    
+        '''
+        Checking that the list of declared constants is available
+        '''
+        if declared_constants is None:
+            raise Exception("Missing argument 'declared_constants'")
+        if type(declared_constants) != list:
+            raise Exception("Argument 'declared_constants' must be a list containing one list")
+        if len(declared_constants) == 0 or type(declared_constants[0]) != list:
+            raise Exception("List 'declared_constants' must contain another list!")
+        '''
+        Checking that the ordering_lambda is defined
+        '''
+        if ordering_lambda is None:
+            raise Exception("Missing argument 'ordering_lambda'")
+        
+        '''
+        Possibly I do not need this one
+        '''
+        if stencil_obj is None:
+            raise Exception("Missing argument 'stencil_obj'")
+        if eq_obj is None:
+            raise Exception("Missing argument 'eq_obj'")
+        if guo_obj is None:
+            raise Exception("Missing argument 'guo_obj'")
+        
+        '''
+        Defining and checking the variables that are needed: missing (!)
+        '''
+        _Q, _dim = stencil_obj.Q, stencil_obj.D
+        _XIs = stencil_obj.XIs
+        _q_bar_index = stencil_obj.opposite
+
+        if rnd_pops is not None and type(rnd_pops) != list:
+            raise Exception("Argument 'rnd_pops' msut be a list!")
+        if rnd_pops is not None and len(rnd_pops) != _Q:
+            raise Exception("The length of 'rnd_pops'", len(rnd_pops), "does not match Q:", _Q)
+
+        _src_pop_vars = _get_seq_vars(_Q, neq_pop)
+        _dim_sizes_macros = _get_seq_macros(_dim, root_dim_sizes)
+        _dim_strides_macros = _get_seq_macros(_dim - 1, root_strides)        
+        
+        _needed_variables = \
+            [dst_arrays_var] + _src_pop_vars + _dim_sizes_macros + _dim_strides_macros
+
+        '''
+        This part does not seem useful, since I need to add the terms from
+        outside I would also need to make sure they are declared
+        '''
+        if False:
+            if rnd_pops is not None:
+                _needed_variables += rnd_pops
+        
+        _chk_needed_variables = []
+        for _ in _needed_variables:
+            _chk_needed_variables += [_ in declared_variables[0] or
+                                      _ in declared_constants[0]]
+            
+        if not AllTrue(_chk_needed_variables):
+            print()
+            for _i, _ in enumerate(_chk_needed_variables):
+                if not _:
+                    print("Variable/constant ", _needed_variables[_i], "not declared!")
+            raise Exception("Some needed variables/constants have not been declared yet (!)")
+        
+        
+        _swap_code = """"""
+        
+        _swap_code += \
+            stencil_obj._define_cartesian_neighbors_coords(
+                declared_variables = declared_variables,
+                declared_constants = declared_constants,
+                pos_type = pos_type,
+                root_dim_sizes = root_dim_sizes, 
+                root_strides = root_strides, 
+                root_coord = root_coord,
+                lex_index = lex_index, 
+                declare_const_flag = declare_const_dict['cartesian_coord_neigh']
+            )
+
+        if pressure_mode == 'compute':
+            '''
+            Declaring the variables for the position of src and dst
+            '''
+            _coord_dst = sp.Symbol(root_coord + '_dst')
+            _q_dst = sp.Symbol('q_dst')
+
+            _swap_code += \
+                _codify_declaration_const_check(_codify_sympy(_coord_dst), 0, pos_type,
+                                                declared_variables, declared_constants)
+            _swap_code += \
+                _codify_declaration_const_check(_codify_sympy(_q_dst), 0, pos_type,
+                                                declared_variables, declared_constants)
+
+            _swap_code += _codify_newl
+
+            for _q, _xi in enumerate(_XIs):
+                '''
+                First get the neighbor position and the opposite
+                '''
+                _swap_code += \
+                    _codify_comment('(Lex)Index for neighbor at ' + str(_xi) +
+                                    ', q: ' + str(_q))
+                _swap_expr = \
+                    _get_single_neighbor_pos_macro_fully_sym(_xi, _dim_sizes_macros, 
+                                                             _dim_strides_macros,
+                                                             root_coord, lex_index)
+                '''
+                if collect_mul == True collect multiplications by the strides
+                '''
+                if collect_mul:
+                    for _stride in _dim_strides_macros:
+                        _swap_expr = sp.collect(_swap_expr, sp.Symbol(_stride))
+
+                _swap_code += _codify_sympy_assignment(_coord_dst, _swap_expr)
+
+                '''
+                Check if neighbor is a wall and invert direction
+                '''
+                _swap_code += _codify_sympy_assignment(_q_dst, _codify_sympy(str(_q)))
+
+                '''
+                Bounce back
+                '''
+                if _q != 0:
+                    _swap_code += 'if(' + _array_value(walls_array_var, _codify_sympy(_coord_dst), use_ptrs) + ' == 0){' + _codify_newl
+                    _swap_code += _codify_sympy_assignment(_coord_dst, lex_index)
+                    _swap_code += _codify_sympy_assignment(_q_dst, _codify_sympy(str(_q_bar_index[_q])))
+                    _swap_code += '}' + _codify_newl
+
+                '''
+                Mirror boundary
+                '''
+                if _q != 0:
+                    for d in range(self.dim):
+                        _swap_code += 'if(' + _array_value(walls_array_var, _codify_sympy(_coord_dst), use_ptrs) + ' == ' + \
+                            str(2 * d + off_mirror_index) +'){' + _codify_newl
+                        _swap_code += _codify_sympy_assignment(_coord_dst, lex_index)
+                        _swap_code += _codify_sympy_assignment(_q_dst, _codify_sympy(str(_q_bar_index[_q])))
+                        _swap_code += '}' + _codify_newl
+
+
+                _sx_hnd = _array_value(dst_arrays_var, ordering_lambda(_coord_dst, _codify_sympy(_q_dst)),
+                                       use_ptrs)
+                _dx_hnd = \
+                    self.CodifySingleSRTCollisionPlusGuoSym(
+                        order = order, i = _q, eq_obj = eq_obj, guo_obj = guo_obj,
+                        neq_pop = neq_pop, tuples_eq = tuples_eq, tuples_guo = tuples_guo
+                    )
+
+                _dx_hnd = neq_pop + '_' + _codify_sympy(_q)
+
+
+                if rnd_pops is not None:
+                    _dx_hnd += ' + ' + rnd_pops[_q]
+                
+                _swap_code += _codify_assignment(_sx_hnd, _dx_hnd)
+                _swap_code += _codify_newl
+
+        '''
+        Registers-pressure mode
+        '''
+        if pressure_mode == 'registers':
+            '''
+            Here I should define all the neighbors positions at once:
+            need to add the management of the declared neighbors variables
+            '''
+            '''
+            I need to include the option to shift the neighbor index
+            in IdpyStencil in order to make the two pieces work together
+            '''
+            _swap_code += \
+                _neighbors_register_pressure_macro(
+                    _declared_variables = declared_variables,
+                    _declared_constants = declared_constants,
+                    _root_coordinate = root_coord,
+                    _lexicographic_index = lex_index,
+                    _stencil_vectors = _XIs,
+                    _dim_sizes = _dim_sizes_macros,
+                    _dim_strides = _dim_strides_macros, 
+                    _custom_type = pos_type,
+                    _exclude_zero_norm = False,
+                    _collect_mul = collect_mul,
+                    _declare_const_flag = declare_const_dict['cartesian_coord_neigh']
+                )
+            _swap_code += _codify_newl
+                
+            
+        return _swap_code        
+
+    def SRTCollisionPlusGuoPushStreamWallsCodeMoveOnly(
+            self, declared_variables = None, declared_constants = None,
+            ordering_lambda = None, order = 2,
+            dst_arrays_var = 'pop_swap',
+            stencil_obj = None, eq_obj = None,
+            guo_obj = None,
+            neq_pop = 'pop', pressure_mode = 'compute',
+            tuples_eq = [], tuples_guo = [],
+            pos_type = 'int', 
+            use_ptrs = False, collect_mul = False,
+            root_dim_sizes = 'L', root_strides = 'STR', 
+            root_coord = 'x', lex_index = 'g_tid', 
+            declare_const_dict = {'cartesian_coord_neigh': False},
+            rnd_pops = None, walls_array_var = 'walls'
+    ):
+
+        '''
+        Checking that the list of declared variables is available
+        '''
+        if declared_variables is None:
+            raise Exception("Missing argument 'declared_variables'")
+        if type(declared_variables) != list:
+            raise Exception("Argument 'declared_variables' must be a list containing one list")
+        if len(declared_variables) == 0 or type(declared_variables[0]) != list:
+            raise Exception("List 'declared_variables' must contain another list!")
+    
+        '''
+        Checking that the list of declared constants is available
+        '''
+        if declared_constants is None:
+            raise Exception("Missing argument 'declared_constants'")
+        if type(declared_constants) != list:
+            raise Exception("Argument 'declared_constants' must be a list containing one list")
+        if len(declared_constants) == 0 or type(declared_constants[0]) != list:
+            raise Exception("List 'declared_constants' must contain another list!")
+        '''
+        Checking that the ordering_lambda is defined
+        '''
+        if ordering_lambda is None:
+            raise Exception("Missing argument 'ordering_lambda'")
+        
+        '''
+        Possibly I do not need this one
+        '''
+        if stencil_obj is None:
+            raise Exception("Missing argument 'stencil_obj'")
+        if eq_obj is None:
+            raise Exception("Missing argument 'eq_obj'")
+        if guo_obj is None:
+            raise Exception("Missing argument 'guo_obj'")
+        
+        '''
+        Defining and checking the variables that are needed: missing (!)
+        '''
+        _Q, _dim = stencil_obj.Q, stencil_obj.D
+        _XIs = stencil_obj.XIs
+        _q_bar_index = stencil_obj.opposite
+
+        if rnd_pops is not None and type(rnd_pops) != list:
+            raise Exception("Argument 'rnd_pops' msut be a list!")
+        if rnd_pops is not None and len(rnd_pops) != _Q:
+            raise Exception("The length of 'rnd_pops'", len(rnd_pops), "does not match Q:", _Q)
+
+        _src_pop_vars = _get_seq_vars(_Q, neq_pop)
+        _dim_sizes_macros = _get_seq_macros(_dim, root_dim_sizes)
+        _dim_strides_macros = _get_seq_macros(_dim - 1, root_strides)        
+        
+        _needed_variables = \
+            [dst_arrays_var] + _src_pop_vars + _dim_sizes_macros + _dim_strides_macros
+
+        '''
+        This part does not seem useful, since I need to add the terms from
+        outside I would also need to make sure they are declared
+        '''
+        if False:
+            if rnd_pops is not None:
+                _needed_variables += rnd_pops
+        
+        _chk_needed_variables = []
+        for _ in _needed_variables:
+            _chk_needed_variables += [_ in declared_variables[0] or
+                                      _ in declared_constants[0]]
+            
+        if not AllTrue(_chk_needed_variables):
+            print()
+            for _i, _ in enumerate(_chk_needed_variables):
+                if not _:
+                    print("Variable/constant ", _needed_variables[_i], "not declared!")
+            raise Exception("Some needed variables/constants have not been declared yet (!)")
+        
+        
+        _swap_code = """"""
+        
+        _swap_code += \
+            stencil_obj._define_cartesian_neighbors_coords(
+                declared_variables = declared_variables,
+                declared_constants = declared_constants,
+                pos_type = pos_type,
+                root_dim_sizes = root_dim_sizes, 
+                root_strides = root_strides, 
+                root_coord = root_coord,
+                lex_index = lex_index, 
+                declare_const_flag = declare_const_dict['cartesian_coord_neigh']
+            )
+
+        if pressure_mode == 'compute':
+            '''
+            Declaring the variables for the position of src and dst
+            '''
+            _coord_dst = sp.Symbol(root_coord + '_dst')
+            _q_dst = sp.Symbol('q_dst')
+
+            _swap_code += \
+                _codify_declaration_const_check(_codify_sympy(_coord_dst), 0, pos_type,
+                                                declared_variables, declared_constants)
+            _swap_code += \
+                _codify_declaration_const_check(_codify_sympy(_q_dst), 0, pos_type,
+                                                declared_variables, declared_constants)
+
+            _swap_code += _codify_newl
+
+            for _q, _xi in enumerate(_XIs):
+                '''
+                First get the neighbor position and the opposite
+                '''
+                _swap_code += \
+                    _codify_comment('(Lex)Index for neighbor at ' + str(_xi) +
+                                    ', q: ' + str(_q))
+                _swap_expr = \
+                    _get_single_neighbor_pos_macro_fully_sym(_xi, _dim_sizes_macros, 
+                                                             _dim_strides_macros,
+                                                             root_coord, lex_index)
+                '''
+                if collect_mul == True collect multiplications by the strides
+                '''
+                if collect_mul:
+                    for _stride in _dim_strides_macros:
+                        _swap_expr = sp.collect(_swap_expr, sp.Symbol(_stride))
+
+                _swap_code += _codify_sympy_assignment(_coord_dst, _swap_expr)
+
+                '''
+                Check if neighbor is a wall and invert direction
+                '''
+                _swap_code += _codify_sympy_assignment(_q_dst, _codify_sympy(str(_q)))
+
+                if _q != 0:
+                    _swap_code += 'if(' + _array_value(walls_array_var, _codify_sympy(_coord_dst), use_ptrs) + ' == 0){' + _codify_newl
+                    _swap_code += _codify_sympy_assignment(_coord_dst, lex_index)
+                    _swap_code += _codify_sympy_assignment(_q_dst, _codify_sympy(str(_q_bar_index[_q])))
+                    _swap_code += '}' + _codify_newl
+
+                _sx_hnd = _array_value(dst_arrays_var, ordering_lambda(_coord_dst, _codify_sympy(_q_dst)),
+                                       use_ptrs)
+
+                _dx_hnd = neq_pop + '_' + _codify_sympy(_q)
+
+                if rnd_pops is not None:
+                    _dx_hnd += ' + ' + rnd_pops[_q]
+                
+                _swap_code += _codify_assignment(_sx_hnd, _dx_hnd)
+                _swap_code += _codify_newl
+
+            '''
+            Registers-pressure mode
+            '''
+            if pressure_mode == 'registers':
+                '''
+                Here I should define all the neighbors positions at once:
+                need to add the management of the declared neighbors variables
+                '''
+                '''
+                I need to include the option to shift the neighbor index
+                in IdpyStencil in order to make the two pieces work together
+                '''
+                _swap_code += \
+                    _neighbors_register_pressure_macro(
+                        _declared_variables = declared_variables,
+                        _declared_constants = declared_constants,
+                        _root_coordinate = root_coord,
+                        _lexicographic_index = lex_index,
+                        _stencil_vectors = _XIs,
+                        _dim_sizes = _dim_sizes_macros,
+                        _dim_strides = _dim_strides_macros, 
+                        _custom_type = pos_type,
+                        _exclude_zero_norm = False,
+                        _collect_mul = collect_mul,
+                        _declare_const_flag = declare_const_dict['cartesian_coord_neigh']
+                    )
+                _swap_code += _codify_newl
+                
+            
+        return _swap_code                
 
     def SRTCollisionPushStreamCode(self,
                                    declared_variables = None,
