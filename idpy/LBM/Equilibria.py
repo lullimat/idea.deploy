@@ -38,6 +38,18 @@ from idpy.Utils.Statements import AllTrue
 
 from functools import reduce
 
+class GeneralizedHermiteEquilibira:
+    def __init__(self, xi_stencil = None,
+                 root_pop = 'f', root_n = 'n', root_u = 'u', root_w = 'w'):
+        if xi_stencil is None:
+            raise Exception("Missing argument 'xi_stencil'")
+
+        self.root_pop, self.root_n, self.root_u, self.root_w = \
+            root_pop, root_n, root_u, root_w
+        
+        self.idpy_stencil = IdpyStencil(xi_stencil)
+        self.D, self.Q = len(self.idpy_stencil.XIs[0]), len(self.idpy_stencil.XIs)
+
 class HermiteEquilibria:
     def __init__(self, xi_stencil = None,
                  root_pop = 'f', root_n = 'n', root_u = 'u', root_w = 'w'):
