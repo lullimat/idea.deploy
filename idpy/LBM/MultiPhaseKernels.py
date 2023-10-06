@@ -53,7 +53,7 @@ class F_NSingleFlatProfile(IdpyFunction):
         """        
 
 class F_NFlatProfilePeriodic(IdpyFunction):
-    def __init__(self, custom_types = None, f_type = 'NType', headers_files=['math.h']):
+    def __init__(self, custom_types = None, f_type = 'NType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
         self.params = {'SType x': ['const'],
                        'SType x0': ['const'],
@@ -74,7 +74,7 @@ class F_NFlatProfilePeriodic(IdpyFunction):
         """
 
 class F_NFlatProfilePeriodicR(IdpyFunction):
-    def __init__(self, custom_types = None, f_type = 'NType', headers_files=['math.h']):
+    def __init__(self, custom_types = None, f_type = 'NType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
         self.params = {'SType x': ['const'],
                        'LengthType x0': ['const'],
