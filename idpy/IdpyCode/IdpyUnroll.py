@@ -56,6 +56,8 @@ _codify_newl = '\n'
 _codify_tab = (' ' * 4) ##'\t'
 _codify_curly_open = '{'
 _codify_curly_close = '}'
+_codify_continue = "continue;"
+
 
 def _codify_prepend_tabs(code, n_tabs=1):
     _split_lines = code.splitlines()
@@ -200,9 +202,16 @@ def _codify_for_loop_head(
 
     return _swap_code
 
+
+def _codify_if_head(statement):
+    _swap_code = 'if(' + statement + '){'
+    _swap_code += _codify_newl
+    return _swap_code
+
 def _codify_swap(
     declared_variables, declared_constants, 
-    a, b, swap_type):
+    a, b, swap_type, declare_const_flag=True, 
+    swap_var_name="codify_swap_var"):
 
     '''
     Putting code in a different scope to avoid name clashed with the swap variable
@@ -211,10 +220,10 @@ def _codify_swap(
     _swap_code = _codify_curly_open + _codify_newl
     _swap_code += \
         _codify_assignment_type_check(
-            "codify_swap_var", a, _type=swap_type,
+            swap_var_name, a, _type=swap_type,
             declared_variables=declared_variables,
             declared_constants=declared_constants,
-            declare_const_flag=True,
+            declare_const_flag=declare_const_flag,
             assignment_type=None)
     _swap_code += \
         _codify_assignment_type_check(
@@ -225,7 +234,7 @@ def _codify_swap(
             assignment_type=None)
     _swap_code += \
         _codify_assignment_type_check(
-            b, "codify_swap_var", _type=None,
+            b, swap_var_name, _type=None,
             declared_variables=declared_variables,
             declared_constants=declared_constants,
             declare_const_flag=None,
@@ -379,6 +388,15 @@ import sympy as sp
 _vector_delta_str = lambda _c: '_p' + str(_c) if _c > 0 else '_m' + str(abs(_c))
 
 import numpy as np
+
+def _get_lex_index_in_code_out_sym(coords_code, dim, dim_strides):
+    coords_sym = [sp.Symbol(_) for _ in coords_code]
+    dim_strides_sym = [sp.Symbol(_) for _ in dim_strides]
+    lexicographic_sym = coords_sym[0]
+    for i in range(dim - 1):
+        lexicographic_sym += coords_sym[i + 1] * dim_strides_sym[i]
+
+    return sp.simplify(lexicographic_sym)
 
 def _get_single_neighbor_pos_macro_fully_sym(_vector, _dim_sizes, _dim_strides,
                                              _root_coordinate, _lexicographic_index):
