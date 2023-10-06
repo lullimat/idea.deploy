@@ -38,10 +38,12 @@ from idpy.IdpyStencils.IdpyStencils import IdpyStencil
 from idpy.LBM.Equilibria import HermiteEquilibria
 from idpy.LBM.Collisions import BGK
 
-class K_ComputeMomentsMeta(IdpyKernel):
+class K_ComputeMomentsWallsMeta(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, XIStencil = None, use_ptrs = False,
-                 ordering_lambda_pop = None, ordering_lambda_u = None):
+                 walls_array_var = 'walls',
+                 ordering_lambda_pop = None, ordering_lambda_u = None, 
+                 headers_files=['math.h']):
 
         self.expect_lambda_args = 2
         
@@ -67,7 +69,88 @@ class K_ComputeMomentsMeta(IdpyKernel):
         self.idpy_stencil = IdpyStencil(XIStencil)
         
         IdpyKernel.__init__(self, custom_types = custom_types, constants = constants, 
-                            f_classes = f_classes, optimizer_flag = optimizer_flag)
+                            f_classes = f_classes, optimizer_flag = optimizer_flag, 
+                            headers_file=headers_files)
+        
+        '''
+        Kernel Parameters declaration
+        '''
+        self.SetCodeFlags('g_tid')
+        self.params = {'NType * n': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict'],
+                       'PopType * pop': ['global', 'restrict', 'const'], 
+                       'FlagType * walls': ['global', 'restrict', 'const']}
+
+        '''
+        Setting the declared variables and constants up to this point
+        '''
+        self.SetDeclaredVariables()
+        self.SetDeclaredConstants()
+
+        '''
+        Kernel Body
+        '''        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && """ + _array_value(walls_array_var, 'g_tid', use_ptrs) + \
+        """ == 1){
+        """ + \
+        self.idpy_stencil.HydroHermiteCode(
+            declared_variables = self.declared_variables,
+            declared_constants = self.declared_constants,
+            arrays = ['pop'], arrays_types = ['PopType'],
+            root_n = 'ln', root_u = 'lu',
+            n_type = 'NType', u_type = 'UType',
+            lex_index = 'g_tid', keep_read = True,
+            ordering_lambdas = [ordering_lambda_pop],
+            use_ptrs = use_ptrs,
+            declare_const_dict = {'arrays_xi': True, 'moments': False}
+        ) + \
+        _codify_newl + \
+        _codify_newl + \
+        _codify_assignment(_array_value('n', 'g_tid', use_ptrs), 'ln_0')
+
+        for _d in range(self.idpy_stencil.D):
+            self.kernels[IDPY_T] += \
+                _codify_assignment(_array_value('u', ordering_lambda_u('g_tid', _d), use_ptrs),
+                                   'lu_0_' + str(_d))
+
+        self.kernels[IDPY_T] += \
+        """
+        }
+        """
+
+class K_ComputeMomentsMeta(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None, XIStencil = None, use_ptrs = False,
+                 ordering_lambda_pop = None, ordering_lambda_u = None, 
+                 headers_files=['math.h']):
+
+        self.expect_lambda_args = 2
+        
+        if ordering_lambda_pop is None:
+            raise Exception("Missing argument 'ordering_lambda_pop'")
+        elif ordering_lambda_pop.__code__.co_argcount != self.expect_lambda_args:
+            raise Excpetion(
+                "The number of arguments for 'ordering_lambda_pop' should be ", 
+                self.expect_lambda_args
+            )
+
+        if ordering_lambda_u is None:
+            raise Exception("Missing argument 'ordering_lambda_u'")
+        elif ordering_lambda_u.__code__.co_argcount != self.expect_lambda_args:
+            raise Excpetion(
+                "The number of arguments for 'ordering_lambda_u' should be ", 
+                self.expect_lambda_args
+            )
+        
+        if XIStencil is None:
+            raise Exception("Missing argument 'XIStencil'")
+                        
+        self.idpy_stencil = IdpyStencil(XIStencil)
+        
+        IdpyKernel.__init__(self, custom_types = custom_types, constants = constants, 
+                            f_classes = f_classes, optimizer_flag = optimizer_flag, 
+                            headers_files=headers_files)
         
         '''
         Kernel Parameters declaration
@@ -406,6 +489,120 @@ class K_CheckUMeta(IdpyKernel):
             
         self.kernels[IDPY_T] = """
         if(g_tid < V){
+        """ + \
+        _swap_kernel_idpy + \
+        """
+        }
+        """
+
+class K_CheckUMetaWalls(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None, use_ptrs = False,
+                 walls_array_var = 'walls',
+                 ordering_lambda_u = None, headers_files=['math.h']):
+
+        self.expect_lambda_args = 2
+
+        if ordering_lambda_u is None:
+            raise Exception("Missing argument 'ordering_lambda_u'")
+        elif ordering_lambda_u.__code__.co_argcount != self.expect_lambda_args:
+            raise Excpetion(
+                "The number of arguments for 'ordering_lambda_u' should be ", 
+                self.expect_lambda_args
+            )        
+        
+        IdpyKernel.__init__(self, custom_types = custom_types,
+                            constants = constants, f_classes = f_classes,
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
+        self.SetCodeFlags('g_tid')
+        self.params = {'UType * delta_u': ['global', 'restrict'],
+                       'UType * old_u': ['global', 'restrict'],
+                       'UType * max_u': ['global', 'restrict'],
+                       'UType * u': ['global', 'restrict', 'const'], 
+                       'FlagType * walls': ['global', 'restrict', 'const']}
+
+        '''
+        Setting the declared variables and constants up to this point
+        '''
+        self.SetDeclaredVariables()
+        self.SetDeclaredConstants()
+
+        self.D = self.constants['DIM']
+        
+        _swap_kernel_idpy = """"""
+        _swap_kernel_idpy += _codify_comment("Declaring difference and norm variables")
+        _swap_kernel_idpy += \
+            _codify_declaration_const_check(
+                'ldiff', 0, 'UType',
+                declared_variables = self.declared_variables,
+                declared_constants = self.declared_constants,
+                declare_const_flag = False
+            )
+
+        _swap_kernel_idpy += \
+            _codify_declaration_const_check(
+                'lu_norm', 0, 'UType',
+                declared_variables = self.declared_variables,
+                declared_constants = self.declared_constants,
+                declare_const_flag = False
+            )
+
+        _swap_kernel_idpy += _codify_comment("Declaring tmp variable for velocity component")
+        _swap_kernel_idpy += \
+            _codify_declaration_const_check(
+                'lu_now', 0, 'UType',
+                declared_variables = self.declared_variables,
+                declared_constants = self.declared_constants,
+                declare_const_flag = False                
+            )
+        
+        
+        for _d in range(self.D):
+            _swap_kernel_idpy += \
+                _codify_assignment(
+                    'lu_now',
+                    _array_value('u', ordering_lambda_u('g_tid', _d), use_ptrs)
+                )
+            _swap_kernel_idpy += _codify_newl
+            
+            _swap_kernel_idpy += _codify_comment("Adding to the norm")
+            _swap_kernel_idpy += \
+                _codify_add_assignment('lu_norm', 'lu_now * lu_now')
+            _swap_kernel_idpy += _codify_newl            
+
+            _swap_kernel_idpy += _codify_comment("Adding to the difference")
+            _swap_kernel_idpy += \
+                _codify_add_assignment(
+                    'ldiff',
+                    '(UType) fabs(lu_now - ' + _array_value('old_u',
+                                               ordering_lambda_u('g_tid', _d),
+                                               use_ptrs) + ')'
+                )
+            _swap_kernel_idpy += _codify_newl            
+            
+            _swap_kernel_idpy += _codify_comment("Writing the value in old_u")
+            _swap_kernel_idpy += \
+                _codify_assignment(
+                    _array_value('old_u', ordering_lambda_u('g_tid', _d), use_ptrs),
+                    'lu_now'
+                )
+            _swap_kernel_idpy += _codify_newl            
+            
+        _swap_kernel_idpy += _codify_comment("Writing difference and norm")
+        _swap_kernel_idpy += \
+            _codify_assignment(
+                _array_value('delta_u', 'g_tid', use_ptrs),
+                'ldiff'
+            )
+        _swap_kernel_idpy += \
+            _codify_assignment(
+                _array_value('max_u', 'g_tid', use_ptrs),
+                'lu_norm'
+            )
+            
+        self.kernels[IDPY_T] = """
+        if(g_tid < V && """ + _array_value(walls_array_var, 'g_tid', use_ptrs) + \
+        """ == 1){
         """ + \
         _swap_kernel_idpy + \
         """
