@@ -109,15 +109,18 @@ class CRNGS(IdpySims):
         type namings for 64-bits unsigned integers for 
         CUDA and OpenCL
         '''
-        if self.sims_vars['kind'] == 'MINSTD':
+        if self.sims_vars['kind'] == 'MINSTD' or self.sims_vars['kind'] == 'NUMREC':
             if self.params_dict['lang'] == CUDA_T or self.params_dict['lang'] == CTYPES_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned int',
                                                  'UINT64': 'unsigned long long int'})
             if self.params_dict['lang'] == OCL_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned int',
                                                  'UINT64': 'unsigned long'})                
+        """
+        - To be deleted...
         if self.sims_vars['kind'] == 'NUMREC':
             self.custom_types = CustomTypes({'CRNGType': 'unsigned int'})
+        """
         if self.sims_vars['kind'] == 'MMIX':
             if self.params_dict['lang'] == CUDA_T or self.params_dict['lang'] == CTYPES_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned long long int'})
@@ -126,20 +129,23 @@ class CRNGS(IdpySims):
 
         '''
         Setting ID_RANDMAX
-        '''
+        '''        
         if self.sims_vars['kind'] == 'MINSTD':
             self.sims_vars['ID_RANDMAX'] = int('7fffffff', 16)
+            self.sims_vars['ID_RANDMAX_STR'] = 'ID_RANDMAX_MINSTD'             
         if self.sims_vars['kind'] == 'NUMREC':
             self.sims_vars['ID_RANDMAX'] = int('ffffffff', 16)
+            self.sims_vars['ID_RANDMAX_STR'] = 'ID_RANDMAX_NUMREC'             
         if self.sims_vars['kind'] == 'MMIX':
             self.sims_vars['ID_RANDMAX'] = int('ffffffffffffffff', 16)
-
+            self.sims_vars['ID_RANDMAX_STR'] = 'ID_RANDMAX_MMIX'            
         
         self.sims_vars['init_from'] = self.params_dict['init_from']
         self.sims_vars['init_seed'] = self.params_dict['init_seed']
         self.sims_vars['n_prngs'] = self.params_dict['n_prngs']
 
-        self.constants = {'ID_RANDMAX': self.sims_vars['ID_RANDMAX'],
+        self.constants = {'ID_RANDMAX': self.sims_vars['ID_RANDMAX'], 
+                          self.sims_vars['ID_RANDMAX_STR']: self.sims_vars['ID_RANDMAX'],
                           'N_PRNGS': self.sims_vars['n_prngs'],
                           'TWOPI': 2. * np.pi}
         '''
@@ -357,10 +363,13 @@ class CRNGS(IdpySims):
         '''
         Check output allocation
         '''
-        if self.sims_idpy_memory['output'] is None:
-            self.sims_idpy_memory['output'] = \
+        type_str = self.custom_types.Push()['RANDType']
+        output_name = 'output_' + type_str
+        if output_name not in self.sims_idpy_memory:
+            self.sims_idpy_memory[output_name] = \
                 IdpyMemory.Zeros(self.sims_vars['n_prngs'], tenet = self.tenet,
                                  dtype = NPT.C[self.custom_types['RANDType']])
+        self.sims_idpy_memory['output'] = self.sims_idpy_memory[output_name]
         '''
         Init the generic kernel
         '''
@@ -414,10 +423,13 @@ class CRNGS(IdpySims):
         '''
         Check output allocation
         '''
-        if self.sims_idpy_memory['output'] is None:
-            self.sims_idpy_memory['output'] = \
+        type_str = self.custom_types.Push()['RANDType']
+        output_name = 'output_' + type_str
+        if output_name not in self.sims_idpy_memory:
+            self.sims_idpy_memory[output_name] = \
                 IdpyMemory.Zeros(self.sims_vars['n_prngs'], tenet = self.tenet,
                                  dtype = NPT.C[self.custom_types['RANDType']])
+        self.sims_idpy_memory['output'] = self.sims_idpy_memory[output_name]
         '''
         Init the generic kernel
         '''
@@ -477,10 +489,13 @@ class CRNGS(IdpySims):
         '''
         Check output allocation
         '''
-        if self.sims_idpy_memory['output'] is None:
-            self.sims_idpy_memory['output'] = \
+        type_str = self.custom_types.Push()['RANDType']
+        output_name = 'output_' + type_str
+        if output_name not in self.sims_idpy_memory:
+            self.sims_idpy_memory[output_name] = \
                 IdpyMemory.Zeros(self.sims_vars['n_prngs'], tenet = self.tenet,
                                  dtype = NPT.C[self.custom_types['RANDType']])
+        self.sims_idpy_memory['output'] = self.sims_idpy_memory[output_name]
         '''
         Init the generic kernel
         '''
@@ -508,6 +523,62 @@ class CRNGS(IdpySims):
             _outputs += [np.copy(self.sims_idpy_memory['output'].D2H())]
             
         return np.array(_outputs)
+
+
+    def Integers(
+        self, reps = 1, int_range=1, 
+        rand_type={'RANDType': 'unsigned int'}):
+
+        if self.sims_vars['kind'] == 'MMIX':
+            raise Exception("This method only works with 32-bits generators")
+
+        self.custom_types.Set(rand_type)
+
+        '''
+        Setting the type macro checking device architecture
+        '''
+        self.constants['F_CRNGFunction'] = 'F_RandomIntegerUnbiasedLemireMACRO' 
+        self.constants['CRNG_Integers_range'] = int_range              
+        '''
+        Check output allocation
+        '''
+        type_str = self.custom_types.Push()['RANDType']
+        output_name = 'output_' + type_str
+        if output_name not in self.sims_idpy_memory:
+            self.sims_idpy_memory[output_name] = \
+                IdpyMemory.Zeros(self.sims_vars['n_prngs'], tenet = self.tenet,
+                                 dtype = NPT.C[self.custom_types['RANDType']])
+
+        self.sims_idpy_memory['output'] = self.sims_idpy_memory[output_name]
+        '''
+        Init the generic kernel
+        '''
+        _K_OutputFunction = \
+            K_OutputFunction(custom_types = self.custom_types.Push(),
+                             constants = self.constants,
+                             optimizer_flag = self.optimizer_flag,
+                             f_classes = [self.F_CRNG, F_RandomIntegerUnbiasedLemireMACRO])
+
+        
+        Idea = _K_OutputFunction(tenet = self.tenet,
+                                 grid = self.sims_vars['grid'],
+                                 block = self.sims_vars['block'])
+
+        _n_streams = self.sims_vars['n_streams']
+        if _n_streams > 1:
+            _outputs = []
+            for _i in range(_n_streams):
+                Idea.Deploy([self.sims_idpy_memory['output'],
+                             self.sims_idpy_memory['seeds_' + str(_i)],
+                             np.int32(reps)])
+                _outputs += [np.copy(self.sims_idpy_memory['output'].D2H())]
+                
+            return np.array(_outputs)
+        else:
+            Idea.Deploy([self.sims_idpy_memory['output'],
+                         self.sims_idpy_memory['seeds'],
+                         np.int32(reps)])            
+            return self.sims_idpy_memory['output'].D2H()        
 
 '''
 Meta-Programming functions
@@ -652,7 +723,7 @@ def _codify_flat(declared_variables = None, declared_constants = None,
                  const_out = False):
     
     _check_declared_variables_constants(declared_variables, declared_constants)
-    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX_' + str(crng_kind)],
                                       declared_variables, declared_constants)
     if crng_kind is None:
         raise Exception("Missing argument 'crng_kind' !")
@@ -673,7 +744,7 @@ def _codify_flat(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_declaration_const_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX))',
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX_' + str(crng_kind) + '))',
             rand_type,
             declared_variables,
             declared_constants,
@@ -690,8 +761,10 @@ def _codify_flat_integers_biased(
         crng_kind = None, rand_type = 'RANDType', const_out = False):
 
     _check_declared_variables_constants(declared_variables, declared_constants)
-    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+    """
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX_' + str(crng_kind)],
                                       declared_variables, declared_constants)
+    """
 
     if crng_kind is None:
         raise Exception("Missing argument 'crng_kind' !")
@@ -725,8 +798,61 @@ def _codify_flat_integers_biased(
 
     return _swap_code
 
-def _codify_flat_integers_unbiased():
-    pass
+## Following the implementation from
+## https://www.pcg-random.org/posts/bounded-rands.html
+def _codify_flat_integers_unbiased(
+        declared_variables = None, declared_constants = None, 
+        min_int = None, max_int = None,
+        root_seed = 'lseed', root_int = 'rand_int', assignment_type = None, 
+        crng_kind = 'NUMREC', rand_type = 'RANDType', const_out = False):
+
+    _check_declared_variables_constants(declared_variables, declared_constants)
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+                                      declared_variables, declared_constants)
+
+    if crng_kind is None:
+        raise Exception("Missing argument 'crng_kind' !")
+    if crng_kind not in _codify_CRNGS_list:
+        raise Exception("Argument 'crng_kind' must be in the list", _codify_CRNGS_list)
+
+    if min_int is None or max_int is None:
+        raise Exception("Missing argument(s) 'max_int', 'min_int'")
+
+    _swap_code = """"""
+    _swap_code += _codify_comment("This is described as the Lemire's method: https://www.pcg-random.org/posts/bounded-rands.html")
+    _swap_code += _codify_comment("Generating an integer in the range [min_int, max_int - 1]")
+    _swap_code += _codify_comment("1. Invoke the PRNG")
+    _swap_code += \
+        _codify_CRNGS[crng_kind](
+            declared_variables=declared_variables, 
+            declared_constants=declared_constants, 
+            root_seed=root_seed
+            )
+    _swap_code += _codify_comment("2. Multiply the random number by the range")
+    _swap_code += \
+        _codify_declaration_const_check(
+                'm', 
+                '((UINT64)(' + root_seed + ')) * \
+                 ((UINT64)(' + str(max_int) + ' - ' + str(min_int) + '))', 
+                _type = 'UINT64',
+                declared_variables = None,
+                declared_constants = None,
+                declare_const_flag = False
+            )
+
+    _swap_code += _codify_comment("Generating an integer in the range [0,max_int-min_int-1] and then shift")
+    _swap_code += \
+        _codify_assignment_type_check(
+            "t", 
+            "-(RANDType)(max_int-min_int-1) % ",
+            rand_type,
+            declared_variables,
+            declared_constants,
+            const_out,
+            assignment_type        
+            )
+
+    return _swap_code
 
 def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
                           root_seed = 'lseed', root_flat = 'lflat',
@@ -736,7 +862,7 @@ def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
                           const_out = False):
     
     _check_declared_variables_constants(declared_variables, declared_constants)
-    _check_needed_variables_constants([root_seed, 'ID_RANDMAX'],
+    _check_needed_variables_constants([root_seed, 'ID_RANDMAX_' + str(crng_kind)],
                                       declared_variables, declared_constants)
     if crng_kind is None:
         raise Exception("Missing argument 'crng_kind' !")
@@ -761,7 +887,7 @@ def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_assignment_type_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX) + (' + str(_shift) + \
+            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX_' + str(crng_kind) +') + (' + str(_shift) + \
             ')) * ' + str(_delta),
             rand_type,
             declared_variables,
@@ -975,7 +1101,8 @@ def _codify_n_random_vars(
         lambda_ordering = None, use_ptrs = False,
         variances = None, means = None, distribution = 'flat',
         generator = 'MINSTD32', parallel_streams = 1,
-        output_const = True, which_box_m = None
+        output_const = True, which_box_m = None, 
+        read_seeds_flag=True, write_seeds_flag=True
 ):    
     if distribution not in ['flat', 'gaussian']:
         raise Exception("Parameter 'distribution' must be in ['flat', 'gaussian']")
@@ -1028,18 +1155,20 @@ def _codify_n_random_vars(
                                       declared_variables, declared_constants)
 
     _swap_code = """"""
-    _swap_code += _codify_comment("Reading prng seeds")
-    _swap_code += \
-        _codify_read_seeds(
-            declared_variables = declared_variables,
-            declared_constants = declared_constants,
-            seeds_array = seeds_array, root_seed = root_seed,
-            n_reads = parallel_streams,
-            lambda_ordering = lambda_ordering,
-            use_ptrs = use_ptrs
-        )
-    _swap_code += _codify_newl
-    _swap_code += _codify_newl    
+
+    if read_seeds_flag:
+        _swap_code += _codify_comment("Reading prng seeds")
+        _swap_code += \
+            _codify_read_seeds(
+                declared_variables = declared_variables,
+                declared_constants = declared_constants,
+                seeds_array = seeds_array, root_seed = root_seed,
+                n_reads = parallel_streams,
+                lambda_ordering = lambda_ordering,
+                use_ptrs = use_ptrs
+            )
+        _swap_code += _codify_newl
+        _swap_code += _codify_newl    
 
     if distribution == 'flat':
         for _i, _rv in enumerate(rand_vars):
@@ -1109,16 +1238,17 @@ def _codify_n_random_vars(
                 _swap_code += _codify_newl
             _swap_code += _codify_newl
                 
-    _swap_code += _codify_comment("Writing back prng seeds")                
-    _swap_code += \
-        _codify_write_seeds(
-            declared_variables = declared_variables,
-            declared_constants = declared_constants,
-            seeds_array = seeds_array, root_seed = root_seed,
-            n_writes = parallel_streams,
-            lambda_ordering = lambda_ordering,
-            use_ptrs = use_ptrs
-        )
+    if write_seeds_flag:
+        _swap_code += _codify_comment("Writing back prng seeds")                
+        _swap_code += \
+            _codify_write_seeds(
+                declared_variables = declared_variables,
+                declared_constants = declared_constants,
+                seeds_array = seeds_array, root_seed = root_seed,
+                n_writes = parallel_streams,
+                lambda_ordering = lambda_ordering,
+                use_ptrs = use_ptrs
+            )
     
     return _swap_code
 
@@ -1226,6 +1356,57 @@ need to add:
 The idea is to parametrize the device function
 call by using a macro
 '''
+## https://www.pcg-random.org/posts/bounded-rands.html
+class F_RandomIntegerUnbiasedLemire(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed': [], 'CRNGType range': []}
+        self.functions[IDPY_T] = """
+        F_CRNG(l_seed);
+        UINT64 m = ((UINT64) (*l_seed)) * ((UINT64) range);
+        CRNGType l = ((CRNGType) m);
+        if(l < range){
+            CRNGType t = -range;
+            if(t >= range){
+                t -= range;
+                if(t >= range){
+                    t %= range;
+                }
+            }
+            while(l < t){
+                F_CRNG(l_seed);
+                m = ((UINT64) (*l_seed)) * ((UINT64) range);
+                CRNGType l = ((CRNGType) m);
+            }
+        }
+        return m >> 32;
+        """
+
+class F_RandomIntegerUnbiasedLemireMACRO(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed': []}
+        self.functions[IDPY_T] = """
+        F_CRNG(l_seed);
+        UINT64 m = ((UINT64) (*l_seed)) * ((UINT64) CRNG_Integers_range);
+        CRNGType l = ((CRNGType) m);
+        if(l < CRNG_Integers_range){
+            CRNGType t = -CRNG_Integers_range;
+            if(t >= CRNG_Integers_range){
+                t -= CRNG_Integers_range;
+                if(t >= CRNG_Integers_range){
+                    t %= CRNG_Integers_range;
+                }
+            }
+            while(l < t){
+                F_CRNG(l_seed);
+                m = ((UINT64) (*l_seed)) * ((UINT64) CRNG_Integers_range);
+                CRNGType l = ((CRNGType) m);
+            }
+        }
+        return m >> 32;
+        """        
+
 class F_Norm(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
