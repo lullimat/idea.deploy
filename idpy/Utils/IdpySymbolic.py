@@ -192,48 +192,68 @@ class SymmetricTensor:
         if _b.d != self.d:
             raise Exception('Dimensionalities of the two SymmetricTensor differ!',
                             self.d, _b.d)
+
         if _b.rank != self.rank:
-            raise Exception('Ranks of the two SymmetricTensor differ!',
-                            self.rank, _b.rank)
-
-        _largest_shape = 0
-        _shapes = [self.shape, _b.shape]
-        _shapes_types = [type(self.shape), type(_b.shape)]
-        _largest_shape = None
-
-        _product, _symt_out = None, False
-        if int in _shapes_types and tuple in _shapes_types:
-            _product = lambda x, y: x * y
-            for _i, _ in enumerate(_shapes_types): 
-                if _ == tuple:
-                    _largest_shape = _shapes[_i]
-        elif AllTrue([_ == tuple for _ in _shapes_types]):
-            _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
-            _symt_out = True
-            if self.shape != _b.shape:
-                raise Exception("Cannot perform the element-wise product")
-        '''
-        Full contraction
-        '''
-        _contraction = sp.Matrix([0] * _largest_shape[0])
-        ##for _tuple in TaylorTuples(list(range(self.d)), self.rank):
-        for _tuple in self.c_dict:
-            _is_symmetric_tuple = True
-            if type(_tuple) == tuple and len(_tuple):
-                _flip_tuple = FlipVector(_tuple)
-                _is_symmetric_tuple = IsSameVector(_tuple, _flip_tuple)
-            '''
-            need to check the shapes in case of sympy matrices, 
-            or if one of the two is a a scalar and the apply the elemntwise product
-            even though I do not need it for now...
-            '''
-            if _is_symmetric_tuple:
-                _contraction += _product(self[_tuple], _b[_tuple])
+            if False:
+                raise Exception('Ranks of the two SymmetricTensor differ!',
+                                self.rank, _b.rank)
+            
+            if self.rank > _b.rank:
+                A, B = self, _b
             else:
-                _contraction += sp.factorial(self.rank) * _product(self[_tuple], _b[_tuple])
+                A, B = _b, self
 
-        return (_contraction if not _symt_out else
-                SymmetricTensor(c_dict = {0: _contraction}, d = self.d, rank = 0))
+            rank_diff = A.rank - B.rank
+            list_ttuples_diff = TaylorTuples(list(range(self.d)), rank_diff)
+            list_ttuples_B = TaylorTuples(list(range(self.d)), B.rank)
+
+            """
+            I need to sum over all tuples, includin the symmetric ones
+            """
+            for ttuple_diff in list_ttuples_diff:
+                print(ttuple_diff)
+                for ttuple_B in list_ttuples_B:
+                    print(ttuple_B)
+
+        if _b.rank == self.rank:
+            _largest_shape = 0
+            _shapes = [self.shape, _b.shape]
+            _shapes_types = [type(self.shape), type(_b.shape)]
+            _largest_shape = None
+
+            _product, _symt_out = None, False
+            if int in _shapes_types and tuple in _shapes_types:
+                _product = lambda x, y: x * y
+                for _i, _ in enumerate(_shapes_types): 
+                    if _ == tuple:
+                        _largest_shape = _shapes[_i]
+            elif AllTrue([_ == tuple for _ in _shapes_types]):
+                _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
+                _symt_out = True
+                if self.shape != _b.shape:
+                    raise Exception("Cannot perform the element-wise product")
+            '''
+            Full contraction
+            '''
+            _contraction = sp.Matrix([0] * _largest_shape[0])
+            ##for _tuple in TaylorTuples(list(range(self.d)), self.rank):
+            for _tuple in self.c_dict:
+                _is_symmetric_tuple = True
+                if type(_tuple) == tuple and len(_tuple):
+                    _flip_tuple = FlipVector(_tuple)
+                    _is_symmetric_tuple = IsSameVector(_tuple, _flip_tuple)
+                '''
+                need to check the shapes in case of sympy matrices, 
+                or if one of the two is a a scalar and the apply the elemntwise product
+                even though I do not need it for now...
+                '''
+                if _is_symmetric_tuple:
+                    _contraction += _product(self[_tuple], _b[_tuple])
+                else:
+                    _contraction += sp.factorial(self.rank) * _product(self[_tuple], _b[_tuple])
+
+            return (_contraction if not _symt_out else
+                    SymmetricTensor(c_dict = {0: _contraction}, d = self.d, rank = 0))
 
         """
         else:
