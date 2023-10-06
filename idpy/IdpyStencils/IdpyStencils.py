@@ -113,8 +113,8 @@ IDStencils['LBM']['XI_D3Q27'] = {'XIs': ((0, 0, 0),
                                  'c2': sp.Rational(1, 3)}
 
 IDStencils['LBM']['SC_D1Q2'] = {'XIs': ((1,), (-1,)),
-                                'Ws': (sp.Rational(1, 2), sp.Rational(1, 2)), 
-                                'e2': 1}                                 
+                                'Ws': (sp.Rational(1, 2), sp.Rational(1, 2)),
+                                'e2': 1}
 
 IDStencils['LBM']['SC_D2E4'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1),
                                         (1, 1), (-1, 1), (-1, -1), (1, -1)),
@@ -223,8 +223,6 @@ IDStencils['LBM']['SC_D3E8'] = \
             sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040), sp.Rational(1, 5040))
     }
 
-
-
 from idpy.IdpyCode.IdpyUnroll import _get_single_neighbor_pos_macro_fully_sym
 from idpy.IdpyCode.IdpyUnroll import _codify, _codify_comment, _codify_newl
 from idpy.IdpyCode.IdpyUnroll import _codify_assignment, _codify_declaration
@@ -243,6 +241,7 @@ from idpy.IdpyCode.IdpyUnroll import _codify_declaration_const, _codify_sympy_de
 from idpy.IdpyCode.IdpyUnroll import _codify_declaration_const_check
 
 from idpy.Utils.Geometry import GetLen2Pos, IsOppositeVector, ProjectionVAlongU, ProjectVAlongU
+from idpy.Utils.Geometry import EScalarProduct, IsSameVector
 from idpy.Utils.Statements import AllTrue
 
 from idpy.Utils.ManageData import ManageData
@@ -305,7 +304,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -329,20 +328,21 @@ class IdpyStencil:
         Defining and checking the variables that are needed
         '''
         _dim, _Q = len(self.XIs[0]), len(self.XIs)
- 
+
         _needed_variables = arrays        
         _chk_needed_variables = []
         for _ in _needed_variables:
             _chk_needed_variables += [_ in declared_variables[0] or _ in declared_constants[0]]
+
         if not AllTrue(_chk_needed_variables):
             print()
             for _i, _ in enumerate(_chk_needed_variables):
                 if not _:
                     print("Variable/constant ", _needed_variables[_i], "not declared!")
             raise Exception("Some needed variables/constants have not been declared yet (!)")
-        
+
         _swap_code = """"""
-        
+
         '''
         defining the symbols and the vector for 'array'
         '''
@@ -376,14 +376,14 @@ class IdpyStencil:
 
         for _a_i in range(len(arrays)):
             _n += [sp.Symbol(root_n + '_' + str(_a_i))]
-        
+
         '''
         Computing and declaring the momenta
         '''
         _hydro_set = self.GetHydroHermiteSet()
         for _a_i in range(len(arrays)):
             _moment_swap = _hydro_set * _vector_array_vars[_a_i]
-            
+
             _swap_code += \
                 _codify_declaration_const_check(
                     _codify_sympy(_n[_a_i]), _codify_sympy(_moment_swap[0]),
@@ -414,7 +414,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -433,7 +433,7 @@ class IdpyStencil:
             raise Exception("Argument 'ordering_lambdas' must be a list of lambdas")
         if len(ordering_lambdas) != len(arrays):
             raise Exception("The length of 'ordering_lambdas' must be the same as 'arrays'")
-        
+
         '''
         Defining and checking the variables that are needed
         '''
@@ -443,22 +443,22 @@ class IdpyStencil:
         Local densities values
         '''
         _n = _get_seq_vars(len(arrays), root_n)
-        
+
         _needed_variables = arrays + _n
         _chk_needed_variables = []
         for _ in _needed_variables:
             _chk_needed_variables += [_ in declared_variables[0] or
                                       _ in declared_constants[0]]
-        
+
         if not AllTrue(_chk_needed_variables):
             print()
             for _i, _ in enumerate(_chk_needed_variables):
                 if not _:
                     print("Variable/constant ", _needed_variables[_i], "not declared!")
             raise Exception("Some needed variables/constants have not been declared yet (!)")
-        
+
         _swap_code = """"""
-        
+
         '''
         defining the symbols and the vector for 'array'
         '''
@@ -493,7 +493,7 @@ class IdpyStencil:
         for _i in range(len(arrays)):
             _u_vars += [_get_sympy_seq_vars(_dim, root_u + '_' + str(_i))]
 
-        
+
         '''
         Computing and declaring the momenta
         '''
@@ -512,9 +512,9 @@ class IdpyStencil:
                         declare_const_flag = declare_const_dict['moments']
                     )
             _swap_code += _codify_newl
-            
+
         return _swap_code
-    
+
     def HydroHermiteCode(self, declared_variables = None, declared_constants = None,
                          arrays = ['array'], arrays_types = ['AType'],
                          root_n = 'n', root_u = 'u',
@@ -532,7 +532,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -557,7 +557,7 @@ class IdpyStencil:
         Defining and checking the variables that are needed
         '''
         _dim, _Q = len(self.XIs[0]), len(self.XIs)
- 
+
         _needed_variables = arrays        
         _chk_needed_variables = []
         for _ in _needed_variables:
@@ -568,7 +568,7 @@ class IdpyStencil:
                 if not _:
                     print("Variable/constant ", _needed_variables[_i], "not declared!")
             raise Exception("Some needed variables/constants have not been declared yet (!)")
-        
+
         _swap_code = """"""
 
         '''
@@ -612,7 +612,7 @@ class IdpyStencil:
         _hydro_set = self.GetHydroHermiteSet()
         for _a_i in range(len(arrays)):
             _moment_swap = _hydro_set * _vector_array_vars[_a_i]
-            
+
             _swap_code += \
                 _codify_declaration_const_check(
                     _codify_sympy(_n[_a_i]), _codify_sympy(_moment_swap[0]),
@@ -657,7 +657,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -682,7 +682,7 @@ class IdpyStencil:
         Defining and checking the variables that are needed
         '''
         _dim, _Q = len(self.XIs[0]), len(self.XIs)
- 
+
         _needed_variables = arrays        
         _chk_needed_variables = []
         for _ in _needed_variables:
@@ -693,7 +693,7 @@ class IdpyStencil:
                 if not _:
                     print("Variable/constant ", _needed_variables[_i], "not declared!")
             raise Exception("Some needed variables/constants have not been declared yet (!)")
-        
+
         _swap_code = """"""
 
         '''
@@ -735,7 +735,7 @@ class IdpyStencil:
         _full_hermite_set = self.GetInvertibleHermiteSet(search_depth = search_depth)['M']
         for _a_i in range(len(arrays)):
             _moment_swap = _full_hermite_set * _vector_array_vars[_a_i]
-            
+
             for _m_i, _m in enumerate(_neq_mom_vars[_a_i]):
                 _swap_code += \
                     _codify_declaration_const_check(
@@ -749,7 +749,7 @@ class IdpyStencil:
             _swap_code += _codify_newl
 
         return _swap_code
-    
+
 
     '''
     symt_flag: flag to toggle the output as a idpy.Utils.IdpySymbolic.SymmetricTensor
@@ -781,9 +781,9 @@ class IdpyStencil:
             for _i, _index_tuple in enumerate(TaylorTuples(list(range(self.D)), _k)):
                 _swap_dict[_index_tuple] = _in_dict[_k].T[:,_i]                
             _out_dict[_k] = SymmetricTensor(_swap_dict, self.D, _k)
-            
+
         return _out_dict
-    
+
     def GetHydroHermiteSet(self, root_xi_sym = '\\xi'):
         return self.GetHermiteSet(_max_order = 1, root_xi_sym = root_xi_sym)
 
@@ -792,7 +792,7 @@ class IdpyStencil:
         _c_sym_list = _hc.sym_list
         _xi_sym_list = [sp.Symbol(root_xi_sym + '_' + str(_)) for _ in range(self.D)]
         _c_s_sym = sp.Symbol('c_s')
-        
+
         _M_coeffs = []
         if _order == 0:
             _M_coeffs = [[1] * self.Q]
@@ -818,15 +818,15 @@ class IdpyStencil:
                 _M_coeffs += [_M_coeffs_swap]
 
             return sp.Matrix([_row for _row in _M_coeffs])
-    
+
     def GetHermiteSet(self, _max_order = 1, root_xi_sym = '\\xi'):
         _hc = Hermite(d = self.D, root_sym = 'c')
         _c_sym_list = _hc.sym_list
         _xi_sym_list = [sp.Symbol(root_xi_sym + '_' + str(_)) for _ in range(self.D)]
         _c_s_sym = sp.Symbol('c_s')
-        
+
         _M_coeffs = [[1] * self.Q]
-        
+
         _count_momenta = 1
 
         for _order in range(1, _max_order + 1):
@@ -958,7 +958,6 @@ class IdpyStencil:
         _M, _H_polys = _M_dict['M'], _M_dict['MHermitePolys']
 
         _lambda_hermite_prod = lambda x, y: HermiteWProd(x, y, self.Ws)
-
         _HermiteW_Orth_M, _HermiteW_Orth_Polys, _coeffs_list = [_M[0,:]], [_H_polys[0]], []
         '''
         Here we compute the orthogonal vectors and keep track of the Hermite polynomials
@@ -978,7 +977,7 @@ class IdpyStencil:
             _HermiteW_Orth_M += [_new_vector]
             _HermiteW_Orth_Polys += [sp.simplify(_new_poly)]
             _coeffs_list += [_coeffs_swap]
-            
+
         self.MWOrth = sp.Matrix(_HermiteW_Orth_M)
         self.MWOrthHermitePolys = \
             np.array(_HermiteW_Orth_Polys, dtype = object)
@@ -994,7 +993,7 @@ class IdpyStencil:
                 'MWOrthHermiteNorms': self.MWOrthHermiteNorms,
                 'MWOrthWProdsHermite': self.MWOrthWProdsHermite,
                 'MWOrthCs': self.MWOrthCs}
-        
+
     '''
     def MakeMemoryFriendly:
     need to define a function to make the order of the directions more memory friendly
@@ -1002,8 +1001,8 @@ class IdpyStencil:
     because the served memory chunck is per-warp (cuda) so it should not really matter
     at least not much
     '''
-        
-            
+
+
     '''
     def StreamingCode
     for this part of the code compute or registers pressure should not really matter
@@ -1022,7 +1021,7 @@ class IdpyStencil:
         _dim = len(self.XIs[0])
         _dim_sizes_macros = _get_seq_macros(_dim, root_dim_sizes)
         _dim_strides_macros = _get_seq_macros(_dim - 1, root_strides)
-        
+
         _largest_c = 0
         for _xi in self.XIs:
             for _xi_c in _xi:
@@ -1040,7 +1039,7 @@ class IdpyStencil:
                                 _dim_sizes_macros[_d])
                 _sm = _sm_macro(root_coord + '_' + str(_d), str(_delta_c), 
                                 _dim_sizes_macros[_d])
-                    
+
                 _neigh_c_var = root_coord + '_' + str(_d) + '_p' + str(_delta_c)
                 _swap_code += _codify_declaration_const_check(_neigh_c_var, _sp, pos_type, 
                                                               declared_variables, 
@@ -1078,7 +1077,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -1106,9 +1105,9 @@ class IdpyStencil:
 
         _swap_code = """"""
 
-
         return _swap_code
-    
+
+
     def StreamingCode(self, declared_variables = None, declared_constants = None,
                       ordering_lambdas = None,
                       src_arrays_vars = ['src_array'], dst_arrays_vars = ['dst_array'], 
@@ -1118,7 +1117,7 @@ class IdpyStencil:
                       root_dim_sizes = 'L', root_strides = 'STR', 
                       root_coord = 'x', lex_index = 'g_tid', 
                       declare_const_dict = {'cartesian_coord_neigh': False}):
-        
+
         '''
         Checking that the list of declared variables is available
         '''
@@ -1128,7 +1127,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -1147,17 +1146,17 @@ class IdpyStencil:
             raise Exception("Argument 'ordering_lambdas' must be a list of lambdas")
         if len(ordering_lambdas) != len(src_arrays_vars):
             raise Exception("The length of 'ordering_lambdas' must be the same as '*_arrays_vars'")
-            
+
 
         if len(src_arrays_vars) != len(dst_arrays_vars):
             raise Exception("The number of source arrays must be the same as the destination ones")
-        
+
         if stream_mode not in ['pull', 'push']:
             raise Exception("Parameter 'stream_mode' must be either 'pull' or 'push'")
 
         if pressure_mode not in ['compute', 'registers']:
             raise Exception("Parameter 'pressure_mode' must be either 'compute' or 'registers'")
-            
+
         '''
         Defining and checking the variables that are needed
         '''
@@ -1169,21 +1168,21 @@ class IdpyStencil:
         _needed_variables = \
             _dim_sizes_macros + _dim_strides_macros + _pos_vars + \
             src_arrays_vars + dst_arrays_vars
-        
+
         _chk_needed_variables = []
         for _ in _needed_variables:
             _chk_needed_variables += [_ in declared_variables[0] or
                                       _ in declared_constants[0]]
-            
+
         if not AllTrue(_chk_needed_variables):
             print()
             for _i, _ in enumerate(_chk_needed_variables):
                 if not _:
                     print("Variable/constant ", _needed_variables[_i], "not declared!")
             raise Exception("Some needed variables/constants have not been declared yet (!)")
-            
+
         _swap_code = """"""
-        
+
         _swap_code += \
             self._define_cartesian_neighbors_coords(
                 declared_variables = declared_variables,
@@ -1195,7 +1194,7 @@ class IdpyStencil:
                 lex_index = lex_index, 
                 declare_const_flag = declare_const_dict['cartesian_coord_neigh']
             )
-        
+
         '''
         Compute-pressure mode
         '''
@@ -1204,7 +1203,7 @@ class IdpyStencil:
             Declaring the variables for the position of src and dst
             '''
             _coord_src, _coord_dst = sp.Symbol(root_coord + '_src'), sp.Symbol(root_coord + '_dst')
-            
+
             _swap_code += _codify_declaration_const_check(_codify_sympy(_coord_src),
                                                           0 if stream_mode == 'pull' else lex_index,
                                                           pos_type, 
@@ -1302,9 +1301,9 @@ class IdpyStencil:
                         _sx_hnd = _array_value(_array_dst, ordering_lambdas[_i](_coord_dst, _q_exchg), use_ptrs)
                         _dx_hnd = _array_value(_array_src, ordering_lambdas[_i](_coord_src, _q_exchg), use_ptrs)
                         _swap_code += _codify_assignment(_sx_hnd, _dx_hnd)
-                        
+
         return _swap_code
-            
+
     '''
     def SetOppositeDirections
     '''
@@ -1316,8 +1315,66 @@ class IdpyStencil:
                 if IsOppositeVector(self.XIs[_i], self.XIs[_j]):
                     self.opposite[_i] = _j
                     self.opposite[_j] = _i
-            
-        
+
+
+    def SetMirrorDirections(self):
+        _dim, _Q = len(self.XIs[0]), len(self.XIs)
+        self.mirror = defaultdict(dict)
+        self.mirror_q = {q: {} for q in range(_Q)}
+        self.mirror_normal_vectors = []
+
+        for d in range(_dim):
+            basis_vector = tuple([int(x == d) for x in range(_dim)])
+            self.mirror_normal_vectors += [basis_vector]
+            self.mirror_normal_vectors += [tuple(map(lambda x: -x, basis_vector))]
+
+            k_xi_list = []
+            for q in range(_Q):
+                prod = EScalarProduct(self.XIs[q], basis_vector)
+                if prod > 0:
+                    k_xi_list += [q]
+
+            j_xi_list = []
+            for k in k_xi_list:
+                xi_j = list(self.XIs[k])
+                xi_j[d] = -xi_j[d]
+
+            for q in range(_Q):
+                if IsSameVector(xi_j, self.XIs[q]):
+                    j_xi_list += [q]
+
+            """
+            Like this I should know enough, although I need to specify the encoding here
+            index 2 * d: is the index of the e_d direction for the normal pointing to the mirror
+            index 2 * d + 1: is the index of the -e_d direction for the normal pointing to the mirror
+            - Need to move the population values according to their (d + l)%dim components with l=1,...,dim-1
+            from the population-key of the dict to the population-value of the dict
+            """
+            self.mirror[2 * d] = {k: j for k, j in zip(k_xi_list, j_xi_list)}
+            self.mirror[2 * d + 1] = {j: k for j, k in zip(j_xi_list, k_xi_list)}
+
+        for q in range(1, _Q):
+            for d in range(_dim):
+                if q in self.mirror[2 * d]:
+                    self.mirror_q[q][2 * d] = self.mirror[2 * d][q]
+                if q in self.mirror[2 * d + 1]:
+                    self.mirror_q[q][2 * d + 1] = self.mirror[2 * d + 1][q]
+
+        self.mirror_ortho_vectors = []
+        for d in range(_dim):
+            self.mirror_ortho_vectors += [tuple([int(x != d) for x in range(_dim)])]
+            self.mirror_ortho_vectors += [tuple([int(x != d) for x in range(_dim)])]
+
+        self.mirror_xi_deltas = {}
+        for q in range(_Q):
+            self.mirror_xi_deltas[q] = {}
+            for mirror_normal in self.mirror_q[q]:
+                filtered_xi = tuple(map(lambda x, y: x * y, self.XIs[q], self.mirror_ortho_vectors[mirror_normal]))
+                self.mirror_xi_deltas[q][mirror_normal] = filtered_xi
+        ##print(q, mirror_normal, self.mirror_q[q][mirror_normal], filtered_xi)
+
+
+
     '''
     After the execution of this function the coordinates of the gradient can be found in
     d_array_0, d_array_1,...,d_array_(dim-1)
@@ -1339,7 +1396,7 @@ class IdpyStencil:
             raise Exception("Argument 'declared_variables' must be a list containing one list")
         if len(declared_variables) == 0 or type(declared_variables[0]) != list:
             raise Exception("List 'declared_variables' must contain another list!")
-    
+
         '''
         Checking that the list of declared constants is available
         '''
@@ -1349,22 +1406,22 @@ class IdpyStencil:
             raise Exception("Argument 'declared_constants' must be a list containing one list")
         if len(declared_constants) == 0 or type(declared_constants[0]) != list:
             raise Exception("List 'declared_constants' must contain another list!")
-        
+
         if pressure_mode not in ['compute', 'registers']:
             raise Exception("Parameter 'pressure_mode' must be either 'compute' or 'registers'")
-        
+
         _dim, _Q = len(self.XIs[0]), len(self.XIs)
         _dim_sizes_macros = _get_seq_macros(_dim, root_dim_sizes)
         _dim_strides_macros = _get_seq_macros(_dim - 1, root_strides)
         _weights_values = self.Ws        
-        
+
         '''
         Creating symbols list for arrays variables names
         '''
         _arrays_vars_syms = [sp.Symbol(_) for _ in arrays_vars]
-        
+
         _swap_code = """"""
-        
+
         '''
         declare swap_products
         '''
@@ -1383,7 +1440,7 @@ class IdpyStencil:
         Find the largest increment for the vectors and precompute the
         coordinates increments: this part is general enough to be abstracted
         '''        
-        
+
         _swap_code += \
             self._define_cartesian_neighbors_coords(
                 declared_variables = declared_variables,
@@ -1396,7 +1453,7 @@ class IdpyStencil:
                 declare_const_flag = declare_const_dict['cartesian_coord_neigh']
             )
         _swap_code += _codify_newl        
-        
+
         '''
         Compute-pressure mode
         '''
@@ -1420,24 +1477,25 @@ class IdpyStencil:
                                                                  _dim_strides_macros,
                                                                  root_coord, lex_index)
                     _swap_code += _codify_sympy_assignment('n_' + root_coord, _swap_expr)
-                    
+
                     for _i, _array in enumerate(_arrays_vars_syms):
                         for _d in range(_dim):
                             if abs(_xi[_d]) > 0:
-                                
+
                                 _assignement_function = (
                                     _codify_sympy_add_assignment if (_xi[_d] * _weights_values[_q]) > 0 else 
                                     _codify_sympy_sub_assignment
                                 )
-                                
+
                                 _dx_hnd = \
                                     (str(abs((_xi[_d]) * _weights_values[_q]).evalf()) + '*' + 
                                      _array_value(str(_array), 'n_' + root_coord, use_ptrs))
-                                                                
+
                                 _swap_code += \
                                     _assignement_function('d_' + str(_array) + '_' + str(_d), _dx_hnd)
+
                     _swap_code += _codify_newl
-                                
+
         '''
         Compute-pressure mode
         '''
@@ -1463,12 +1521,11 @@ class IdpyStencil:
                 for _array in _arrays_vars_syms:
                     for _d in range(_dim):
                         if abs(_xi[_d]) > 0:
-
                             _assignement_function = (
                                 _codify_sympy_add_assignment if (_xi[_d] * _weights_values[_q]) > 0 else 
                                 _codify_sympy_sub_assignment
                             )
-                            
+
                             _dx_hnd = \
                                 (str((abs(_xi[_d]) * _weights_values[_q]).evalf()) + '*' + 
                                  _array_value(str(_array), 'n_' + root_coord + '_' + str(_q), 
@@ -1476,8 +1533,8 @@ class IdpyStencil:
 
                             _swap_code += \
                                 _assignement_function('d_' + str(_array) + '_' + str(_d), _dx_hnd)
-                            
+
                             _i += 1
-                        
-                
+
+
         return _swap_code
