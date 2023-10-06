@@ -84,6 +84,12 @@ class IdpyPapers:
              "doi": "", "doi-dir": "",
              "git": "https://github.com/lullimat/arXiv-2212.07848.git"}
 
+        self.arxiv_papers['arXiv-2310.03632'] = \
+            {"Title": "The exact evaluation of hexagonal spin-networks and topological quantum neural networks",
+             "Authors": ["Matteo Lulli", "Antonino Marciano", "Emanuele Zappala"],
+             "doi": "", "doi-dir": "",
+             "git": "https://github.com/lullimat/arXiv-2310.03632"}
+        
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
 
