@@ -12,7 +12,7 @@ h5py
 jupyter_contrib_nbextensions
 jupyter_nbextensions_configurator
 ipykernel
-sklearn
+scikit-learn
 plotly
 psutil
 requests
