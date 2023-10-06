@@ -72,6 +72,9 @@ from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeVelocityAfterForceSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamSCMP_MRTMeta
+from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamWallsSCMPMeta
+from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiWallsMeta
+from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeVelocityAfterForceSCMPWallsMeta
 
 '''
 Fluctuating Hydrodynamics kernels
@@ -1043,7 +1046,93 @@ class ShanChenMultiPhase(RootLB):
         if profiling:
             return _profiling_results
         else:
-            return None        
+            return None
+
+
+    def MainLoopWalls(self, time_steps, convergence_functions = [], profiling = False):
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+
+        _K_ComputeDensityPsiWallsMeta = \
+            K_ComputeDensityPsiWallsMeta(
+                custom_types = self.custom_types.Push(), 
+                constants = self.constants, f_classes = [], 
+                XIStencil = self.params_dict['xi_stencil'], 
+                use_ptrs = self.params_dict['use_ptrs'],
+                ordering_lambda = self.sims_vars['ordering']['pop'], 
+                psi_code = self.params_dict['psi_code']
+            )
+
+        _K_ForceCollideStreamWallsSCMPMeta = \
+            K_ForceCollideStreamWallsSCMPMeta(
+                custom_types = self.custom_types.Push(), 
+                constants = self.constants, f_classes = [],
+                optimizer_flag = None, 
+                XIStencil = self.params_dict['xi_stencil'], 
+                SCFStencil = self.params_dict['f_stencil'], 
+                use_ptrs = self.params_dict['use_ptrs'], 
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'], 
+                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                collect_mul = False, stream_mode = 'push', pressure_mode = 'compute',
+                root_dim_sizes = self.params_dict['root_dim_sizes'], 
+                root_strides = self.params_dict['root_strides'], 
+                root_coord = self.params_dict['root_coord'], 
+                walls_array_var = 'walls'
+            )
+        
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+
+        ### return _K_ComputeDensityPsiMeta, _K_ForceCollideStreamSCMPMeta
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [
+                        (_K_ComputeDensityPsiWallsMeta(tenet = self.tenet,
+                                                  grid = self.sims_vars['grid'],
+                                                  block = self.sims_vars['block']),
+                         ['n', 'psi', 'pop', 'walls']),
+                        
+                        (_K_ForceCollideStreamWallsSCMPMeta(tenet = self.tenet,
+                                                            grid = self.sims_vars['grid'],
+                                                            block = self.sims_vars['block']),
+                         ['pop_swap', 'pop', 'n', 'psi', 'walls']),
+
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_f in convergence_functions:
+                    checks.append(c_f(self))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None                    
 
     def MainLoopMRT(self, time_steps, relaxation_matrix = None, omega_syms_vals = None,
                     convergence_functions = [], profiling = False):
@@ -1275,7 +1364,7 @@ class ShanChenMultiPhase(RootLB):
         if profiling:
             return _profiling_results
         else:
-            return None            
+            return None ## _K_ForceGross2011CollideStreamSCMPMeta            
         
     def ComputeMoments(self):
         if not self.init_status['pop']:
@@ -1306,55 +1395,97 @@ class ShanChenMultiPhase(RootLB):
         '''
         Need to fix the code: temporary for comparison fields
         '''
-        _K_ComputeDensityPsiMeta = \
-            K_ComputeDensityPsiMeta(
-                custom_types = self.custom_types.Push(), 
-                constants = self.constants, f_classes = [], 
-                XIStencil = self.params_dict['xi_stencil'], 
-                use_ptrs = self.params_dict['use_ptrs'],
-                ordering_lambda = self.sims_vars['ordering']['pop'], 
-                psi_code = self.params_dict['psi_code']
-            )
 
-        IdeaPsi = _K_ComputeDensityPsiMeta(tenet = self.tenet,
-                                           grid = self.sims_vars['grid'],
-                                           block = self.sims_vars['block'])        
+        if 'walls' not in self.sims_idpy_memory:
+            _K_Psi = \
+                K_ComputeDensityPsiMeta(
+                    custom_types = self.custom_types.Push(), 
+                    constants = self.constants, f_classes = [], 
+                    XIStencil = self.params_dict['xi_stencil'], 
+                    use_ptrs = self.params_dict['use_ptrs'],
+                    ordering_lambda = self.sims_vars['ordering']['pop'], 
+                    psi_code = self.params_dict['psi_code']
+                )        
 
-        _K_ComputeVelocityAfterForceSCMPMeta = \
-            K_ComputeVelocityAfterForceSCMPMeta(
-                custom_types = self.custom_types.Push(),
-                constants = self.constants, f_classes = [],
-                optimizer_flag = self.optimizer_flag,
-                XIStencil = self.params_dict['xi_stencil'], 
-                SCFStencil = self.params_dict['f_stencil'],
-                use_ptrs = self.params_dict['use_ptrs'],
-                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
-                ordering_lambda_u= self.sims_vars['ordering']['u'],
-                collect_mul = False, pressure_mode = 'compute',
-                root_dim_sizes = self.params_dict['root_dim_sizes'],
-                root_strides = self.params_dict['root_strides'],
-                root_coord = self.params_dict['root_coord']
-            )
+            _K_Velocity = \
+                K_ComputeVelocityAfterForceSCMPMeta(
+                    custom_types = self.custom_types.Push(),
+                    constants = self.constants, f_classes = [],
+                    optimizer_flag = self.optimizer_flag,
+                    XIStencil = self.params_dict['xi_stencil'], 
+                    SCFStencil = self.params_dict['f_stencil'],
+                    use_ptrs = self.params_dict['use_ptrs'],
+                    ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                    ordering_lambda_u= self.sims_vars['ordering']['u'],
+                    collect_mul = False, pressure_mode = 'compute',
+                    root_dim_sizes = self.params_dict['root_dim_sizes'],
+                    root_strides = self.params_dict['root_strides'],
+                    root_coord = self.params_dict['root_coord']
+                )
+
+        else:
+            _K_Psi = \
+                K_ComputeDensityPsiWallsMeta(
+                    custom_types = self.custom_types.Push(), 
+                    constants = self.constants, f_classes = [], 
+                    XIStencil = self.params_dict['xi_stencil'], 
+                    use_ptrs = self.params_dict['use_ptrs'],
+                    ordering_lambda = self.sims_vars['ordering']['pop'], 
+                    psi_code = self.params_dict['psi_code']
+                )        
+
+            _K_Velocity = \
+                K_ComputeVelocityAfterForceSCMPWallsMeta(
+                    custom_types = self.custom_types.Push(),
+                    constants = self.constants, f_classes = [],
+                    optimizer_flag = self.optimizer_flag,
+                    XIStencil = self.params_dict['xi_stencil'], 
+                    SCFStencil = self.params_dict['f_stencil'],
+                    use_ptrs = self.params_dict['use_ptrs'],
+                    ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                    ordering_lambda_u= self.sims_vars['ordering']['u'],
+                    collect_mul = False, pressure_mode = 'compute',
+                    root_dim_sizes = self.params_dict['root_dim_sizes'],
+                    root_strides = self.params_dict['root_strides'],
+                    root_coord = self.params_dict['root_coord'], 
+                    walls_array_var = 'walls'
+                )                
+
+        IdeaPsi = _K_Psi(tenet = self.tenet,
+                         grid = self.sims_vars['grid'],
+                         block = self.sims_vars['block'])            
 
         IdeaVelocity = \
-            _K_ComputeVelocityAfterForceSCMPMeta(tenet = self.tenet,
-                                                 grid = self.sims_vars['grid'],
-                                                 block = self.sims_vars['block'])
+            _K_Velocity(tenet = self.tenet,
+                        grid = self.sims_vars['grid'],
+                        block = self.sims_vars['block'])
 
         _stream = IdeaPsi.Deploy([self.sims_idpy_memory['n'],
                                   self.sims_idpy_memory['psi'],
-                                  self.sims_idpy_memory['pop']])
+                                  self.sims_idpy_memory['pop']] + \
+                                  (
+                                      [self.sims_idpy_memory['walls']] 
+                                      if 'walls' in self.sims_idpy_memory else
+                                      []
+                                  )
+                                 )
 
         _stream = [_stream] if self.params_dict['lang'] == OCL_T else None        
         
         IdeaVelocity.Deploy([self.sims_idpy_memory['n'],
                              self.sims_idpy_memory['u'],
                              self.sims_idpy_memory['pop'],
-                             self.sims_idpy_memory['psi']],
+                             self.sims_idpy_memory['psi']] + \
+                             (
+                                 [self.sims_idpy_memory['walls']] 
+                                 if 'walls' in self.sims_idpy_memory else
+                                 []
+                             ),
                             idpy_stream = _stream)
 
         self.init_status['n'] = True
         self.init_status['u'] = True
+
 
     def InitPopulations(self):
         if not AllTrue([self.init_status['n'], self.init_status['u']]):
