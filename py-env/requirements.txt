@@ -5,13 +5,9 @@ numpy
 sympy
 matplotlib
 pybind11==2.9.2
-jupyter
 mako
 dill
 h5py
-jupyter_contrib_nbextensions
-jupyter_nbextensions_configurator
-ipykernel
 scikit-learn
 plotly
 psutil
@@ -19,9 +15,18 @@ requests
 ## Thanks!
 ## https://stackoverflow.com/questions/58473837/plotly-missing-orca
 kaleido
-ipyparallel
 py-cpuinfo
 einsteinpy
+jupyter
+jupyter_contrib_nbextensions
+jupyter_nbextensions_configurator
 jupyterlab
+jupyterlab-fasta
+jupyterlab-geojson
+jupyterlab-katex
+jupyterlab-mathjax2
+jupyterlab-vega3
+ipykernel
+ipyparallel
 python-sat[pblib,aiger]
 networkx[all]
