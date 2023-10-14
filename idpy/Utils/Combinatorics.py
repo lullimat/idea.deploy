@@ -99,10 +99,14 @@ def Multinomial(n, below: list):
     for i in range(len(below)):
         _multinomial /= factorial(below[i])
         
-    return _multinomial
+    return _multinomial    
 
 def Multinomial2(n, i, k):
     return factorial(n) // factorial(i) // factorial(k)
+
+def PrintMultinomial(n, below: list):
+    list_str = ''
+    return '$$\\binom{a}{' + list_str + '}$$'
 
 '''
 Need to compute all the possible combinations of all the possible sum decompositions
