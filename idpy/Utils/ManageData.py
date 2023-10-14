@@ -69,8 +69,13 @@ class ManageData:
             entries.append(elem)
         return entries
 
-    def IsThereKey(self, key):
-        return key in self.data_dictionary
+    def IsThereKey(self, key, kind = 'dill'):
+        if kind not in ['hdf5', 'dill', 'json']:
+            raise Exception("Parameter 'kind' must be in ['hdf5','dill','json']")
+        if kind != 'hdf5':
+            return key in self.data_dictionary
+        else:
+            return self.IsThereKeyHDF5(full_key=key)
 
     def PullData(self, key):
         if key in self.WhichData():
@@ -88,6 +93,11 @@ class ManageData:
         if kind == 'json':
             self.DumpJson(indent = indent)
 
+    '''
+    - It looks like this method should not have the 'full_key' option
+    - Need write a new method, ReadHDF5Key so that the interface is homogeneous across types
+    - Like this there is no easy way to check whether a specific path exists in a h5 file
+    '''
     def Read(self, kind = 'dill', full_key = None):
         if kind not in ['hdf5', 'dill', 'json']:
             raise Exception("Parameter 'kind' must be in ['hdf5','dill','json']")        
@@ -117,6 +127,7 @@ class ManageData:
             file_out = self.dump_file
             
         _out_f = h5py.File(file_out, "a")
+        ## Need to check if this group is already there...
         _grp = _out_f.create_group(self.__class__.__name__)
             
         for _key in self.data_dictionary:
@@ -152,6 +163,13 @@ class ManageData:
             return True
         else:
             return False
+
+    def IsThereKeyHDF5(self, full_key):
+        h5_file = h5py.File(self.dump_file, 'r+')
+        is_there_key = full_key in h5_file.keys()
+        h5_file.close()
+        return is_there_key
+        
 
     def ReadHDF5(self, full_key = None):
         if full_key is None:
