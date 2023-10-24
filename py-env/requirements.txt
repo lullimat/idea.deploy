@@ -28,5 +28,6 @@ jupyterlab-mathjax2
 jupyterlab-vega3
 ipykernel
 ipyparallel
+ipympl
 python-sat[pblib,aiger]
 networkx[all]
