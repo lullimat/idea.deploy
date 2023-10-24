@@ -280,6 +280,11 @@ then
     jupyter nbextension install --py ipyparallel
     jupyter nbextension enable --py ipyparallel
 
+    pip install --upgrade jupyterlab
+    jupyter labextension install @jupyter-widgets/jupyterlab-manager
+    jupyter labextension install jupyter-matplotlib
+    jupyter nbextension enable --py widgetsnbextension
+    
     ## Adding virtual environemtn to jupyter
     ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
     ## --env ${CUDA_EXPORT}
