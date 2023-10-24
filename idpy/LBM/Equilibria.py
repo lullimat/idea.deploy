@@ -40,7 +40,7 @@ from functools import reduce
 
 class GeneralizedHermiteEquilibira:
     def __init__(self, xi_stencil = None,
-                 root_pop = 'f', root_n = 'n', root_u = 'u', root_w = 'w'):
+                 root_pop = 'q', root_n = 'n', root_u = 'u', root_w = 'w'):
         if xi_stencil is None:
             raise Exception("Missing argument 'xi_stencil'")
 
