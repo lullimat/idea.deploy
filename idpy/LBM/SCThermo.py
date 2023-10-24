@@ -74,7 +74,7 @@ def FindZeroRanges(func, n_range, n_bins, n_delta, debug_flag = False):
     return zero_ranges
 
 def FindExtrema(func, f_arg, arg_range = (0.01,3.), arg_bins = 256):
-    d_func = lambda f_arg_: diff(func,f_arg).subs(f_arg, f_arg_)
+    d_func = lambda f_arg_: float(diff(func,f_arg).subs(f_arg, f_arg_).evalf())
     arg_delta = (arg_range[1] - arg_range[0])/arg_bins
     zero_ranges = FindZeroRanges(d_func, arg_range, arg_bins, arg_delta)
 
@@ -160,7 +160,8 @@ class ShanChen:
         negative pressures
         '''
         if self.extrema[1][1] > 0:
-            func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
+            func_f = lambda f_arg_: \
+                float((self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1]).evalf())
             # Looking for the LEFT limit starting from ZERO
             # and ending after the first stationary point
             arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0])
@@ -171,7 +172,8 @@ class ShanChen:
             
         # Looking for the RIGHT limit starting from the RIGHT extremum
         # that is certainly at the LEFT of the value we are looking for
-        func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[0][1])
+        func_f = lambda f_arg_: \
+            float((self.P_subs.subs(self.n, f_arg_) - self.extrema[0][1]).evalf())
         arg_swap = bisect(func_f, self.extrema[1][0] + self.n_eps, self.range_ext + self.n_eps)
         p_swap = self.P_subs.subs(self.n, arg_swap)
         coexistence_range.append((arg_swap, p_swap))
@@ -237,8 +239,8 @@ class ShanChen:
             arg_delta = (arg_range[1] - arg_range[0])/arg_bins
             
             delta_func_f = (lambda arg_: 
-                            (self.SC.P_subs.subs(self.SC.n, arg_) - 
-                             self.SC.P_subs.subs(self.SC.n, arg_range[0])))
+                            float((self.SC.P_subs.subs(self.SC.n, arg_) - 
+                                   self.SC.P_subs.subs(self.SC.n, arg_range[0])).evalf()))
             
             zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta,
                                          debug_flag = False)
