@@ -76,10 +76,10 @@ def SetDefaultFonts(rc,
 
 def SetAxTicksFont(ax, fs):
     for tick in ax.xaxis.get_major_ticks():
-        tick.label.set_fontsize(fs)
+        tick.label1.set_fontsize(fs)
 
     for tick in ax.yaxis.get_major_ticks():
-        tick.label.set_fontsize(fs)
+        tick.label1.set_fontsize(fs)
         
 def SetAxPanelLabel(ax, label, fs, x_pos = 0.015, y_pos = 0.91, pos=None, *args, **kwargs):
     if pos is not None and pos == 'ul':
