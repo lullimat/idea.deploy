@@ -773,14 +773,17 @@ class IdpyStencil:
                         )
         return _set_dict
 
+    """
+    Deprecated ?
+    """
     def GetEquilibriumHermiteSetSYMT(self, order = 2, root_xi_sym = '\\xi'):
-        _in_dict = GetEquilibriumHermiteSet(order = order, root_xi_sym = root_xi_sym)
+        _in_dict = self.GetEquilibriumHermiteSet(order = order, root_xi_sym = root_xi_sym)
         _out_dict = {0: _in_dict[0].T, 1: _in_dict[1].T}
         for _k in range(2, order + 1):
             _swap_dict = {}
             for _i, _index_tuple in enumerate(TaylorTuples(list(range(self.D)), _k)):
                 _swap_dict[_index_tuple] = _in_dict[_k].T[:,_i]                
-            _out_dict[_k] = SymmetricTensor(_swap_dict, self.D, _k)
+            _out_dict[_k] = SymmetricTensor(c_dict=_swap_dict, d=self.D, rank=_k)
 
         return _out_dict
 
