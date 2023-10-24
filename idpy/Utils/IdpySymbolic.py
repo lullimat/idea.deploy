@@ -30,9 +30,11 @@ Provides some functions and classes for symbolic manipulations
 '''
 
 import sympy as sp
+import numpy as np
 from functools import reduce
 from idpy.Utils.Geometry import FlipVector, IsSameVector
 from idpy.Utils.Statements import AllTrue
+from idpy.Utils.Combinatorics import GetUniquePermutations
 
 '''
 Function MergeTuples:
@@ -194,6 +196,10 @@ class SymmetricTensor:
                             self.d, _b.d)
 
         if _b.rank != self.rank:
+            """
+            Do I need to manage the case where each component of the symmetric tensor is still
+            a tenorial quantity, an object of the class sympy.Matrix ?
+            """
             if False:
                 raise Exception('Ranks of the two SymmetricTensor differ!',
                                 self.rank, _b.rank)
@@ -208,13 +214,42 @@ class SymmetricTensor:
             list_ttuples_B = TaylorTuples(list(range(self.d)), B.rank)
 
             """
-            I need to sum over all tuples, includin the symmetric ones
+            I need to sum over all tuples, including the symmetric ones
             """
+            contraction_dict = {}
             for ttuple_diff in list_ttuples_diff:
-                print(ttuple_diff)
-                for ttuple_B in list_ttuples_B:
-                    print(ttuple_B)
 
+                partial_sum = 0
+                for ttuple_B in list_ttuples_B:
+                    print(ttuple_diff, ttuple_B)
+                    elems_tuple, count_elems = np.unique(ttuple_B, return_counts=True)
+                    """
+                    Now we cycle on all possible symmetric realization of the ttuple_B
+                    """
+                    elems_list = list(zip(elems_tuple, count_elems))
+                    elems_list = elems_list[1:] if len(elems_list) > 1 else elems_list
+                    print("elems_list:", elems_list)
+                    """
+                    The solution for the equal rank case below looks less readable
+                    But it seems more elegant
+                    """
+
+                    for symm_ttuple_B in GetUniquePermutations(elems_list, B.rank):
+                        symm_ttuple_B = tuple(symm_ttuple_B)
+                        partial_sum += A[ttuple_diff + symm_ttuple_B] * B[symm_ttuple_B]
+                        print("\t", symm_ttuple_B, partial_sum)
+                    print()
+
+                contraction_dict[ttuple_diff] = partial_sum
+                print()
+            return SymmetricTensor(c_dict = contraction_dict, d=self.d, rank=rank_diff)
+
+        '''
+        This routine is written in order to handle the contraction of objects from the class
+        SymmetricTensor such that each component can be an object of the sympy class Matrix
+        This is used to contain all the values of the Hermite polynomials associated to different
+        stencil vectors
+        '''
         if _b.rank == self.rank:
             _largest_shape = 0
             _shapes = [self.shape, _b.shape]
@@ -235,7 +270,10 @@ class SymmetricTensor:
             '''
             Full contraction
             '''
-            _contraction = sp.Matrix([0] * _largest_shape[0])
+            _contraction = \
+                sp.Matrix([0] * _largest_shape[0]) \
+                if _largest_shape is not None else 0
+            
             ##for _tuple in TaylorTuples(list(range(self.d)), self.rank):
             for _tuple in self.c_dict:
                 _is_symmetric_tuple = True
@@ -250,6 +288,10 @@ class SymmetricTensor:
                 if _is_symmetric_tuple:
                     _contraction += _product(self[_tuple], _b[_tuple])
                 else:
+                    """
+                    Need to double check whether multiplying by the factorial of the
+                    rank is the correct procedure
+                    """
                     _contraction += sp.factorial(self.rank) * _product(self[_tuple], _b[_tuple])
 
             return (_contraction if not _symt_out else
@@ -297,6 +339,40 @@ class SymmetricTensor:
 
         return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
 
+    def __sub__(self, _b):
+        if _b.__class__.__name__ != self.__class__.__name__:
+            raise Exception('Summation is only defined between SymmetricTensor(s)')
+        
+        if _b.d != self.d:
+            raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+                            self.d, _b.d)
+        if _b.rank != self.rank:
+            raise Exception('Ranks of the two SymmetricTensor differ!',
+                            self.rank, _b.rank)
+
+        _largest_shape = 0
+        _shapes = [self.shape, _b.shape]
+        _shapes_types = [type(self.shape), type(_b.shape)]
+        _largest_shape = None
+
+        if int in _shapes_types and tuple in _shapes_types:
+            _product = lambda x, y: x * y
+            for _i, _ in enumerate(_shapes_types): 
+                if _ == tuple:
+                    _largest_shape = _shapes[_i]
+        elif AllTrue([_ == tuple for _ in _shapes_types]):
+            if self.shape != _b.shape:
+                raise Exception("Cannot perform the element-wise product")
+        
+        '''
+        Subtraction
+        '''
+        _sum_dict = {}
+        for _key in self.c_dict:
+            _sum_dict[_key] = self[_key] - _b[_key]
+
+        return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
+    
 def GetASymmetricTensor(dim, order, root_sym = 'A'):
     _taylor_indices = TaylorTuples(list(range(dim)), order)
     _swap_dict = {}
