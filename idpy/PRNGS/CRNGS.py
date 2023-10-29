@@ -577,8 +577,8 @@ class CRNGS(IdpySims):
         else:
             Idea.Deploy([self.sims_idpy_memory['output'],
                          self.sims_idpy_memory['seeds'],
-                         np.int32(reps)])            
-            return self.sims_idpy_memory['output'].D2H()        
+                         np.int32(reps)])
+            return self.sims_idpy_memory['output'].D2H()
 
 '''
 Meta-Programming functions
@@ -1362,6 +1362,38 @@ class F_RandomIntegerUnbiasedLemire(IdpyFunction):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
         self.params = {'CRNGType * l_seed': [], 'CRNGType range': []}
         self.functions[IDPY_T] = """
+        CRNGType t = (-range) % range;
+        UINT64 m = 0;
+        CRNGType l = 0;
+        do {
+            F_CRNG(l_seed);
+            m = ((UINT64) (*l_seed)) * ((UINT64) (range));
+            l = ((CRNGType)(m));
+        } while (l < t);
+        return ((CRNGType) (m >> 32));
+        """
+
+class F_RandomIntegerUnbiasedLemireMACRO(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed': []}
+        self.functions[IDPY_T] = """
+        CRNGType t = (-CRNG_Integers_range) % CRNG_Integers_range;
+        UINT64 m = 0;
+        CRNGType l = 0;
+        do {
+            F_CRNG(l_seed);
+            m = ((UINT64) (*l_seed)) * ((UINT64) (CRNG_Integers_range));
+            l = ((CRNGType)(m));
+        } while (l < t);
+        return ((CRNGType) (m >> 32));
+        """        
+
+class F_RandomIntegerUnbiasedLemire_BUG(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'RANDType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'CRNGType * l_seed': [], 'CRNGType range': []}
+        self.functions[IDPY_T] = """
         F_CRNG(l_seed);
         UINT64 m = ((UINT64) (*l_seed)) * ((UINT64) range);
         CRNGType l = ((CRNGType) m);
@@ -1381,8 +1413,8 @@ class F_RandomIntegerUnbiasedLemire(IdpyFunction):
         }
         return m >> 32;
         """
-
-class F_RandomIntegerUnbiasedLemireMACRO(IdpyFunction):
+        
+class F_RandomIntegerUnbiasedLemireMACRO_BUG(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
         self.params = {'CRNGType * l_seed': []}
@@ -1406,7 +1438,7 @@ class F_RandomIntegerUnbiasedLemireMACRO(IdpyFunction):
         }
         return m >> 32;
         """        
-
+        
 class F_Norm(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
