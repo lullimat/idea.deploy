@@ -105,6 +105,19 @@ $ idpy-jupyter-lab
 
 8. Copy and paste the url from the terminal in your browser to access and execute the notebook
 
+### Cleaning the Virtual Environment (and .bashrc)
+1. Go to the **idea.deploy** repository directory. If you installed the aliases sourced from your .bashrc you can type
+
+```bash
+$ idpy-go
+```
+
+2. Run the cleaning script
+
+```bash
+$ bash idpy-clean.sh
+```
+
 ### Details
 - The alias "idpy-jupyter" launches a Jupyter notebook server (preferably) on the port 4379 with the "--no-browser" option
 - The alias "idpy-jupyter-forward remotehost" forwards to your computer the port 4379 (supposedly) used on the "remotehost" computer by the jupyter session opened within the idea.deploy python virtual environment
