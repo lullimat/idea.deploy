@@ -5,7 +5,7 @@
 **Changes are being pushed quite frequently.**
 **Please, keep on pulling the updates, either with your git manager software of choice or by means of the command**
 ```bash
-$ git pull
+git pull
 ```
 **in order to be able to use the latest paper repository for the works "The exact evaluation of hexagonal spin-networks and topological quantum neural networks" and "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
 
@@ -53,57 +53,74 @@ At the moment the main code base for the project is written in python and it hea
 
 2. Clone the repository
 ```bash
-$ git clone https://github.com/lullimat/idea.deploy.git
+git clone https://github.com/lullimat/idea.deploy.git
 ```
 
 3. Enter the repository
 ```bash
-$ cd idea.deploy
+cd idea.deploy
 ```
 
 4. Install the virtual environment
 ```bash
-$ bash idpy-init.sh
+bash idpy-init.sh
 ```
 
  If you opted for installing the aliases either execute 
   ```bash
-  $ source ~/.bashrc
+  source ~/.bashrc
   ```
  
  or open a new terminal session and type ```idpy-go``` to reach the idea.deploy directory
 
 ```bash
-$ idpy-go
+idpy-go
 ```
 
 5. Type ```idpy-load``` to load the python virtual environment
    
 ```bash
-$ idpy-load
+idpy-load
 ```
 
 6. Go to the ```papers``` directory and execute ```python idpy-papers.py``` to list the available papers and select the one you wish to clone from its own git repository
 
 ```bash
-$ cd papers
-$ python idpy-papers.py
+cd papers
+```
+```bash
+python idpy-papers.py
 ```
 
 7. ```cd``` into the cloned directory and launch the Jupyter or Jupyter Lab server
 
 ```bash
-$ cd [cloned-git-paper-repository]
-$ idpy-jupyter
+cd [cloned-git-paper-repository]
+```
+```bash
+idpy-jupyter
 ```
 
 or
 
 ```bash
-$ idpy-jupyter-lab
+idpy-jupyter-lab
 ```
 
 8. Copy and paste the url from the terminal in your browser to access and execute the notebook
+
+### Cleaning the Virtual Environment (and .bashrc)
+1. Go to the **idea.deploy** repository directory. If you installed the aliases sourced from your .bashrc you can type
+
+```bash
+idpy-go
+```
+
+2. Run the cleaning script
+
+```bash
+bash idpy-clean.sh
+```
 
 ### Details
 - The alias "idpy-jupyter" launches a Jupyter notebook server (preferably) on the port 4379 with the "--no-browser" option
