@@ -5,7 +5,7 @@
 **Changes are being pushed quite frequently.**
 **Please, keep on pulling the updates, either with your git manager software of choice or by means of the command**
 ```bash
-$ git pull
+git pull
 ```
 **in order to be able to use the latest paper repository for the works "The exact evaluation of hexagonal spin-networks and topological quantum neural networks" and "Metastable and Unstable Dynamics in multi-phase lattice Boltzmann"**
 
