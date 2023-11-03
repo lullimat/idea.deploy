@@ -7,41 +7,69 @@ source .idpy-env
 
 echo "Welcome to idea.deploy!"
 echo
-echo "Checking if conda is installed"
-CONDA_F=$(conda -V 1>/dev/null 2>/dev/null || echo 0 && echo 1)
-PACKAGE_INSTALL=
-
-if ((CONDA_F))
-then
-    echo "conda is found"
-fi
-
-echo
 
 echo "Selecting PyPI/pythonhosted servers"
+echo "Please select the region/servers for downloading python packages"
+echo
+for((SERVER_NAME_I=0; SERVER_NAME_I<${#PYHOSTED_SERVERS[@]}; SERVER_NAME_I++))
+do
+    echo "${SERVER_NAME_I}) ${PYHOSTED_SERVERS[${SERVER_NAME_I}]}/${PYPI_SERVERS[${SERVER_NAME_I}]}"
+done
+echo "$((${#PYPI_SERVERS[@]}))) for custom addresses"
+echo
 
-function CheckPing { ping -c 2 ${1} 2>/dev/null 1>/dev/null && echo 1 || echo 0; }
+while true
+do
+    read -p "Enter selection (press 'return' for default 0): " SELECTED_SERVER
+    if [ -z ${SELECTED_SERVER} ]
+    then
+        SELECTED_SERVER=0
+    fi
 
-USE_PYPI_SERVER=${PYPI_SERVERS[0]}
-USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[0]}
-PIP_SERVER_OPTION=""
+    if((SELECTED_SERVER >= 0 && SELECTED_SERVER <= ${#PYPI_SERVERS[@]}))
+    then
+        break
+    else
+        echo
+        echo "Please enter an integer between 0 and $((${#PYPI_SERVERS[@]}))"
+        echo
+    fi
+done
+echo
 
-if (($(CheckPing "www.google.com") == 0))
+if((SELECTED_SERVER < ${#PYPI_SERVERS[@]}))
 then
-    USE_PYPI_SERVER=${PYHOSTED_SERVERS[1]}
-    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[1]}
-    PIP_SERVER_OPTION="-i http://${USE_PYPI_SERVER}/simple --trusted-host ${USE_PYPI_SERVER}"
+    USE_PYPI_SERVER=${PYPI_SERVERS[${SELECTED_SERVER}]}
+    USE_PYHOSTED_SERVER=${PYHOSTED_SERVERS[${SELECTED_SERVER}]}
+    PIP_SERVER_OPTION=${PIP_SERVER_OPTION_LIST[${SELECTED_SERVER}]}
+elif((SELECTED_SERVER == ${#PYPI_SERVERS[@]}))
+then
+    echo "If you wish to add this choice as one of the default options you can modify"
+    echo "the variables 'PYPI_SERVERS', 'PYHOSTED_SERVERS' and 'PIP_SERVER_OPTION_LIST'"
+    echo "in the file '.idpy-env'"
+    echo    
+    echo "Please insert the servers addresses and options"
+    read -p "Pythonhosted server: " USE_PYHOSTED_SERVER
+    read -p "Pypi server: " USE_PYPI_SERVER
+    read -p "Pip server options: " PIP_SERVER_OPTION
+    if [ -z ${PIP_SERVER_OPTION} ]
+    then
+        PIP_SERVER_OPTION=""
+    fi
 fi
 echo
 
+WGET_PYOPENCL_2019=https://${USE_PYHOSTED_SERVER}/packages/1b/0e/f49c0507610aae0bc2aba6ad1e79f87992d9e74e6ea55af23e436075502e/pyopencl-2019.1.tar.gz
 WGET_PYOPENCL_2020=https://${USE_PYHOSTED_SERVER}/packages/a1/b5/c32aaa78e76fefcb294f4ad6aba7ec592d59b72356ca95bcc4abfb98af3e/pyopencl-2020.2.tar.gz
 WGET_PYOPENCL_2021=https://${USE_PYHOSTED_SERVER}/packages/71/2f/e5c0860f86f8ea8d8044db7b661fccb954c200308d94d982352592eb88ee/pyopencl-2021.1.2.tar.gz
+WGET_PYOPENCL_2022=https://${USE_PYHOSTED_SERVER}/packages/dd/4c/7f60601cb3e55d21cff151da2121d7d19e8f9f69e3519dc8fca2593668b2/pyopencl-2022.3.1.tar.gz
 WGET_PYOPENCL=${WGET_PYOPENCL_2021}
 
 WGET_PYCUDA_2019=https://${USE_PYHOSTED_SERVER}/packages/5e/3f/5658c38579b41866ba21ee1b5020b8225cec86fe717e4b1c5c972de0a33c/pycuda-2019.1.2.tar.gz
 WGET_PYCUDA_2020=https://${USE_PYHOSTED_SERVER}/packages/46/61/47d3235a4c13eec5a5f03594ddb268f4858734e02980afbcd806e6242fa5/pycuda-2020.1.tar.gz
 WGET_PYCUDA_2021=https://${USE_PYHOSTED_SERVER}/packages/5a/56/4682a5118a234d15aa1c8768a528aac4858c7b04d2674e18d586d3dfda04/pycuda-2021.1.tar.gz
-WGET_PYCUDA=${WGET_PYCUDA_2021}
+WGET_PYCUDA_2022=https://${USE_PYHOSTED_SERVER}/packages/78/09/9df5358ffb74d225243b56a65ffe196de481fcd8f731f55e41f2d5d36015/pycuda-2022.2.2.tar.gz
+WGET_PYCUDA=${WGET_PYCUDA_2022}
 
 TAR_PYOPENCL=$(echo ${WGET_PYOPENCL} | tr '/' ' ' | awk '{print($NF)}')
 DIR_PYOPENCL=${TAR_PYOPENCL:0:${#TAR_PYOPENCL} - 7}
@@ -71,9 +99,16 @@ PY3p6_F=$(command -v python3.6 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p7_F=$(command -v python3.7 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p8_F=$(command -v python3.8 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p9_F=$(command -v python3.9 >/dev/null 2>&1 && echo 1 || echo 0)
+PY3p10_F=$(command -v python3.10 >/dev/null 2>&1 && echo 1 || echo 0)
+PY3p11_F=$(command -v python3.11 >/dev/null 2>&1 && echo 1 || echo 0)
 
 ##
-if ((${PY3p9_F}))
+if ((${PY3p10_F}))
+then
+    ID_PYTHON=python3.10
+    PY_PATH=$(which python3.10)
+    echo "Found ${PY_PATH}"
+elif ((${PY3p9_F}))
 then
     ID_PYTHON=python3.9
     PY_PATH=$(which python3.9)
@@ -142,7 +177,7 @@ fi
 #####################
 ## Checking CUDA
 echo -n "Looking for CUDA installation (for pyopencl headers):..."
-if [ -f ${VENV}/cuda_paths ]
+if [ -f ${VENV_ROOT}/cuda_paths ]
 then
     CUDA_F=0
     while IFS= read -r line
@@ -152,9 +187,9 @@ then
 	    CUDA_F=1
 	    CUDA_PATH=${line}
 	fi
-    done < ${VENV}/cuda_paths
+    done < ${VENV_ROOT}/cuda_paths
 else
-    echo "File ${VENV}/cuda_paths not found!"
+    echo "File ${VENV_ROOT}/cuda_paths not found!"
     echo "Looks like something is wrong with the installation"
     echo "Bye Bye!"
     exit 1
@@ -163,17 +198,13 @@ fi
 if ((CUDA_F))
 then
     echo "Found ${CUDA_PATH}"
-    echo ${CUDA_PATH} > ${VENV}/cuda_path_found
+    echo ${CUDA_PATH} > ${ID_CUDA_PATH_FOUND}
     CUDA_EXPORT_PATH_STRING="export PATH=\${PATH}:${CUDA_PATH}/bin"
     CUDA_EXPORT_LD_LIB_PATH_STRING="export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:${CUDA_PATH}/lib:${CUDA_PATH}/lib64"
     CHECK_CUDA_PATH_ACTIVATE=$(grep "${CUDA_EXPORT_PATH_STRING}" \
-				    ${VENV_BIN}/activate \
-				    1>/dev/null 2>/dev/null \
-				   && echo 1 || echo 0)
+        ${VENV_BIN}/activate &>/dev/null && echo 1 || echo 0)
     CHECK_CUDA_LD_PATH_ACTIVATE=$(grep "${CUDA_EXPORT_LD_LIB_PATH_STRING}" \
-				       ${VENV_BIN}/activate \
-				       1>/dev/null 2>/dev/null \
-				      && echo 1 || echo 0)
+        ${VENV_BIN}/activate &>/dev/null && echo 1 || echo 0)
 
     if((CHECK_CUDA_PATH_ACTIVATE == 0))
     then
@@ -193,7 +224,7 @@ then
     fi
 else
     echo "Not Found"
-    echo > ${VENV}/cuda_path_found
+    echo > ${VENV_ROOT}/cuda_path_found
 fi
 
 ## Check if pycuda is installed
@@ -221,7 +252,7 @@ if((VENV_F == 0))
 then
     echo "Pip installing requirements"
     pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
-    pip install -r ${VENV}/requirements.txt ${PIP_SERVER_OPTION}
+    pip install -r ${VENV_ROOT}/requirements.txt ${PIP_SERVER_OPTION}
     ## Install pycuda if cuda is found
     if ((CUDA_F && 0))
     then
@@ -249,6 +280,11 @@ then
     jupyter nbextension install --py ipyparallel
     jupyter nbextension enable --py ipyparallel
 
+    pip install --upgrade jupyterlab
+    jupyter labextension install @jupyter-widgets/jupyterlab-manager
+    jupyter labextension install jupyter-matplotlib
+    jupyter nbextension enable --py widgetsnbextension
+    
     ## Adding virtual environemtn to jupyter
     ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
     ## --env ${CUDA_EXPORT}
@@ -262,7 +298,7 @@ then
 	echo "Downloading pycuda source:..."
 	if((ISTHERE_WGET))
 	then
-	    wget -P ${VENV_SRC} ${WGET_PYCUDA}	    
+	    wget -P ${VENV_SRC} ${WGET_PYCUDA} --no-check-certificate
 	elif((ISTHERE_CURL))
 	then
 	    mkdir ${VENV_SRC}
@@ -308,7 +344,7 @@ then
 	echo "Downloading pyopencl source:..."
 	if((ISTHERE_WGET))
 	then
-	    wget -P ${VENV_SRC} ${WGET_PYOPENCL}
+	    wget -P ${VENV_SRC} ${WGET_PYOPENCL} --no-check-certificate
 	elif((ISTHERE_CURL))
 	then	    
 	    mkdir ${VENV_SRC}
@@ -366,30 +402,14 @@ echo
 ## ALIASES
 for((ALIAS_I=0; ALIAS_I<${#IDPY_ALIASES[@]}; ALIAS_I++))
 do
-    ALIAS_STRING=${IDPY_ALIASES[ALIAS_I]}
-    ALIAS_STRING_SED=${IDPY_ALIASES_SED[ALIAS_I]}    
-    ALIAS_CHECK=$(grep "${ALIAS_STRING_SED}" ${HOME}/.bashrc \
-			1>/dev/null 2>/dev/null && echo 1 || echo 0)
-
-    if((${ALIAS_CHECK} == 0))
-    then
-	echo "${ALIAS_STRING}"
-	ALIAS_REPLY=0
-	while true
-	do
-	    read -p "Would you like to append an this alias to your ${HOME}/.bashrc? (Y/N) " yn
-	    case ${yn} in
-		[Yy]* ) ALIAS_REPLY=1; break;;
-		[Nn]* ) break;;
-		* ) echo "Please answer yes or no";;
-	    esac
-	done
-	if((${ALIAS_REPLY}))
-	then
-	    echo "${ALIAS_STRING}" >> ${HOME}/.bashrc
-	fi
-	echo "For using the alias in the present shell: source ${HOME}/.bashrc"
-    fi
-    echo
+	echo "${IDPY_ALIASES[ALIAS_I]}" >> ${VENV_ALIASES}
 done
-echo "Python virtual environment for idea.deploy initialized"
+## Appending lines at the end of the .bashrc to source the aliases
+echo "${ID_BASHRC_BANNER}" >> ${HOME}/.bashrc
+echo "${ID_BASHRC_ALIASES_OPT}" >> ${HOME}/.bashrc
+echo "${ID_BASHRC_SOURCE_ALIASES}" >> ${HOME}/.bashrc
+
+echo "For using the alias in the present shell: source ${HOME}/.bashrc"
+
+echo "Python virtual environment for idea.deploy initialized!"
+echo
