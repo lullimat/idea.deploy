@@ -49,12 +49,61 @@ For the time being the project has been tested only on some Linux platforms (ope
 At the moment the main code base for the project is written in python and it heavily relies, among other modules, on PyCUDA [(https://documen.tician.de/pycuda/)](https://documen.tician.de/pycuda/), PyOpenCL [(https://documen.tician.de/pyopencl/)](https://documen.tician.de/pyopencl/) and numpy [(https://numpy.org)](https://numpy.org). In order to keep the user computer as clean as possible a python virtual environment is created through the script **idpy-init.sh** and the necessary dependencies downloaded and installed. PyCUDA and PyOpenCL are both compiled from source when possible. The python environment and the other optional system modifications (like new aliases in the .bashrc) can be cleaned by using the script **idpy-clean.sh**. Since erasing files must be taken with care, each "rm" command is executed only after the user reviews the files/directories that will be removed (please check the terms of the license). The purpose is to fully clean the changes performed by the use of **idpy-init.sh**
 
 ### Typical usage for reproducing the results reported in a paper
-- Install the virtual environment: **bash idpy-init.sh**, reply to the questions and follow the prompted instructions
-- If you opted for installing the aliases either execute "source ~/.bashrc" or open a new terminal session and type "idpy-go" to reach the idea.deploy directory
-- Type "idpy-load" to load the python virtual environment
-- Go to the './papers' directory and execute "python idpy-papers.py" to list the available papers and select the one you wish to clone from its own git repository
-- "cd" into the cloned directory and launch the Jupyter server "idpy-jupyter"
-- copy and paste the url from the terminal in your browser to access and execute the notebook
+1. Open a terminal session and go to the directory you want to clone the repository to
+
+2. Clone the repository
+```bash
+$ git clone https://github.com/lullimat/idea.deploy.git
+```
+
+3. Enter the repository
+```bash
+$ cd idea.deploy
+```
+
+4. Install the virtual environment
+```bash
+$ bash idpy-init.sh
+```
+
+ If you opted for installing the aliases either execute 
+  ```bash
+  $ source ~/.bashrc
+  ```
+ 
+ or open a new terminal session and type ```idpy-go``` to reach the idea.deploy directory
+
+```bash
+$ idpy-go
+```
+
+5. Type ```idpy-load``` to load the python virtual environment
+   
+```bash
+$ idpy-load
+```
+
+6. Go to the ```papers``` directory and execute ```python idpy-papers.py``` to list the available papers and select the one you wish to clone from its own git repository
+
+```bash
+$ cd papers
+$ python idpy-papers.py
+```
+
+7. ```cd``` into the cloned directory and launch the Jupyter or Jupyter Lab server
+
+```bash
+$ cd [cloned-git-paper-repository]
+$ idpy-jupyter
+```
+
+or
+
+```bash
+$ idpy-jupyter-lab
+```
+
+8. Copy and paste the url from the terminal in your browser to access and execute the notebook
 
 ### Details
 - The alias "idpy-jupyter" launches a Jupyter notebook server (preferably) on the port 4379 with the "--no-browser" option
@@ -87,7 +136,7 @@ Clearly, I am willing to collaborate with those researchers who would like to po
 ## To do (short-term)
 At the moment the scripts can create a python virtual environment only for Linux and MacOS: no testing of the **idpy-init.sh** and **idpy-clean.sh** has been performed so far on Windows Linux Subsystem. Most probably the best approach will be to rewrite the above scripts in python so that they will be Os independent. However, quite a few implementation details depend on the operative system, especially as far as compilers are concerned, e.g. escaping spaces when passing options flags and so on.
 
-Matteo Lulli, December 17th 2022
+Matteo Lulli, November 3rd 2023
 [www.ideadeploy.io](www.ideadeploy.io)
 [www.lullimat.org](https://www.lullimat.org)
 matteo.lulli@gmail.com
