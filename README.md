@@ -49,6 +49,8 @@ For the time being the project has been tested only on some Linux platforms (ope
 At the moment the main code base for the project is written in python and it heavily relies, among other modules, on PyCUDA [(https://documen.tician.de/pycuda/)](https://documen.tician.de/pycuda/), PyOpenCL [(https://documen.tician.de/pyopencl/)](https://documen.tician.de/pyopencl/) and numpy [(https://numpy.org)](https://numpy.org). In order to keep the user computer as clean as possible a python virtual environment is created through the script **idpy-init.sh** and the necessary dependencies downloaded and installed. PyCUDA and PyOpenCL are both compiled from source when possible. The python environment and the other optional system modifications (like new aliases in the .bashrc) can be cleaned by using the script **idpy-clean.sh**. Since erasing files must be taken with care, each "rm" command is executed only after the user reviews the files/directories that will be removed (please check the terms of the license). The purpose is to fully clean the changes performed by the use of **idpy-init.sh**
 
 ### Typical usage for reproducing the results reported in a paper
+**In this moment we are merging the ```devel``` and the ```master``` branches. Please, use the ```devel``` branch as the default for now (see below)**
+
 1. Open a terminal session and go to the directory you want to clone the repository to
 
 2. Clone the repository
@@ -59,6 +61,11 @@ git clone https://github.com/lullimat/idea.deploy.git
 3. Enter the repository
 ```bash
 cd idea.deploy
+```
+
+3a. **Temporary:** Change to ```devel``` branch
+```bash
+git checkout devel
 ```
 
 4. Install the virtual environment
