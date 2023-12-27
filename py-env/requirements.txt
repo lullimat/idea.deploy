@@ -29,5 +29,6 @@ jupyterlab-vega3
 ipykernel
 ipyparallel
 ipympl
+nbconvert
 python-sat[pblib,aiger]
 networkx[all]
