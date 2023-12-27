@@ -25,6 +25,8 @@ __maintainer__ = "Matteo Lulli"
 __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
+import sympy as sp
+
 from idpy.IdpyCode import IDPY_T
 from idpy.IdpyCode.IdpyCode import IdpyKernel
 from idpy.IdpyCode.IdpyUnroll import _get_seq_macros, _get_seq_vars, _codify_newl
@@ -890,3 +892,196 @@ class K_SRTCollideStreamMeta(IdpyKernel):
         }
         """
         
+class K_IsotropyFilter(IdpyKernel):
+    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+                 optimizer_flag = None, XIStencil = None, use_ptrs = False, search_depth=6,
+                 declare_const_dict = {'new_pop': True}, output_pop = 'pop_iso',
+                 ordering_lambda_pop = None, collect_mul = False, headers_files=['math.h']):
+
+        self.expect_lambda_args = 2
+        
+        if ordering_lambda_pop is None:
+            raise Exception("Missing argument 'ordering_lambda_pop'")
+        elif ordering_lambda_pop.__code__.co_argcount != self.expect_lambda_args:
+            raise Excpetion(
+                "The number of arguments for 'ordering_lambda_pop' should be ", 
+                self.expect_lambda_args
+            )
+
+        self.idpy_stencil = IdpyStencil(XIStencil)
+        
+        IdpyKernel.__init__(self, custom_types = custom_types, constants = constants,
+                            f_classes = f_classes, optimizer_flag = optimizer_flag, 
+                            headers_files=headers_files)
+
+        '''
+        Kernel Parameters declaration
+        '''
+        self.SetCodeFlags('g_tid')
+        self.params = {'PopType * pop': ['global', 'restrict', 'const'], 
+                       'PopType * ' + output_pop: ['global', 'restrict']}
+        
+
+        self.SetDeclaredVariables()
+        self.SetDeclaredConstants()
+
+        code_body = """"""
+
+        """
+        Computing the non-equilibrium moments
+        """
+        code_body += \
+            self.idpy_stencil.MomentsHermiteCode(
+                declared_variables = self.declared_variables,
+                declared_constants = self.declared_constants,
+                arrays = ['pop'], arrays_types = ['PopType'],
+                root_neq_mom = 'neq_m', mom_type = 'PopType',
+                lex_index = 'g_tid', keep_read = True,
+                ordering_lambdas = [ordering_lambda_pop],
+                use_ptrs = use_ptrs,
+                declare_const_dict = {'arrays_xi': True, 'moments': False}
+            )
+
+        """
+        Normalize all moments
+        """
+        code_normalize = """"""
+        for q in range(1, self.idpy_stencil.Q):
+            code_normalize += "neq_m_0_" + str(q) + " /= neq_m_0_0;"
+            code_normalize += _codify_newl
+
+        code_body += code_normalize + _codify_newl
+
+        """
+        Define the new populations
+        """
+        M_dict = self.idpy_stencil.GetInvertibleHermiteSet(search_depth=search_depth)
+        M = M_dict['M']
+
+        f_i = sp.Matrix([sp.Symbol('f_{' + str(i) + '}') for i in range(9)])
+        D=2
+        root_xi_sym = '\\xi'
+        xi_sym_list = [sp.Symbol(root_xi_sym + '_' + str(_)) for _ in range(D)]
+        
+        polys = {'xi_xx': xi_sym_list[0] ** 2, 
+                 'xi_xy': xi_sym_list[0] * xi_sym_list[1], 
+                 'xi_yy': xi_sym_list[1] ** 2,
+                 'xi_xyy': (xi_sym_list[0] ** 1) * (xi_sym_list[1] ** 2),
+                 'xi_xxy': (xi_sym_list[0] ** 2) * (xi_sym_list[1] ** 1)}
+        
+        mom_list = sp.Matrix([sp.Symbol('m_{' + str(i) + '}') for i in range(9)])
+        mom_list_i = sp.Matrix([sp.Symbol('m_{' + str(i) + '}^{(i)}') for i in range(9)])
+        
+        polys_coeffs = {}
+        
+        for label in polys:
+            coeffs_list = []
+            for xi in self.idpy_stencil.XIs:
+                coeff_swap = polys[label]
+                for i in range(len(xi)):
+                    coeff_swap = coeff_swap.subs(xi_sym_list[i], xi[i])
+                coeffs_list += [coeff_swap]
+                
+            polys_coeffs[label] = sp.Matrix(coeffs_list).T
+        
+        eq_xy = (polys_coeffs['xi_xy'] * f_i)[0]
+        eq_xx_yy = (polys_coeffs['xi_xx'] * f_i)[0] - (polys_coeffs['xi_yy'] * f_i)[0]
+        eq_xyy = (polys_coeffs['xi_xyy'] * f_i)[0]
+        eq_xxy = (polys_coeffs['xi_xxy'] * f_i)[0]
+
+        M_H = M * f_i - mom_list      
+        M_new = sp.Matrix(M_H[:4] + [eq_xy - mom_list_i[4], eq_xx_yy - mom_list_i[5]] + M_H[6:])
+        M_new = sp.Matrix(M_H[:6] + [eq_xxy - mom_list_i[6], eq_xyy - mom_list_i[7]] + M_H[8:])
+        M_new = \
+            sp.Matrix(M_H[:4] + [eq_xy - mom_list_i[4], eq_xx_yy - mom_list_i[5]] + 
+                      [eq_xxy - mom_list_i[6], eq_xyy - mom_list_i[7]] + M_H[8:])
+        self.M_H = M_H
+
+        """
+        imposing the isotropy conditions for the new populations
+        """
+        sol_dict_new = sp.solve(M_new, f_i)
+        sol_f_new = sp.Matrix([sol_dict_new[_] for _ in sol_dict_new])
+        sol_f_new = sol_f_new.subs(mom_list_i[4], mom_list[1] * mom_list[2])
+        sol_f_new = sol_f_new.subs(mom_list_i[5], (mom_list[1] ** 2) - (mom_list[2] ** 2))
+        sol_f_new = sol_f_new.subs(
+            mom_list_i[6], 
+            2 * mom_list[4] * mom_list[1] + (mom_list[3] + sp.Rational(1,3)) * mom_list[2] -2 * mom_list[2] * (mom_list[1] ** 2)
+        )
+
+        sol_f_new = sol_f_new.subs(
+            mom_list_i[7], 
+            2 * mom_list[4] * mom_list[2] + (mom_list[5] + sp.Rational(1,3)) * mom_list[1] -2 * mom_list[1] * (mom_list[2] ** 2)
+        )        
+
+        self.sol_f_new = sol_f_new
+
+        mom_list = sp.Matrix([sp.Symbol('m_{' + str(i) + '}') for i in range(9)])
+        mom_vars = {mom_list[i]: '1.' if i == 0 else 'neq_m_0_' + str(i) for i in range(9)}
+        mom_vars_pow = lambda mom, pow: sp.Symbol(((mom_vars[mom] + '*') * pow)[:-1])
+        
+        evalf_sols = []
+        for sol in sol_f_new:
+            monomials = sp.Add.make_args(sol)
+        
+            sol_evalf_tmp = 0
+        
+            for mono in monomials:
+                mono_swap = mono
+                for pow_mono in mono_swap.atoms(sp.Pow):
+                    base, exp = pow_mono.as_base_exp()
+                    mono_swap = mono_swap.subs(base ** exp, mom_vars_pow(base, exp)).evalf()
+        
+                for mom in mom_list:
+                    mono_swap = mono_swap.subs(mom, mom_vars[mom]).evalf()
+        
+                sol_evalf_tmp += mono_swap
+        
+            evalf_sols += [sol_evalf_tmp]
+
+        self.evalf_sols = evalf_sols
+
+        """
+        Computing the new populations
+        """
+        code_solutions = """"""
+        for q, pop in enumerate(evalf_sols):
+
+            _sx_hnd = "new_pop_" + str(q)
+            _dx_hnd = str(pop)
+            
+            code_solutions += \
+                _codify_declaration_const_check(
+                    _sx_hnd, _dx_hnd,
+                    "PopType",
+                    self.declared_variables,
+                    self.declared_constants,
+                    declare_const_flag = declare_const_dict['new_pop']
+                )
+        code_solutions += _codify_newl
+
+        code_body += code_solutions
+
+        """
+        Rescale and write the new populations
+        """
+        code_population_write = """"""
+        for q in range(self.idpy_stencil.Q):
+
+            _dx_hnd = "new_pop_" + str(q) + " * neq_m_0_0"
+            _sx_hnd = \
+                _array_value(output_pop, ordering_lambda_pop('g_tid', q), use_ptrs)
+            
+            code_population_write += _codify_assignment(_sx_hnd, _dx_hnd)
+
+        code_population_write += _codify_newl
+
+        code_body += code_population_write
+        
+        self.kernels[IDPY_T] = """
+        if(g_tid < V){
+        """ + \
+        code_body + \
+        """
+        }
+        """
