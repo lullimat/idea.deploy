@@ -691,10 +691,11 @@ class K_InitRadialInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag,
+                            headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
