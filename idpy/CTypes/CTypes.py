@@ -63,7 +63,9 @@ class Tenet:
     
     def End(self):
         pass
- 
+
+    def FreeMemoryDict(self, memory_dict = None):
+        pass
     '''
     Need to get the name of the system's CPU
     '''
