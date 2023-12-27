@@ -47,6 +47,7 @@ from idpy.LBM.LBMKernels import K_SetPopNUXInletDutyCycle, K_SetPopNUOutletNoGra
 Importing LBM Meta Kernels
 '''
 from idpy.LBM.LBMKernelsMeta import K_InitPopulationsMeta, K_StreamPeriodicMeta
+from idpy.LBM.LBMKernelsMeta import K_IsotropyFilter
 
 from idpy.Utils.Statements import AllTrue, OneTrue
 '''
@@ -71,6 +72,7 @@ from idpy.LBM.MultiPhaseKernels import K_Collision_ShanChenMultiPhaseWalls
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeVelocityAfterForceSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamSCMPMeta
+from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamSCMP_MRTMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ForceCollideStreamWallsSCMPMeta
 from idpy.LBM.MultiPhaseKernelsMeta import K_ComputeDensityPsiWallsMeta
@@ -1048,6 +1050,132 @@ class ShanChenMultiPhase(RootLB):
         else:
             return None
 
+    def MainLoopIsoFilter(self, time_steps, convergence_functions = [], profiling = False):
+        _all_init = []
+        for key in self.init_status:
+            _all_init.append(self.init_status[key])
+
+        if not AllTrue(_all_init):
+            print(self.init_status)
+            raise Exception("Hydrodynamic variables/populations not initialized")
+
+        _K_ComputeDensityPsiMeta = \
+            K_ComputeDensityPsiMeta(
+                custom_types = self.custom_types.Push(), 
+                constants = self.constants, f_classes = [], 
+                XIStencil = self.params_dict['xi_stencil'], 
+                use_ptrs = self.params_dict['use_ptrs'],
+                ordering_lambda = self.sims_vars['ordering']['pop'], 
+                psi_code = self.params_dict['psi_code']
+            )
+
+        _K_ForceCollideSCMPMeta = \
+            K_ForceCollideSCMPMeta(
+                custom_types = self.custom_types.Push(), 
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag,
+                XIStencil = self.params_dict['xi_stencil'], 
+                SCFStencil = self.params_dict['f_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'],
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                collect_mul = False, pressure_mode = 'compute',
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+
+        _K_IsotropyFilter = \
+            K_IsotropyFilter(
+                custom_types = self.custom_types.Push(), 
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag,
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'],
+                search_depth=6,
+                declare_const_dict = {'new_pop': True},
+                output_pop = 'pop_iso',
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                collect_mul = False
+            )
+
+        _K_StreamPeriodicMeta = \
+            K_StreamPeriodicMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [], 
+                pressure_mode = 'compute',
+                optimizer_flag = self.optimizer_flag,
+                XIStencil = self.params_dict['xi_stencil'],
+                collect_mul = False,
+                stream_mode = 'push',
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'], 
+                use_ptrs = self.params_dict['use_ptrs'],
+                root_coord = self.params_dict['root_coord'],
+                ordering_lambda = self.sims_vars['ordering']['pop']
+            )
+        
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
+
+        ### return _K_ComputeDensityPsiMeta, _K_ForceCollideStreamSCMPMeta
+        
+        self._MainLoop = \
+            _loop_class(
+                [self.sims_idpy_memory],
+                [
+                    [                        
+                        (_K_ComputeDensityPsiMeta(tenet = self.tenet,
+                                                  grid = self.sims_vars['grid'],
+                                                  block = self.sims_vars['block']),
+                         ['n', 'psi', 'pop']),
+                        
+                        (_K_ForceCollideSCMPMeta(tenet = self.tenet,
+                                                       grid = self.sims_vars['grid'],
+                                                       block = self.sims_vars['block']),
+                         ['pop', 'n', 'psi']),
+
+                        (_K_IsotropyFilter(
+                            tenet = self.tenet,
+                            grid = self.sims_vars['grid'],
+                            block = self.sims_vars['block']
+                        ), ['pop', 'pop']),                        
+
+                        (_K_StreamPeriodicMeta(
+                            tenet=self.tenet,
+                            grid=self.sims_vars['grid'],
+                            block=self.sims_vars['block']
+                        ), ['pop_swap', 'pop']),
+
+                        (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
+                    ]
+                ]
+            )
+
+        '''
+        now the loop: need to implement the exit condition
+        '''
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
+            '''
+            Very simple timing, reasonable for long executions
+            '''
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
+            
+            old_step = step
+            if len(convergence_functions):
+                checks = []
+                for c_f in convergence_functions:
+                    checks.append(c_f(self))
+
+                if OneTrue(checks):
+                    break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None
+        
 
     def MainLoopWalls(self, time_steps, convergence_functions = [], profiling = False):
         _all_init = []
