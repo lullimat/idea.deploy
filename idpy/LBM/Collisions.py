@@ -560,6 +560,148 @@ class BGK:
             
         return _swap_code
 
+    def SRTCollisionPlusGuoCode(
+            self, declared_variables = None, declared_constants = None,
+            ordering_lambda = None, order = 2,
+            dst_arrays_var = 'pop_swap',
+            stencil_obj = None, eq_obj = None,
+            guo_obj = None,
+            neq_pop = 'pop', pressure_mode = 'compute',
+            tuples_eq = [], tuples_guo = [],
+            pos_type = 'int', 
+            use_ptrs = False, collect_mul = False,
+            root_dim_sizes = 'L', root_strides = 'STR', 
+            root_coord = 'x', lex_index = 'g_tid', 
+            declare_const_dict = {'cartesian_coord_neigh': False},
+            rnd_pops = None
+    ):
+
+        '''
+        Checking that the list of declared variables is available
+        '''
+        if declared_variables is None:
+            raise Exception("Missing argument 'declared_variables'")
+        if type(declared_variables) != list:
+            raise Exception("Argument 'declared_variables' must be a list containing one list")
+        if len(declared_variables) == 0 or type(declared_variables[0]) != list:
+            raise Exception("List 'declared_variables' must contain another list!")
+    
+        '''
+        Checking that the list of declared constants is available
+        '''
+        if declared_constants is None:
+            raise Exception("Missing argument 'declared_constants'")
+        if type(declared_constants) != list:
+            raise Exception("Argument 'declared_constants' must be a list containing one list")
+        if len(declared_constants) == 0 or type(declared_constants[0]) != list:
+            raise Exception("List 'declared_constants' must contain another list!")
+        '''
+        Checking that the ordering_lambda is defined
+        '''
+        if ordering_lambda is None:
+            raise Exception("Missing argument 'ordering_lambda'")
+        
+        '''
+        Possibly I do not need this one
+        '''
+        if stencil_obj is None:
+            raise Exception("Missing argument 'stencil_obj'")
+        if eq_obj is None:
+            raise Exception("Missing argument 'eq_obj'")
+        if guo_obj is None:
+            raise Exception("Missing argument 'guo_obj'")
+        
+        '''
+        Defining and checking the variables that are needed: missing (!)
+        '''
+        _Q, _dim = stencil_obj.Q, stencil_obj.D
+        _XIs = stencil_obj.XIs
+
+        if rnd_pops is not None and type(rnd_pops) != list:
+            raise Exception("Argument 'rnd_pops' msut be a list!")
+        if rnd_pops is not None and len(rnd_pops) != _Q:
+            raise Exception("The length of 'rnd_pops'", len(rnd_pops), "does not match Q:", _Q)
+
+        _src_pop_vars = _get_seq_vars(_Q, neq_pop)
+        _dim_sizes_macros = _get_seq_macros(_dim, root_dim_sizes)
+        _dim_strides_macros = _get_seq_macros(_dim - 1, root_strides)        
+        
+        _needed_variables = \
+            [dst_arrays_var] + _src_pop_vars + _dim_sizes_macros + _dim_strides_macros
+
+        '''
+        This part does not seem useful, since I need to add the terms from
+        outside I would also need to make sure they are declared
+        '''
+        if False:
+            if rnd_pops is not None:
+                _needed_variables += rnd_pops
+        
+        _chk_needed_variables = []
+        for _ in _needed_variables:
+            _chk_needed_variables += [_ in declared_variables[0] or
+                                      _ in declared_constants[0]]
+            
+        if not AllTrue(_chk_needed_variables):
+            print()
+            for _i, _ in enumerate(_chk_needed_variables):
+                if not _:
+                    print("Variable/constant ", _needed_variables[_i], "not declared!")
+            raise Exception("Some needed variables/constants have not been declared yet (!)")
+        
+        
+        _swap_code = """"""
+        
+        if pressure_mode == 'compute':
+            '''
+            Declaring the variables for the position of src and dst
+            '''
+            for _q, _xi in enumerate(_XIs):
+                _sx_hnd = _array_value(dst_arrays_var, ordering_lambda(lex_index, _q),
+                                       use_ptrs)
+                _dx_hnd = \
+                    self.CodifySingleSRTCollisionPlusGuoSym(
+                        order = order, i = _q, eq_obj = eq_obj, guo_obj = guo_obj,
+                        neq_pop = neq_pop, tuples_eq = tuples_eq, tuples_guo = tuples_guo
+                    )
+
+                if rnd_pops is not None:
+                    _dx_hnd += ' + ' + rnd_pops[_q]
+                
+                _swap_code += _codify_assignment(_sx_hnd, _dx_hnd)
+                _swap_code += _codify_newl
+
+        '''
+        Registers-pressure mode
+        '''
+        if pressure_mode == 'registers':
+            '''
+            Here I should define all the neighbors positions at once:
+            need to add the management of the declared neighbors variables
+            '''
+            '''
+            I need to include the option to shift the neighbor index
+            in IdpyStencil in order to make the two pieces work together
+            '''
+            _swap_code += \
+                _neighbors_register_pressure_macro(
+                    _declared_variables = declared_variables,
+                    _declared_constants = declared_constants,
+                    _root_coordinate = root_coord,
+                    _lexicographic_index = lex_index,
+                    _stencil_vectors = _XIs,
+                    _dim_sizes = _dim_sizes_macros,
+                    _dim_strides = _dim_strides_macros, 
+                    _custom_type = pos_type,
+                    _exclude_zero_norm = False,
+                    _collect_mul = collect_mul,
+                    _declare_const_flag = declare_const_dict['cartesian_coord_neigh']
+                )
+            _swap_code += _codify_newl
+                
+            
+        return _swap_code
+    
     def SRTCollisionPlusGuoPushStreamWallsCode(
             self, declared_variables = None, declared_constants = None,
             ordering_lambda = None, order = 2,
