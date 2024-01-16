@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2023 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,7 +34,7 @@ import numpy as np
 from functools import reduce
 from idpy.Utils.Geometry import FlipVector, IsSameVector
 from idpy.Utils.Statements import AllTrue
-from idpy.Utils.Combinatorics import GetUniquePermutations
+from idpy.Utils.Combinatorics import GetUniquePermutations, SplitTuplePerm, cycle_list
 
 '''
 Function MergeTuples:
@@ -188,6 +188,53 @@ class SymmetricTensor:
             return self.c_dict[_index]
 
     '''
+    Implements the tensor products between fully-symmetric tensors
+    - yields a higher ranking tensor as output with the same dimension
+    '''
+    def __xor__(self, b):
+        if b.d != self.d:
+            raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+                            self.d, b.d)
+
+        A, B = self, b
+        new_rank = A.rank + B.rank
+        """
+        - I need to check if the symmetric tensor contains scalars or sympy arrays
+        - once I know which product function to use, then I need to cycle over all possible
+        indices of a fully symmetric tensor of rank 'new_rank' and take the products
+        - I need to associate the first self.rank indices to self and the remaining to b
+        """
+        _shapes = [A.shape, B.shape]
+        _shapes_types = [type(A.shape), type(B.shape)]
+        _largest_shape = None
+
+        _product, _symt_out = None, False
+        if int in _shapes_types and tuple in _shapes_types:
+            _product = lambda x, y: x * y
+            for _i, _ in enumerate(_shapes_types): 
+                if _ == tuple:
+                    _largest_shape = _shapes[_i]
+        elif AllTrue([_ == tuple for _ in _shapes_types]):
+            _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
+            _symt_out = True
+            if A.shape != B.shape:
+                raise Exception("Cannot perform the element-wise product")
+        elif AllTrue([_ == int for _ in _shapes_types]):
+            _product = lambda x, y: x * y
+        
+        ttuples_new = TaylorTuples(list(range(A.d)), new_rank)
+        swap_dict = {}
+        for t in ttuples_new:
+            t_A, t_B = tuple(t[:A.rank]), tuple(t[A.rank:])
+            t_A = t_A if len(t_A) > 1 else t_A[0]
+            t_B = t_B if len(t_B) > 1 else t_B[0]
+            
+            swap_dict[t] = _product(A[t_A], B[t_B])
+        
+        return SymmetricTensor(d=A.d, rank=new_rank, c_dict=swap_dict)
+        
+        
+    '''
     Implements a full contraction among fully-symmetric tensors
     '''
     def __mul__(self, _b):
@@ -265,11 +312,12 @@ class SymmetricTensor:
             elif AllTrue([_ == tuple for _ in _shapes_types]):
                 _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
                 _symt_out = True
+                _largest_shape=self.shape
                 if self.shape != _b.shape:
                     raise Exception("Cannot perform the element-wise product")
             elif AllTrue([_ == int for _ in _shapes_types]):
                 _product = lambda x, y: x * y
-                
+
             '''
             Full contraction
             '''
@@ -290,7 +338,11 @@ class SymmetricTensor:
                      if (v == 0 and c == self.rank) or (v > 0)]
                 
                 for p_tuple in GetUniquePermutations(perm_elems_list, self.rank):
-                    _contraction += _product(self[tuple(p_tuple)], _b[tuple(p_tuple)])
+                    ##print(p_tuple, len(p_tuple))
+                    p_tuple = tuple(p_tuple) if len(p_tuple) > 1 else p_tuple[0]
+                    ##print(self[p_tuple])
+                    ##print(_b[p_tuple])
+                    _contraction += _product(self[p_tuple], _b[p_tuple])
                     
                 if False:
                     _is_symmetric_tuple = True
@@ -397,3 +449,70 @@ def GetASymmetricTensor(dim, order, root_sym = 'A'):
         _lower_indices = reduce(lambda x, y: str(x) + str(y), _index_tuple)
         _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_" + _lower_indices)
     return SymmetricTensor(c_dict = _swap_dict, d = dim, rank = order)
+
+def GetFullyIsotropicTensor(d=None, rank=None):
+    if rank % 2:
+        raise Exception("rank must be even!")
+
+    ttuples = TaylorTuples(list(range(d)), 2)
+    values = [1 if t[0] == t[1] else 0 for t in ttuples]
+    lead_kr_2 = \
+        SymmetricTensor(d=d, rank=2, list_values=values, list_ttuples=ttuples)
+    
+    if rank == 2:
+        return lead_kr_2
+        
+    if rank > 2:        
+        root_index_list = list(range(rank))
+        index_lists = [root_index_list]
+        last_perm = root_index_list
+        
+        for i in range(rank - 2):
+            last_perm = cycle_list(last_perm, 1)
+            index_lists += [last_perm]
+
+        follow_kr_rankm2 = GetFullyIsotropicTensor(d=d, rank=rank-2)
+        
+        tuples_map = \
+            lambda in_tuple: \
+            map(lambda perm: \
+                SplitTuplePerm(in_tuple=in_tuple, 
+                               perm=perm, 
+                               split_point=2), 
+                index_lists)
+
+        summands = lambda in_tuple:\
+            map(lambda out_tuple: \
+                lead_kr_2[out_tuple[0]] * follow_kr_rankm2[out_tuple[1]], 
+                tuples_map(in_tuple))
+
+        sum_results = \
+            lambda in_tuple: reduce(lambda x, y: x + y, summands(in_tuple))        
+
+        components = TaylorTuples(list(range(d)), rank)
+        swap_dict = {}
+        for full_tuple in components:
+            ## print(full_tuple)
+            swap_dict[full_tuple] = sum_results(full_tuple)
+                    
+        return SymmetricTensor(d=d, rank=rank, c_dict=swap_dict)
+
+def GetGeneralizedKroneckerDelta(d=None, rank=None):
+    if rank % 2:
+        raise Exception("rank must be even!")
+
+    if rank == 2:
+        return GetFullyIsotropicTensor(d=d, rank=rank)
+    elif rank > 2:
+        ttuples = TaylorTuples(list(range(d)), rank)
+        values = []
+        
+        for t in ttuples:
+            v, c = np.unique(t, return_counts=True)
+            values += [1 if c[0] == rank else 0]
+        
+        gen_kr = \
+            SymmetricTensor(d=d, rank=rank, list_values=values, list_ttuples=ttuples)
+
+        return gen_kr 
+        
