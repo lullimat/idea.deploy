@@ -41,10 +41,12 @@ using sp.Rational for the weights should be fine when creating the W_list
 in the naive version of the LBM module
 '''
 
-IDStencils['Ising']['NN_D2'] = {'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1)),
-                                'Ws': (sp.Rational(1, 4), sp.Rational(1, 4),
-                                       sp.Rational(1, 4), sp.Rational(1, 4)),
-                                'e2': 1}
+IDStencils['Ising']['NN_D2'] = \
+    {
+        'XIs': ((1, 0), (0, 1), (-1, 0), (0, -1)),
+        'Ws': (sp.Rational(1, 4), sp.Rational(1, 4), sp.Rational(1, 4), sp.Rational(1, 4)),
+        'e2': 1
+    }
 
 IDStencils['Ising']['NN_D3'] = {'XIs': ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0),
                                         (0, 0, 1), (0, 0, -1)),
