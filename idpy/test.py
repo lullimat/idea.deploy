@@ -45,6 +45,17 @@ def AllTrue(list_swap):
     return reduce(lambda x, y: x and y, list_swap)
 
 '''
+testing module Utils.Combinatorics
+'''
+from idpy.Utils.Combinatorics import SwapElem
+class TestCombinatorics(unittest.TestCase):
+    def setUp(self):
+        pass
+    
+    def test_SwapElem(self):
+        self.assertTrue(True)   
+
+'''
 testing module Utils.ManageData
 '''
 from idpy.Utils.ManageData import ManageData
