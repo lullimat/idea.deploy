@@ -2,8 +2,9 @@
 Provides a simple function to check whether a module is installed
 in the system. Works with Python3
 """
-
-import importlib
+## Thank You!
+## https://stackoverflow.com/questions/66797668/module-importlib-has-no-attribute-util
+import importlib.util as util
 
 __author__ = "Matteo Lulli"
 __copyright__ = "Copyright 2020, idea.deploy"
@@ -21,7 +22,7 @@ def IsModuleThere(module_name = None):
     system. Can be used for running system's test and conditional
     modules imports
     '''
-    swap_spec = importlib.util.find_spec(module_name)
+    swap_spec = util.find_spec(module_name)
     return swap_spec is not None
 
 def AreModulesThere(modules_list = None):
