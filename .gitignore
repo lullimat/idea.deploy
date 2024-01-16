@@ -6,4 +6,5 @@
 *slurm_engine.sbatch
 *.err
 *.out
+*.vscode/
 !.gitignore
