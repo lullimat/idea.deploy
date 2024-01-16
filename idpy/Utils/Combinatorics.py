@@ -204,3 +204,25 @@ def FindSumCombinationsTuples(n: int, cutoff: int):
             elems, count = np.unique(combination, return_counts=True)
             _tuples_lists += [list(zip(elems, count))]
     return _tuples_lists
+
+'''
+Functions for handling fully isotropic tensors and generalized Kronecker deltas
+'''
+
+def cycle_list(list, pivot_index=0):
+    return list[:pivot_index] + list[pivot_index + 1:] + [list[pivot_index]]
+
+def SplitTuplePerm(in_tuple=None, perm=None, split_point=None):
+    n = len(in_tuple)
+    if n % 2:
+        raise Exception("The tuple must be of even length!")
+    if split_point is None or split_point % 2:
+        raise Exception("The split point must be provided and must be even!")
+    """
+    If no permutation is specified provide the default one
+    """
+    if perm is None:
+        perm = list(range(n))
+        
+    new_tuple = tuple([in_tuple[perm[i]] for i in range(n)])
+    return new_tuple[:split_point], new_tuple[split_point:]
