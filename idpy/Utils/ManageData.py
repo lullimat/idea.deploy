@@ -128,7 +128,10 @@ class ManageData:
             
         _out_f = h5py.File(file_out, "a")
         ## Need to check if this group is already there...
-        _grp = _out_f.create_group(self.__class__.__name__)
+        if self.__class__.__name__ not in _out_f:
+            _grp = _out_f.create_group(self.__class__.__name__)
+        else:
+            _grp = _out_f[self.__class__.__name__]
             
         for _key in self.data_dictionary:
             if _key not in _grp:
@@ -141,7 +144,13 @@ class ManageData:
                     _grp.create_dataset(_key,
                                         data = np.string_(str(self.data_dictionary[_key])), 
                                         maxshape=(None,))
-            
+            else:
+                ## print("Append?")
+                if type(self.data_dictionary[_key]) is not dict:
+                    new_size = _grp[_key].shape[0] + self.data_dictionary[_key].shape[0]
+                    _grp[_key].resize(new_size, axis=0)
+                    _grp[_key][-self.data_dictionary[_key].shape[0]:] = self.data_dictionary[_key]
+
         _out_f.close()
         
     def ReadDill(self):
