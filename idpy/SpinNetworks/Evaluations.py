@@ -518,15 +518,27 @@ class Evaluation:
         ## sum_index = self.list_sums.index((label,))
         ## sum_bounds_labels = self.list_sums_extrema[label_i]
 
-        ## We could not do any better...
         upper_bound, lower_bound = math.inf, 0
-        for neigh_labels in self.list_sums_extrema[label_i]:
-            upper_bound = min(upper_bound, self.colors[neigh_labels[0]][0] + self.colors[neigh_labels[1]][0])
-            lower_bound = max(lower_bound, abs(self.colors[neigh_labels[0]][0] - self.colors[neigh_labels[1]][0]))
 
-            if lower_bound > upper_bound:
-                return 0, 1
-            
+        ## We could not do any better...
+        if q is None or len(q) == 1:
+            for neigh_labels in self.list_sums_extrema[label_i]:
+                upper_bound = min(upper_bound, self.colors[neigh_labels[0]][0] + self.colors[neigh_labels[1]][0])
+                lower_bound = max(lower_bound, abs(self.colors[neigh_labels[0]][0] - self.colors[neigh_labels[1]][0]))
+
+                if lower_bound > upper_bound:
+                    return 0, 1
+
+        elif q is not None and len(q) > 1:
+            for neigh_labels in self.list_sums_extrema[label_i]:
+                color_sum = self.colors[neigh_labels[0]][0] + self.colors[neigh_labels[1]][0]
+                color_diff = self.colors[neigh_labels[0]][0] - self.colors[neigh_labels[1]][0]
+                upper_bound = min(upper_bound, min(2 * q[1] - 4 - color_sum, color_sum))
+                lower_bound = max(lower_bound, abs(color_diff))
+
+                if lower_bound > upper_bound:
+                    return 0, 1
+
         return upper_bound, lower_bound    
 
     def GetColorSumExtremaOld(self, label_i, q=None):
