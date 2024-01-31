@@ -25,14 +25,18 @@ __maintainer__ = "Matteo Lulli, Emanuele Zappala"
 __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
+import numpy as np
+
 def PerezNouiAmplitude(A, B):    
     _mod2_A = (A.conjugate() * A).real
     _mod2_B = (B.conjugate() * B).real    
     
     _max = max(_mod2_A, _mod2_B)
     _A_star_B = A.conjugate() * B
+
+    zero_flag = (np.abs(_max) < 1e-15)
     
-    return _A_star_B / (_max) if _max > 0 else 0
+    return 0 if zero_flag else _A_star_B / (_max)
 
 def PerezNouiProbability(A, B):    
     _mod2_A = (A.conjugate() * A).real
@@ -41,5 +45,7 @@ def PerezNouiProbability(A, B):
     _max = max(_mod2_A, _mod2_B)
     _A_star_B = A.conjugate() * B
     _mod2_A_star_B = (_A_star_B.conjugate() * _A_star_B).real
+
+    zero_flag = (np.abs(_max) < 1e-15)
     
-    return _mod2_A_star_B / (_max ** 2) if _max > 0 else 0
+    return  0 if zero_flag else _mod2_A_star_B / (_max ** 2)
