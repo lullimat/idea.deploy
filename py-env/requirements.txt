@@ -33,3 +33,4 @@ nbconvert
 python-sat[pblib,aiger]
 networkx[all]
 multiprocess
+mlx
