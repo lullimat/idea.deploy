@@ -148,6 +148,10 @@ sum = 2 -> [1, 1, 0, 0, 0, 0, 0], [1, 0, 1, 0, 0, 0, 0], [1, 0, 0, 1, 0, 0, 0], 
 def GetBaseString(n: int, x: int, y: int):
     return np.array(([n] * x) + ([0] * y))
 
+"""
+This function return all the possible permutations of a single element 'n'
+repeated 'x' times with 'y' repetitions of zero : (n, n, n, ...[x times], 0, 0, 0, ...[y times])
+"""
 def GetSinglePermutations(n: int, x: int, y: int):
     return [GetBaseString(n, x, y)] + JustDoIt(GetBaseString(n, x, y))
 
