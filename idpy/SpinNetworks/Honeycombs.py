@@ -257,7 +257,16 @@ def FromExtremaToAllSequences(extrema_list):
         ]
     return list(zip(*sequences))
 
-def FromExtremaToSequence(extrema_list, i=0):
+def FromExtremaToSequence(extrema_list, N, n_extrema, strides, i=0):
+    if i >= N:
+        return None
+            
+    coords = PosFromIndex(i, strides)
+    sequence = [extrema_list[j][1] + coords[-j-1] for j in range(n_extrema)]
+
+    return sequence
+
+def FromExtremaToSequenceOld(extrema_list, i=0):
     N, n_extrema = TotalNumberOfSequences(extrema_list), len(extrema_list)
     if i >= N:
         return None
@@ -1594,6 +1603,11 @@ class Honeycomb(Graph, Evaluation):
             for label in loop:
                 self.colors[label][0] += 1
 
+    def SetLoopColorsM1(self, loops):
+        for loop in loops:
+            for label in loop:
+                self.colors[label][0] -= 1                
+
     def SetLoopColorsMod2(self, loops):
         for loop in loops:
             for label in loop:
@@ -1772,7 +1786,7 @@ class Honeycomb(Graph, Evaluation):
                             print("level, x:", level, x)
 
                         ranges = self.FindExtremaLevel(level, q=q)
-                        x_colors = FromExtremaToSequence(ranges, i=x)
+                        x_colors = FromExtremaToSequenceOld(ranges, i=x)
 
                         if debug_flag:
                             print("ranges:", ranges, "x_colors:", x_colors)
