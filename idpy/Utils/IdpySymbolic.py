@@ -238,133 +238,150 @@ class SymmetricTensor:
     Implements a full contraction among fully-symmetric tensors
     '''
     def __mul__(self, _b):
-        if _b.d != self.d:
-            raise Exception('Dimensionalities of the two SymmetricTensor differ!',
-                            self.d, _b.d)
-
-        if _b.rank != self.rank:
+        if _b.__class__.__name__ != self.__class__.__name__:
             """
-            Do I need to manage the case where each component of the symmetric tensor is still
-            a tenorial quantity, an object of the class sympy.Matrix ?
+            Here we assume a multiplication by a scalar
             """
-            if False:
-                raise Exception('Ranks of the two SymmetricTensor differ!',
-                                self.rank, _b.rank)
-            
-            if self.rank > _b.rank:
-                A, B = self, _b
-            else:
-                A, B = _b, self
+            contraction_dict = {key: self.c_dict[key] * _b for key in self.c_dict}
+            return SymmetricTensor(c_dict = contraction_dict, d=self.d, rank=self.rank)
+        else:
+            if _b.d != self.d:
+                raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+                                self.d, _b.d)
 
-            rank_diff = A.rank - B.rank
-            list_ttuples_diff = TaylorTuples(list(range(self.d)), rank_diff)
-            list_ttuples_B = TaylorTuples(list(range(self.d)), B.rank)
-
-            """
-            I need to sum over all tuples, including the symmetric ones
-            """
-            contraction_dict = {}
-            for ttuple_diff in list_ttuples_diff:
-
-                partial_sum = 0                
-                for ttuple_B in list_ttuples_B:
-                    ## print(ttuple_diff, ttuple_B)
-                    elems_tuple, count_elems = np.unique(ttuple_B, return_counts=True)
-                    """
-                    Now we cycle on all possible symmetric realization of the ttuple_B
-                    """
-                    elems_list = \
-                        [(v, c) for v, c in zip(elems_tuple, count_elems)
-                         if (v == 0 and c == B.rank) or (v > 0)]
-                    
-                    ## print("elems_list:", elems_list, partial_sum)
-                    
-                    for symm_ttuple_B in GetUniquePermutations(elems_list, B.rank):
-                        symm_ttuple_B = tuple(symm_ttuple_B)
-                        swap_sum = A[ttuple_diff + symm_ttuple_B] * B[symm_ttuple_B]
-                        partial_sum += swap_sum
-                        ## print("\t", symm_ttuple_B, swap_sum, partial_sum)
-                    ## print()
-
-                contraction_dict[ttuple_diff] = partial_sum
-                ## print()
-                
-            return SymmetricTensor(c_dict = contraction_dict, d=self.d, rank=rank_diff)
-
-        '''
-        This routine is written in order to handle the contraction of objects from the class
-        SymmetricTensor such that each component can be an object of the sympy class Matrix
-        This is used to contain all the values of the Hermite polynomials associated to different
-        stencil vectors
-        '''
-        if _b.rank == self.rank:
-            _largest_shape = 0
-            _shapes = [self.shape, _b.shape]
-            _shapes_types = [type(self.shape), type(_b.shape)]
-            _largest_shape = None
-
-            _product, _symt_out = None, False
-            if int in _shapes_types and tuple in _shapes_types:
-                _product = lambda x, y: x * y
-                for _i, _ in enumerate(_shapes_types): 
-                    if _ == tuple:
-                        _largest_shape = _shapes[_i]
-            elif AllTrue([_ == tuple for _ in _shapes_types]):
-                _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
-                _symt_out = True
-                _largest_shape=self.shape
-                if self.shape != _b.shape:
-                    raise Exception("Cannot perform the element-wise product")
-            elif AllTrue([_ == int for _ in _shapes_types]):
-                _product = lambda x, y: x * y
-
-            '''
-            Full contraction
-            '''
-            _contraction = \
-                sp.Matrix([0] * _largest_shape[0]) \
-                if _largest_shape is not None else 0
-            
-            ##for _tuple in TaylorTuples(list(range(self.d)), self.rank):
-            """
-            Need to loop over all the tuples of the dict:
-            then deconstruct the tuple and generate all the symmetric ones
-            sum over the list
-            """
-            for _tuple in self.c_dict:
-                values, counts = np.unique(_tuple, return_counts=True)
-                perm_elems_list = \
-                    [(v, c) for v, c in zip(values, counts)
-                     if (v == 0 and c == self.rank) or (v > 0)]
-                
-                for p_tuple in GetUniquePermutations(perm_elems_list, self.rank):
-                    ##print(p_tuple, len(p_tuple))
-                    p_tuple = tuple(p_tuple) if len(p_tuple) > 1 else p_tuple[0]
-                    ##print(self[p_tuple])
-                    ##print(_b[p_tuple])
-                    _contraction += _product(self[p_tuple], _b[p_tuple])
-                    
+            if _b.rank != self.rank:
+                """
+                Do I need to manage the case where each component of the symmetric tensor is still
+                a tenorial quantity, an object of the class sympy.Matrix ?
+                """
                 if False:
-                    _is_symmetric_tuple = True
-                    if type(_tuple) == tuple and len(_tuple):
-                        _flip_tuple = FlipVector(_tuple)
-                        _is_symmetric_tuple = IsSameVector(_tuple, _flip_tuple)
-                    '''
-                    need to check the shapes in case of sympy matrices, 
-                    or if one of the two is a a scalar and the apply the elemntwise product
-                    even though I do not need it for now...
-                    '''
-                    if _is_symmetric_tuple:
-                        _contraction += _product(self[_tuple], _b[_tuple])
-                    else:
-                        """
-                        Need to double check whether multiplying by the factorial of the
-                        rank is the correct procedure: it is not
-                        """
-                        _Contraction += sp.factorial(self.rank) * _product(self[_tuple], _b[_tuple])
+                    raise Exception('Ranks of the two SymmetricTensor differ!',
+                                    self.rank, _b.rank)
+                
+                if self.rank > _b.rank:
+                    A, B = self, _b
+                else:
+                    A, B = _b, self
 
-            return (_contraction if not _symt_out else
-                    SymmetricTensor(c_dict = {0: _contraction}, d = self.d, rank = 0))
+                rank_diff = A.rank - B.rank
+                list_ttuples_diff = TaylorTuples(list(range(self.d)), rank_diff)
+                list_ttuples_B = TaylorTuples(list(range(self.d)), B.rank)
+
+                """
+                I need to sum over all tuples, including the symmetric ones
+                """
+                contraction_dict = {}
+                for ttuple_diff in list_ttuples_diff:
+                    ttuple_diff_index = ttuple_diff
+                    if type(ttuple_diff) != tuple:
+                        ttuple_diff = (ttuple_diff,)
+
+                    partial_sum = 0                
+                    for ttuple_B in list_ttuples_B:
+                        ## print(ttuple_diff, ttuple_B)
+                        elems_tuple, count_elems = np.unique(ttuple_B, return_counts=True)
+                        """
+                        Now we cycle on all possible symmetric realization of the ttuple_B
+                        """
+                        elems_list = \
+                            [(v, c) for v, c in zip(elems_tuple, count_elems)
+                            if (v == 0 and c == B.rank) or (v > 0)]
+                        
+                        ## print("elems_list:", elems_list, partial_sum)
+                        
+                        for symm_ttuple_B in GetUniquePermutations(elems_list, B.rank):
+                            if B.rank == 1:
+                                symm_ttuple_B_left = tuple(symm_ttuple_B,)
+                                symm_ttuple_B_right = symm_ttuple_B[0]
+                            else:
+                                symm_ttuple_B_left = tuple(symm_ttuple_B)
+                                symm_ttuple_B_right = symm_ttuple_B_left
+
+                            swap_sum = A[ttuple_diff + symm_ttuple_B_left] * B[symm_ttuple_B_right]
+                            partial_sum += swap_sum
+                            ## print("\t", symm_ttuple_B, swap_sum, partial_sum)
+                        ## print()
+
+                    contraction_dict[ttuple_diff_index] = partial_sum
+                    ## print()
+                    
+                return SymmetricTensor(c_dict = contraction_dict, d=self.d, rank=rank_diff)
+
+            '''
+            This routine is written in order to handle the contraction of objects from the class
+            SymmetricTensor such that each component can be an object of the sympy class Matrix
+            This is used to contain all the values of the Hermite polynomials associated to different
+            stencil vectors
+            '''
+            if _b.rank == self.rank:
+                _largest_shape = 0
+                _shapes = [self.shape, _b.shape]
+                _shapes_types = [type(self.shape), type(_b.shape)]
+                _largest_shape = None
+
+                _product, _symt_out = None, False
+                if int in _shapes_types and tuple in _shapes_types:
+                    _product = lambda x, y: x * y
+                    for _i, _ in enumerate(_shapes_types): 
+                        if _ == tuple and len(_shapes[_i]):
+                            _largest_shape = _shapes[_i]
+                elif AllTrue([_ == tuple for _ in _shapes_types]):
+                    _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
+                    _symt_out = True
+                    _largest_shape=self.shape
+                    if self.shape != _b.shape:
+                        raise Exception("Cannot perform the element-wise product")
+                elif AllTrue([_ == int for _ in _shapes_types]):
+                    _product = lambda x, y: x * y
+
+                '''
+                Full contraction
+                '''
+                # print("_largest_shape:", _largest_shape, "_shapes_types:", _shapes_types)
+                _contraction = \
+                    sp.Matrix([0] * _largest_shape[0]) \
+                    if _largest_shape is not None else 0
+                
+                ##for _tuple in TaylorTuples(list(range(self.d)), self.rank):
+                """
+                Need to loop over all the tuples of the dict:
+                then deconstruct the tuple and generate all the symmetric ones
+                sum over the list
+                """
+                for _tuple in self.c_dict:
+                    values, counts = np.unique(_tuple, return_counts=True)
+                    perm_elems_list = \
+                        [(v, c) for v, c in zip(values, counts)
+                        if (v == 0 and c == self.rank) or (v > 0)]
+                    
+                    for p_tuple in GetUniquePermutations(perm_elems_list, self.rank):
+                        ##print(p_tuple, len(p_tuple))
+                        p_tuple = tuple(p_tuple) if len(p_tuple) > 1 else p_tuple[0]
+                        ##print(self[p_tuple])
+                        ##print(_b[p_tuple])
+                        _contraction += _product(self[p_tuple], _b[p_tuple])
+                        
+                    if False:
+                        _is_symmetric_tuple = True
+                        if type(_tuple) == tuple and len(_tuple):
+                            _flip_tuple = FlipVector(_tuple)
+                            _is_symmetric_tuple = IsSameVector(_tuple, _flip_tuple)
+                        '''
+                        need to check the shapes in case of sympy matrices, 
+                        or if one of the two is a a scalar and the apply the elemntwise product
+                        even though I do not need it for now...
+                        '''
+                        if _is_symmetric_tuple:
+                            _contraction += _product(self[_tuple], _b[_tuple])
+                        else:
+                            """
+                            Need to double check whether multiplying by the factorial of the
+                            rank is the correct procedure: it is not
+                            """
+                            _Contraction += sp.factorial(self.rank) * _product(self[_tuple], _b[_tuple])
+
+                return (_contraction if not _symt_out else
+                        SymmetricTensor(c_dict = {0: _contraction}, d = self.d, rank = 0))
 
         """
         else:
@@ -441,13 +458,13 @@ class SymmetricTensor:
             _sum_dict[_key] = self[_key] - _b[_key]
 
         return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
-    
+                
 def GetASymmetricTensor(dim, order, root_sym = 'A'):
     _taylor_indices = TaylorTuples(list(range(dim)), order)
     _swap_dict = {}
     for _i, _index_tuple in enumerate(_taylor_indices):
-        _lower_indices = reduce(lambda x, y: str(x) + str(y), _index_tuple)
-        _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_" + _lower_indices)
+        _lower_indices = reduce(lambda x, y: str(x) + ',' + str(y), _index_tuple)
+        _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_{" + _lower_indices + "}")
     return SymmetricTensor(c_dict = _swap_dict, d = dim, rank = order)
 
 def GetFullyIsotropicTensor(d=None, rank=None):
