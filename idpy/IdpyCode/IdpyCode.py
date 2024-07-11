@@ -807,10 +807,14 @@ class IdpyLoop:
                         Deploying
                         '''
                         _prev_evt = self.meta_streams[seq_i][(item_i - 1 + seq_len) % seq_len]
+                        # print("ev pre:", Idea.k_dict['_kernel_name'], _prev_evt)
+
                         self.meta_streams[seq_i][item_i] = \
                             [Idea.Deploy(_args,
-                                         idpy_stream = (None if _prev_evt is None
+                                         idpy_stream = (None if _prev_evt is None or _prev_evt == [None]
                                                         else _prev_evt))]
+                        # print("ev post:", self.meta_streams[seq_i][item_i])
+                        # print()
                         self.PutArgs(seq_i, _indices, _args)
 
                 '''
