@@ -38,9 +38,9 @@ from idpy.IdpyCode.IdpyUnroll import _get_cartesian_coordinates_macro
 
 from idpy.LBM.LBM import RootLB, LBMTypes, InitFStencilWeights, NPT
 from idpy.LBM.LBMKernels import F_PosFromIndex, F_IndexFromPos
-from idpy.LBM.LBMKernels import K_InitPopulations, K_ComputeMoments
+from idpy.LBM.LBMKernels import K_InitPopulations, K_ComputeMoments, K_CenterOfMass
 from idpy.LBM.LBMKernels import K_StreamPeriodic, K_HalfWayBounceBack, M_SwapPop
-from idpy.LBM.LBMKernels import K_ComputeMomentsWalls
+from idpy.LBM.LBMKernels import K_ComputeMomentsWalls, K_NInNOut
 from idpy.LBM.LBMKernels import K_SetPopNUXInletDutyCycle, K_SetPopNUOutletNoGradient
 
 '''
@@ -90,6 +90,52 @@ from idpy.Utils.CustomTypes import CustomTypes
 Importing Congruential Pseudo-Random numbers generator
 '''
 from idpy.PRNGS.CRNGS import CRNGS
+
+def IndexFromPos(pos, dim_strides):
+    index = pos[0]
+    for i in range(1, len(pos)):
+        index += pos[i] * dim_strides[i - 1]
+    return index
+
+def PosFromIndex(index, dim_strides): 
+    pos = [index%dim_strides[0]]
+    pos += [(index//dim_strides[stride_i]) % (dim_strides[stride_i + 1]//dim_strides[stride_i]) \
+            if stride_i < len(dim_strides) - 1 else \
+            index//dim_strides[stride_i] \
+            for stride_i in range(len(dim_strides))]
+    return tuple(pos)
+
+def ComputeCenterOfMass(lbm, c_i = ''):
+    first_flag = False
+    if 'cm_coords' not in lbm.sims_idpy_memory:
+        lbm.sims_idpy_memory['cm_coords'] = \
+            IdpyMemory.Zeros(lbm.sims_vars['V'],
+                             dtype = NPT.C[lbm.custom_types['NType']],
+                             tenet = lbm.tenet)
+        lbm.aux_idpy_memory.append('cm_coords')
+        first_flag = True
+
+    _mass = IdpyMemory.Sum(lbm.sims_idpy_memory['n' + c_i])
+        
+    _K_CenterOfMass = K_CenterOfMass(custom_types = lbm.custom_types.Push(),
+                                     constants = lbm.constants,
+                                     f_classes = [F_PosFromIndex],
+                                     optimizer_flag = lbm.optimizer_flag)
+
+    Idea = _K_CenterOfMass(tenet = lbm.tenet, grid = lbm.sims_vars['grid'],
+                           block = lbm.sims_vars['block'])
+
+    _cm_coords = ()
+    for direction in range(lbm.sims_vars['DIM']):        
+        Idea.Deploy([lbm.sims_idpy_memory['cm_coords'],
+                     lbm.sims_idpy_memory['n' + c_i],
+                     lbm.sims_idpy_memory['dim_sizes'],
+                     lbm.sims_idpy_memory['dim_strides'],
+                     NPT.C[lbm.custom_types['SType']](direction)])
+        _cm_coords += (IdpyMemory.Sum(lbm.sims_idpy_memory['cm_coords'])/_mass, )
+
+    return _mass, _cm_coords
+
 
 class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
