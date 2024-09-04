@@ -32,6 +32,8 @@ from idpy.LBM.LBM import NPT
 
 from idpy.LBM.LBMKernelsMeta import K_ComputeMomentsMeta, K_CheckUMeta
 
+from idpy.Utils.Statements import OneTrue
+
 def CheckCenterOfMassDeltaPConvergence(lbm):
     _first_flag = False
     if 'cm_conv' not in lbm.aux_vars:
