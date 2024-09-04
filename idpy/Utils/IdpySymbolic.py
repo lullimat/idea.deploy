@@ -515,12 +515,12 @@ def GetFullyIsotropicTensor(d=None, rank=None):
         return SymmetricTensor(d=d, rank=rank, c_dict=swap_dict)
 
 def GetGeneralizedKroneckerDelta(d=None, rank=None):
-    if rank % 2:
-        raise Exception("rank must be even!")
+    # if rank % 2:
+    #     raise Exception("rank must be even!")
 
     if rank == 2:
         return GetFullyIsotropicTensor(d=d, rank=rank)
-    elif rank > 2:
+    elif rank == 1 or rank > 2:
         ttuples = TaylorTuples(list(range(d)), rank)
         values = []
         
