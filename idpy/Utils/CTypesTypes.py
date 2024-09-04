@@ -46,7 +46,8 @@ class CTypesTypes:
                   'long long int': ctypes.c_int64,
                   'unsigned long': ctypes.c_uint64,
                   'unsigned long long int': ctypes.c_uint64,
-                  'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte}
+                  'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte, 
+                  'unsigned': ctypes.c_uint32}
 
         self.CTypes = {value: key for (key, value) in self.C.items()}
 
