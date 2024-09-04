@@ -131,7 +131,7 @@ class IdpySims(threading.Thread):
         _grp_custom_types = _grp.create_group("custom_types")
         for key, value in custom_types.Push().items():
             _grp_custom_types.create_dataset(str(key),
-                                             data = np.string_(value))
+                                             data = np.bytes_(value))
             
         _out_f.close()
 
