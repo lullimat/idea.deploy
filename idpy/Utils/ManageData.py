@@ -180,7 +180,7 @@ class ManageData:
         return is_there_key
         
 
-    def ReadHDF5(self, full_key = None):
+    def ReadHDF5(self, full_key = None, class_check_override = False):
         if full_key is None:
             raise Exception("Missing parameter 'full_key'")
 
@@ -192,7 +192,7 @@ class ManageData:
         if os.path.isfile(file_name):
             _in_f = h5py.File(file_name, "r")
             _sims_class_name = list(_in_f.keys())[0]
-            if _sims_class_name != self.__class__.__name__:
+            if _sims_class_name != self.__class__.__name__ and not class_check_override:
                 _in_f.close()
                 raise Exception("The file you are reading has been created by another class!")
 
