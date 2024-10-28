@@ -189,6 +189,7 @@ class OpenCL:
     def GetContext(self):
         if self.kind is not None:
             return cl.Context([self.GetDevice()])
+            # return cl.Context(self.GetDevice())
 
     def GetQueue(self):
         if self.kind is not None:
