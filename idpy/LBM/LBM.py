@@ -1476,10 +1476,10 @@ Kernels
 '''
 class K_CenterOfMass(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
         self.params = {'NType * cm_coords': ['global', 'restrict'],
@@ -1526,10 +1526,10 @@ class K_CheckU(IdpyKernel):
 
 class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
         self.SetCodeFlags('g_tid')
         self.params = {'PopType * pop': ['global', 'restrict'],
                        'UType * u': ['global', 'restrict'],
@@ -1610,7 +1610,7 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
 
 class K_ComputePsi(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [], psi_code = None,
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         if psi_code is None:
             raise Exception("Missing argument psi_code")
 
@@ -1618,7 +1618,7 @@ class K_ComputePsi(IdpyKernel):
         
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
         self.SetCodeFlags('g_tid')
         self.params = {'PsiType * psi': ['global', 'restrict'],
                        'NType * n': ['global', 'restrict', 'const']}
@@ -1664,10 +1664,10 @@ class K_StreamPeriodic(IdpyKernel):
 
 class K_ComputeMoments(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1697,10 +1697,10 @@ class K_ComputeMoments(IdpyKernel):
         
 class K_InitPopulations(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1789,10 +1789,10 @@ class K_InitRadialInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1831,10 +1831,10 @@ class K_InitCylinderInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
