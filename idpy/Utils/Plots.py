@@ -43,6 +43,7 @@ def SetMatplotlibLatexParamas(rc, rcParams, mathfont='sourcesanspro'):
     rcParams[0]['text.usetex'] = True
     rc[0]('text', usetex=True)
     #rcParams[0]['text.latex.preview'] = True
+    rcParams[0]['text.latex.preamble']='\\usepackage{amsmath}'
     if False:
         if mathfont == 'sourcesanspro':
             rcParams[0]['text.latex.preamble']=[r"\usepackage{amsmath, sourcesanspro}"]
