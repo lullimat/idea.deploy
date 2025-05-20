@@ -91,7 +91,9 @@ class IdpyPapers:
              "git": "https://github.com/lullimat/arXiv-2310.03632"}
         
         self.arxiv_papers['arXiv-2503.05743'] = \
-            {"Title": "", "Authors": [], "doi": "", "doi-dir": "", "git": "https://github.com/lullimat/arXiv-2503.05743.git"}
+            {"Title": "A note on the lattice momentum balance in the lattice Boltzmann interaction-framework", 
+             "Authors": ["Francesca Pelusi", "Matteo Lulli", "Christophe Coreixas", "Mauro Sbragaglia", "Xiaowen Shan"], 
+             "doi": "", "doi-dir": "", "git": "https://github.com/lullimat/arXiv-2503.05743.git"}
         
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
