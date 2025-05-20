@@ -37,6 +37,7 @@ from sympy import Rational, diff, simplify
 from sympy import lambdify as sp_lambdify
 from sympy import symbols as sp_symbols
 from sympy import exp as sympy_exp
+from sympy import log as sympy_log
 from sympy.solvers.solveset import nonlinsolve
 from sympy.solvers import solve
 from functools import reduce
@@ -150,8 +151,11 @@ class ShanChen:
     def PressureTensorInit(self, py_stencil):
         self.PTensor = self.PressureTensor(py_stencil)
 
-    def FlatInterfaceProperties(self, which_sol = 0, eps_val = None):
+    def FlatInterfacePropertiesOld(self, which_sol = 0, eps_val = None):
         self.FInterface = self.FlatInterface(self, self.PTensor, which_sol, eps_val)
+
+    def FlatInterfaceProperties(self, which_sol = 0, eps_val = None, tau = 1, forcing = 'guo'):
+        self.FInterface = self.FlatInterface(self, self.PTensor, which_sol, eps_val, tau, forcing)
             
     def FindCoexistenceRange(self):
         coexistence_range = []
@@ -184,7 +188,7 @@ class ShanChen:
     ####################################################################################
 
     class FlatInterface:
-        def __init__(self, SC, PTensor, which_sol, eps_val):
+        def __init__(self, SC, PTensor, which_sol, eps_val, tau = 1, forcing = 'guo'):
             self.SC, self.PTensor = SC, PTensor
             # defining epsilon
             if eps_val is None:
@@ -206,14 +210,62 @@ class ShanChen:
             self.beta = self.PTensor.p_consts_sym['\beta']
             self.sigma_c = self.PTensor.p_consts_sym['\sigma_c']
             self.tolman_c = self.PTensor.p_consts_sym['t_c']
-            # Defining the integrand
-            self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
-            # Substituting \theta and e_2 and psi and eps and G
-            self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
-            self.integrand = self.integrand.subs(self.SC.e2, 1)
-            self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
-            self.integrand = self.integrand.subs(self.eps, self.eps_val)
-            self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+
+            if forcing == 'guo':
+                # Defining the integrand
+                self.integrand = \
+                    (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
+                # Substituting \theta and e_2 and psi and eps and G
+                self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
+                self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
+                self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
+                self.integrand = self.integrand.subs(self.eps, self.eps_val)
+                self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+            
+            if forcing == 'sc' or forcing == 'ks':
+                '''
+                Forcing tau = 1 for Kupershtokh, i.e. 'ks' 
+                '''
+                if forcing == 'ks':
+                    tau = 1
+                
+                _prefactor = 0
+
+                if self.SC.psi_f == sympy_exp(-1/self.SC.n):
+                    _prefactor = \
+                        sympy_exp(
+                            self.eps * \
+                            ((self.SC.psi_f ** 2) * (sympy_log(self.SC.psi_f) - 1 / 2) / 2)
+                        )
+                if self.SC.psi_f == 1 - sympy_exp(-self.SC.n):
+                    _prefactor = \
+                        sympy_exp(
+                            self.eps * (sp.Ei(-2 * self.SC.n) - sp.Ei(-self.SC.n))
+                        )
+                
+                # Defining the integrand
+                self.integrand = \
+                    (self.p_0 - self.SC.P) * self.SC.d_psi_f * _prefactor / self.SC.psi_f
+                
+                # Substituting \theta and e_2 and psi and eps and G
+                self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
+                self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
+                self.integrand = \
+                    self.integrand.subs(self.eps,
+                                        -2 * ((2*tau - 1) ** 2) * self.SC.G * self.SC.e2)
+                
+                self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
+                self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+
+            # # Defining the integrand
+            # self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
+            # # Substituting \theta and e_2 and psi and eps and G
+            # self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
+            # self.integrand = self.integrand.subs(self.SC.e2, 1)
+            # self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
+            # self.integrand = self.integrand.subs(self.eps, self.eps_val)
+            # self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+
             # Make a function of n and p_0
             self.integrand_np = \
                 (lambda n_, p_ :
@@ -534,7 +586,9 @@ class ShanChanEquilibriumCache(ManageData):
     def __init__(self,
                  stencil = None,
                  G = None, c2 = None, psi_f = None,
-                 dump_file = 'SCEqCache.json', n_eps = 1e-2):
+                 dump_file = 'SCEqCache.json', n_eps = 1e-2, 
+                 forcing = 'guo', tau = 1):
+        
         ManageData.__init__(self, dump_file = dump_file)
 
         if stencil is None:
@@ -548,16 +602,23 @@ class ShanChanEquilibriumCache(ManageData):
 
         if psi_f is None:
             raise Exception("Missing argument psi_f")
+        
+        if forcing == 'ks':
+            forcing = 'sc'
+            tau = 1
+
+        if forcing == 'guo':
+            tau = 1
 
         self.n_eps = n_eps
-
 
         '''
         Looking for the file and data
         '''
         self.is_file, self.is_key = ManageData.Read(self, kind = 'json'), False
         self.dict_string = (str(psi_f) + "_" + str(float(G)) + "_" +
-                            str(c2) + "_" + str(stencil.w_sol[0]))
+                            str(c2) + "_" + str(stencil.w_sol[0]) + "_" +
+                            str(forcing) + "_" + str(tau))
 
         self.dict_string = self.dict_string.replace(" ", "_")
         
@@ -613,7 +674,10 @@ class ShanChanEquilibriumCache(ManageData):
                          n_eps = self.n_eps)
 
             _shan_chen.PressureTensorInit(stencil)
-            _shan_chen.FlatInterfaceProperties()
+            _shan_chen.FlatInterfaceProperties(which_sol = 0,
+                                               eps_val = None,
+                                               tau = tau,
+                                               forcing = forcing)
             _shan_chen.FInterface.MechanicEquilibrium()
 
             _mech_eq_target = _shan_chen.FInterface.mech_eq_target
