@@ -36,6 +36,8 @@ import dill, os
 import h5py, json
 import numpy as np
 
+from pathlib import Path
+
 class ManageData:
     '''
     class ManageData(dump_file):
@@ -68,6 +70,9 @@ class ManageData:
         for elem in self.data_dictionary:
             entries.append(elem)
         return entries
+    
+    def IsThereFile(self):
+        return Path(self.dump_file).is_file()
 
     def IsThereKey(self, key, kind = 'dill'):
         if kind not in ['hdf5', 'dill', 'json']:
@@ -174,11 +179,13 @@ class ManageData:
             return False
 
     def IsThereKeyHDF5(self, full_key):
-        h5_file = h5py.File(self.dump_file, 'r+')
-        is_there_key = full_key in h5_file.keys()
-        h5_file.close()
-        return is_there_key
-        
+        if self.IsThereFile():
+            h5_file = h5py.File(self.dump_file, 'r+')
+            is_there_key = full_key in h5_file.keys()
+            h5_file.close()
+            return is_there_key
+        else:
+            return False
 
     def ReadHDF5(self, full_key = None, class_check_override = False):
         if full_key is None:
