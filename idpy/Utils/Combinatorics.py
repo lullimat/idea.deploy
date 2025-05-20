@@ -220,8 +220,14 @@ def SplitTuplePerm(in_tuple=None, perm=None, split_point=None):
     n = len(in_tuple)
     if n % 2:
         raise Exception("The tuple must be of even length!")
-    if split_point is None or split_point % 2:
+
+    ## Why enforcing the parity?
+    # if split_point is None or split_point % 2:
+    #     raise Exception("The split point must be provided and must be even!")
+    if split_point is None:
         raise Exception("The split point must be provided and must be even!")
+
+
     """
     If no permutation is specified provide the default one
     """
