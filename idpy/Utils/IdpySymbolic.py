@@ -140,7 +140,6 @@ def GetTaylorDerivativesDict(_f, _sym_list, _n):
     else:
         return {'_': _swap_res[0]}
 
-
 '''
 class SymmetricTensor:
 
@@ -186,6 +185,27 @@ class SymmetricTensor:
                 _index = tuple(_index)
                 
             return self.c_dict[_index]
+        
+    '''
+    Implements the tensor product without the full-symmetry assumption -> JSymmetricTensor
+    '''
+    def __or__(self, b):
+        if isinstance(b, SymmetricTensor):
+            if self.d != b.d:
+                raise Exception("The two fully symmetric tensors must have the same dimensionality")
+            
+            taylor_indices_0 = TaylorTuples(list(range(self.d)), self.rank)
+            taylor_indices_1 = TaylorTuples(list(range(self.d)), b.rank)
+
+            j_c_dict = {}
+            for tt0 in taylor_indices_0:
+                tt0_tuple = tt0 if isinstance(tt0, tuple) else (tt0,)
+                for tt1 in taylor_indices_1:
+                    tt1_tuple = tt1 if isinstance(tt1, tuple) else (tt1,)
+                    j_c_dict[tt0_tuple + tt1_tuple] = self[tt0] * b[tt1]
+
+            return JSymmetricTensor(c_dict=j_c_dict, d=self.d, rank=self.rank + b.rank, ranks=[self.rank, b.rank])
+
 
     '''
     Implements the tensor products between fully-symmetric tensors
@@ -391,6 +411,58 @@ class SymmetricTensor:
             return SymmetricTensor(c_dict = _swap_dict, d = self.d, rank = self.rank)
         """
 
+    ## Need to move this function to the JointSymmetricTensor
+    def PartialContraction(self, _b, n_indices):
+        if _b.__class__.__name__ != self.__class__.__name__:
+            raise Exception("the two object must belong to the same class!", self.__class__.__name__)
+        else:                    
+            if _b.d != self.d:
+                raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+                                self.d, _b.d)
+            
+            """
+            In case of full contraction of one of the tensors call __mul__ method
+            """
+            if self.rank == n_indices or _b.rank == n_indices:
+                return self.__mul__(_b)
+
+            """
+            Manage the remaining case
+            """
+            if self.rank > n_indices and _b.rank > n_indices:
+                rank_diff_self, rank_diff_b = self.rank - n_indices, _b.rank - n_indices
+                list_tuples_diff_self = TaylorTuples(list(range(self.d)), rank_diff_self)
+                list_tuples_diff_b = TaylorTuples(list(range(self.d)), rank_diff_b)
+                list_tuples_contraction = TaylorTuples(list(range(self.d)), n_indices)
+
+                is_rd_self_1 = rank_diff_self == 1
+                is_rd_b_1 = rank_diff_b == 1
+                is_rcontraction_1 = n_indices == 1
+
+                contraction_dict = {}
+                for ttuple_self in list_tuples_diff_self:
+                    for ttuple_b in list_tuples_diff_b:
+                        tuple_prefix = ttuple_self if not is_rd_self_1 else (ttuple_self, )
+                        tuple_postfix = ttuple_b if not is_rd_b_1 else (ttuple_b, )
+                        # print(tuple_prefix, tuple_postfix)
+
+                        partial_sum = 0
+                        for ttuple_contraction in list_tuples_contraction:
+                            ttuple_contraction = ttuple_contraction if not is_rcontraction_1 else (ttuple_contraction, )
+
+                            # print(tuple_prefix, tuple_postfix, ttuple_contraction)
+
+                            tuple_sum_self = tuple_prefix + ttuple_contraction
+                            tuple_sum_b = ttuple_contraction + tuple_postfix
+
+                            partial_sum += self[tuple_sum_self] * _b[tuple_sum_b]
+
+                        tuple_result = tuple_prefix + tuple_postfix
+                        contraction_dict[tuple_result] = partial_sum
+
+                rank_result = rank_diff_self + rank_diff_b                
+                return SymmetricTensor(c_dict = contraction_dict, d=self.d, rank=rank_result)
+
     def __add__(self, _b):
         if _b.__class__.__name__ != self.__class__.__name__:
             raise Exception('Summation is only defined between SymmetricTensor(s)')
@@ -458,7 +530,159 @@ class SymmetricTensor:
             _sum_dict[_key] = self[_key] - _b[_key]
 
         return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
+
+"""
+class JSymmetricTensor
+- for rank 1 tensors need to pass the argument ranks = [1], without a second entry
+"""
+class JSymmetricTensor:
+    def __init__(self, c_dict = None, list_values = None, list_ttuples = None,
+                 d = None, rank = None, ranks = None):
+        
+        if c_dict is None and list_values is None and list_ttuples is None:
+            raise Exception("Missing arguments: either 'c_dict' or 'list_values' and 'list_ttuples'")
+        elif c_dict is None and (list_values is None or list_ttuples is None):
+            raise Exception("Missing argument: either 'list_values' or 'list_ttuples'")        
+        if c_dict is not None and (list_values is not None or list_ttuples is not None):
+            raise Exception("Arguments conflict: either 'c_dict' or 'list_values' and 'list_ttuples'")
+        if ranks is None or sum(ranks) != rank:
+            raise Exception("Missing arguments: 'ranks' needs to be a list of two values adding to 'rank'!")
+
+        self.d, self.rank, self.ranks = d, rank, ranks
+        if c_dict is not None:
+            self.c_dict = c_dict
+        else:
+            self.c_dict = dict(zip(list_ttuples, list_values))
+            
+        # self.shape = self.set_shape()
+
+    def set_shape(self):
+        _key_0 = list(self.c_dict)[0]
+        _shape = (0 if not hasattr(self.c_dict[_key_0], 'shape') else
+                  self.c_dict[_key_0].shape)
+        return _shape
+        
+    def __getitem__(self, _index):
+        if isinstance(_index, slice):
+            return self.c_dict[_index]
+        else:
+            if isinstance(_index, tuple):
+                _index_0 = list(_index)[:self.ranks[0]]
+                _index_1 = list(_index)[self.ranks[0]:]
+                _index_0.sort()
+                _index_1.sort()
+                _index = tuple(_index_0 + _index_1)
                 
+            return self.c_dict[_index]
+        
+    def GetFullySymmetric(self):
+        taylor_indices = TaylorTuples(list(range(self.d)), self.rank)
+        c_dict = {tt: self[tt] for tt in taylor_indices}
+        return SymmetricTensor(d=self.d, rank=self.rank, c_dict=c_dict)
+        
+    ## So complicated...?
+    def add__mah(self, b):
+        if isinstance(b, JSymmetricTensor):
+            ## check the two tensors are of the same kind
+            if self.d != b.d or self.rank != b.rank or self.ranks != b.ranks:
+                raise Exception("The two tensors are not of the same dimension/rank/partial-ranks")
+            add_c_dict = {}
+            taylor_indices_0 = TaylorTuples(list(range(self.d)), self.ranks[0])
+
+            if len(self.ranks) > 1:
+                
+                for tt0 in taylor_indices_0:
+                    tt0 = tt0 if isinstance(tt0, tuple) else (tt0,)
+                    for tt1 in taylor_indices_1:
+                        tt1 = tt1 if isinstance(tt1, tuple) else (tt1,)
+                        add_c_dict[tt0 + tt1] = self[tt0 + tt1] + b[tt0 + tt1]
+                # print(taylor_indices_0, taylor_indices_1, add_c_dict)
+            else:
+                for tt0 in taylor_indices_0:
+                    add_c_dict[tt0] = self[tt0] + b[tt0]
+
+            return JSymmetricTensor(d=self.d, rank=self.rank, ranks=self.ranks, c_dict=add_c_dict)
+        else:
+            raise Exception("Can only add Joint-Symmetric Tensors")
+
+    def __add__(self, b):
+        if isinstance(b, JSymmetricTensor) or isinstance(b, SymmetricTensor):
+            ## check the two tensors are of the same kind
+            if self.d != b.d or self.rank != b.rank:
+                raise Exception("The two tensors are not of the same dimension/rank")
+
+            add_c_dict = {tt: self[tt] + b[tt] for tt in self.c_dict}
+            return JSymmetricTensor(d=self.d, rank=self.rank, ranks=self.ranks, c_dict=add_c_dict)
+        else:
+            raise Exception("Can only add Joint/Symmetric Tensors")
+
+    def __mul__(self, b):
+        if isinstance(b, SymmetricTensor):
+            """
+            - For each 0-multi-index we can build a SymmetricTensor for the 1-multi-index part
+            - at this point the contraction would be given by calling __mul__ between this sub-tensor and b
+            """
+            taylor_indices_0 = TaylorTuples(list(range(self.d)), self.ranks[0])
+            taylor_indices_1 = TaylorTuples(list(range(self.d)), self.ranks[1])
+            
+            res_c_dict = {}
+            for tt0 in taylor_indices_0:
+                tt0_tuple = tt0 if isinstance(tt0, tuple) else (tt0,)
+                ## building sub tensor
+                c_dict_swap = {}
+                for tt1 in taylor_indices_1:
+                    tt1_tuple = tt1 if isinstance(tt1, tuple) else (tt1,)
+                    c_dict_swap[tt1] = self[tt0_tuple + tt1_tuple]
+                sub_tensor = SymmetricTensor(c_dict = c_dict_swap, d = self.d, rank = self.ranks[1])
+                # print(sub_tensor.c_dict)
+
+                contracion = sub_tensor * b
+                ## the contraction might be a scalar
+                if isinstance(contracion, SymmetricTensor):
+                    for tt_c in contracion.c_dict:
+                        tt_c_tuple = tt_c if isinstance(tt_c, tuple) else (tt_c,)
+                        res_c_dict[tt0_tuple + tt_c_tuple] = contracion[tt_c]
+                else:
+                    res_c_dict[tt0] = contracion
+
+            first_elem_index = list(res_c_dict.keys())[0]
+            new_full_rank = len(first_elem_index) if isinstance(first_elem_index, tuple) else 1
+            new_1_rank = new_full_rank - self.ranks[0]
+
+            if new_1_rank > 0:
+                return JSymmetricTensor(res_c_dict, d=self.d, rank=new_full_rank, ranks=[self.ranks[0], new_1_rank])
+            else:
+                return SymmetricTensor(res_c_dict, d=self.d, rank=new_full_rank)
+            
+        elif not isinstance(b, SymmetricTensor) and not isinstance(b, JSymmetricTensor):
+            ## In this case we assume multiplication by a scalar
+            mul_c_dict = {tt: self[tt] * b for tt in self.c_dict}
+            return JSymmetricTensor(d=self.d, rank=self.rank, ranks=self.ranks, c_dict=mul_c_dict)
+        
+    def __sub__(self, b):
+        if isinstance(b, JSymmetricTensor) or isinstance(b, SymmetricTensor):
+            if self.d != b.d or self.rank != b.rank:
+                raise Exception("Mismathcing dimension/rank!!!")
+            
+            sub_c_dict = {tt: self[tt] - b[tt] for tt in self.c_dict}
+            return JSymmetricTensor(d=self.d, rank=self.rank, ranks=self.ranks, c_dict=sub_c_dict)
+        else:
+            raise Exception("Can only subtract Joint/Symmetric Tensors")
+
+def GetAJSymmetricTensor(d, rank, ranks, root_sym = 'A'):
+    taylor_indices_0 = TaylorTuples(list(range(d)), ranks[0])
+    taylor_indices_1 = TaylorTuples(list(range(d)), ranks[1])
+    swap_dict = {}
+    for tt0 in taylor_indices_0:
+        tt0 = tt0 if isinstance(tt0, tuple) else (tt0,)
+        for tt1 in taylor_indices_1:
+            tt1 = tt1 if isinstance(tt1, tuple) else (tt1,)
+            full_index = tt0 + tt1            
+            lower_indices = reduce(lambda x, y: str(x) + ',' + str(y), full_index)
+            swap_dict[full_index] = sp.Symbol(root_sym + "_{" + lower_indices + "}")
+
+    return JSymmetricTensor(c_dict = swap_dict, d = d, rank = rank, ranks=ranks)
+
 def GetASymmetricTensor(dim, order, root_sym = 'A'):
     _taylor_indices = TaylorTuples(list(range(dim)), order)
     _swap_dict = {}
@@ -533,3 +757,39 @@ def GetGeneralizedKroneckerDelta(d=None, rank=None):
 
         return gen_kr 
         
+def GetPiTensor(d=None, half_rank=None):
+    # Building the half_rank = 1 case
+    ttuples = TaylorTuples(list(range(d)), 2)
+    values = [1 if t[0] == t[1] else 0 for t in ttuples]
+    lead_kr_2 = SymmetricTensor(d=d, rank=2, list_values=values, list_ttuples=ttuples)
+
+    # The final result needs to be a JSymmetricTensor - at least from half_rank>=2
+    if half_rank == 1:
+        return lead_kr_2
+    
+    if half_rank > 1:
+        root_index_list = list(range(2 * half_rank))
+        index_lists = [root_index_list]
+        last_perm = root_index_list
+
+        for i in range(half_rank - 1):
+            last_perm = cycle_list(last_perm, half_rank)
+            index_lists += [last_perm]
+
+        # tuple_map = lambda in_tuple: map(lambda perm: SplitTuplePerm(in_tuple=in_tuple, perm=perm, split_point=2), index_lists_1)
+
+        follow_Pi_hrankm1 = GetPiTensor(d, half_rank=half_rank-1)
+
+        tuples_map = lambda in_tuple: map(lambda perm: SplitTuplePerm(in_tuple=in_tuple, perm=perm, split_point=half_rank), index_lists)
+        summands = lambda in_tuple: map(lambda out_tuple: lead_kr_2[(out_tuple[0][0], out_tuple[1][0])] * follow_Pi_hrankm1[out_tuple[0][1:] + out_tuple[1][1:]], tuples_map(in_tuple))
+        sum_results = lambda in_tuple: reduce(lambda x, y: x + y, summands(in_tuple))
+
+        taylor_indices_0 = TaylorTuples(list(range(d)), half_rank)
+        taylor_indices_1 = TaylorTuples(list(range(d)), half_rank)
+
+        swap_dict = {}
+        for tt0 in taylor_indices_0:
+            for tt1 in taylor_indices_1:
+                swap_dict[tt0 + tt1] = sum_results(tt0 + tt1) / half_rank
+
+        return JSymmetricTensor(d=d, rank=2*half_rank, ranks=[half_rank, half_rank], c_dict=swap_dict)
