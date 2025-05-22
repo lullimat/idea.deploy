@@ -1492,9 +1492,17 @@ class IdpyStencil:
                                     _codify_sympy_sub_assignment
                                 )
 
+                                abs_value_swap = abs((_xi[_d]) * _weights_values[_q])
+                                if type(abs_value_swap) is not float:
+                                    abs_value_swap = abs_value_swap.evalf()
+
                                 _dx_hnd = \
-                                    (str(abs((_xi[_d]) * _weights_values[_q]).evalf()) + '*' + 
+                                    (str(abs_value_swap) + '*' + 
                                      _array_value(str(_array), 'n_' + root_coord, use_ptrs))
+
+                                # _dx_hnd = \
+                                #     (str(abs((_xi[_d]) * _weights_values[_q]).evalf()) + '*' + 
+                                #      _array_value(str(_array), 'n_' + root_coord, use_ptrs))
 
                                 _swap_code += \
                                     _assignement_function('d_' + str(_array) + '_' + str(_d), _dx_hnd)
