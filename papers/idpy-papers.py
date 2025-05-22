@@ -73,7 +73,8 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia",
                          "Xiaowen Shan"],
-             "doi": "", "doi-dir": "",
+             "doi": "10.1007/978-981-19-6462-6_14", 
+             "doi-dir": "doi-10.1007-978-981-19-6462-6_14",
              "git": "https://github.com/lullimat/arXiv-2112.02574.git"}
         
         self.arxiv_papers['arXiv-2212.07848'] = \
