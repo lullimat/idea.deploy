@@ -301,7 +301,7 @@ then
 fi
 
 ## Building pycuda
-if((CUDA_F && PYCUDA_F == 0))
+if((CUDA_F && PYCUDA_F == 0 && 0))
 then
     if [ ! -f ${VENV_SRC}/${TAR_PYCUDA} ]
     then
@@ -347,7 +347,7 @@ fi
 echo
 echo
 ## Building pyopencl
-if((PYOPENCL_F == 0))
+if((PYOPENCL_F == 0 && 0))
 then
     if [ ! -f ${VENV_SRC}/${TAR_PYOPENCL} ]
     then

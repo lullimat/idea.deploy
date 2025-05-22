@@ -34,3 +34,5 @@ python-sat[pblib,aiger]
 networkx[all]
 multiprocess
 mlx
+pycuda
+pyopencl
