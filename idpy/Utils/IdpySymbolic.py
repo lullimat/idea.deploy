@@ -139,6 +139,28 @@ def GetTaylorDerivativesDict(_f, _sym_list, _n):
         return _swap_dict
     else:
         return {'_': _swap_res[0]}
+    
+#########################################
+
+def GetTaylorExpansion(_f, _vars, _delta, _order):
+    _expr = 0
+    for _i in range(_order + 1):
+        for _der in GetTaylorDerivatives(_f, _vars, _i)[0]:
+            _expr += ((_delta ** _i) / sp.factorial(_i)) * _der
+        
+    return _expr
+
+def GetDerivativeCut(_expr, _index, _max_order):
+    '''
+    Getting the highest power of _index
+    '''
+    _hp = sp.LM(_expr, _index).exp
+    for _i in range(_max_order + 1, _hp + 1):
+        _expr = _expr.subs((_index ** _i), 0)
+        
+    return _expr
+
+#########################################
 
 '''
 class SymmetricTensor:
