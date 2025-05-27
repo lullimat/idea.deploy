@@ -157,4 +157,47 @@ def FindTwoPiAngle(rel, ref):
     if cosine >= 0 and sine < 0:
         return 2 * math.pi + math.asin(sine)
 
+# GetDihedralVectorsG
+from idpy.Utils.Combinatorics import GetUniquePermutations
 
+def GetBinaryList(integer, n_list):
+    binary_list = [int(x) for x in bin(integer)[2:]]
+    n_bits = len(binary_list)
+    binary_list = binary_list if n_bits == n_list else [0] * (n_list - n_bits) + binary_list
+    return np.array(binary_list)
+
+def GetDihedralVectorsG(root_v, no_unique=False):
+    d = len(root_v)
+    if no_unique:
+        u_root_vector = list(root_v)
+        counts = [1] * len(root_v)
+    else:
+        u_root_vector, counts = np.unique(root_v, return_counts=True)
+    
+    # u_root_vector, counts = np.unique(root_v, return_counts=True)
+        
+    root_permutations = \
+        GetUniquePermutations(
+            [c for c in zip(u_root_vector, counts) if c[0] != 0], d
+        )
+    
+    """
+    I can flip the signs in all possible permutations by simply knowing how many componets are different from zero
+    Then I can take all the permutations only for that length, which is feasible
+    """        
+    nnzero_digits = len(root_v[root_v != 0])
+    
+    group_vectors = []
+    for xi in root_permutations:
+        nnzero_where = xi != 0
+        for i in range(2 ** nnzero_digits):
+            binary_mask = GetBinaryList(i, nnzero_digits)
+            # print("binary_mask:", binary_mask)
+            xi_swap = np.copy(xi)
+            xi_swap[nnzero_where] = xi_swap[nnzero_where] * ((-1) ** binary_mask)
+            group_vectors += [xi_swap]
+
+    return group_vectors
+
+def GetRootVector(vector):
+    return np.flip(np.sort(np.abs(vector)))
