@@ -203,6 +203,23 @@ def CheckOCLFP(tenet, custom_types):
     else:
         return custom_types
 
+"""
+Possibly insert it back in 'CheckOCLFP'
+"""
+def SwitchToFP32(custom_types):
+    print("Changing all custom types from 64-bits to 32-bits")
+    _swap_dict = {}
+    for key, value in custom_types.Push().items():
+        if value == 'double':
+            value = 'float'
+
+        if value == 'unsigned long':
+            value = 'unsigned int'
+            
+        _swap_dict[key] = value
+        
+    return CustomTypes(_swap_dict)
+
 '''
 Method GetParamsClean
 '''
