@@ -82,20 +82,27 @@ class IdpyPapers:
              "Authors": ["Matteo Lulli", "Luca Biferale",
                          "Giacomo Falcucci", "Mauro Sbragaglia", "Dong Yang",
                          "Xiaowen Shan"],
-             "doi": "", "doi-dir": "",
+             "doi": "10.1103/PhysRevE.109.045304", 
+             "doi-dir": "10.1103-PhysRevE.109.045304",
              "git": "https://github.com/lullimat/arXiv-2212.07848.git"}
 
         self.arxiv_papers['arXiv-2310.03632'] = \
             {"Title": "The exact evaluation of hexagonal spin-networks and topological quantum neural networks",
              "Authors": ["Matteo Lulli", "Antonino Marciano", "Emanuele Zappala"],
-             "doi": "", "doi-dir": "",
+             "doi": "10.1002/prop.70005", 
+             "doi-dir": "doi-10.1002-prop.70005",
              "git": "https://github.com/lullimat/arXiv-2310.03632"}
         
         self.arxiv_papers['arXiv-2503.05743'] = \
             {"Title": "A note on the lattice momentum balance in the lattice Boltzmann interaction-framework", 
              "Authors": ["Francesca Pelusi", "Matteo Lulli", "Christophe Coreixas", "Mauro Sbragaglia", "Xiaowen Shan"], 
              "doi": "", "doi-dir": "", "git": "https://github.com/lullimat/arXiv-2503.05743.git"}
-        
+
+        self.arxiv_papers['arXiv-2505.23647'] = \
+            {"Title": "Higher-order Tuning of Interface Physics in Multiphase Lattice Boltzmann", 
+             "Authors": ["Matteo Lulli", "Emily S. C. Ching"], 
+             "doi": "", "doi-dir": "", "git": "https://github.com/lullimat/arXiv-2505.23647.git"}
+
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
 
