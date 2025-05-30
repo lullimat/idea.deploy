@@ -28,7 +28,7 @@ __status__ = "Development"
 import sympy as sp
 import numpy as np
 
-from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
+from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP, SwitchToFP32
 
 from idpy.IdpyCode import IDPY_T, OCL_T, CUDA_T
 from idpy.IdpyCode import IdpyMemory
@@ -2101,7 +2101,7 @@ class ShanChenMultiPhase(RootLB):
                  'set_ordering', 'use_ptrs',
                  'fluctuations', 'prng_kind', 'init_seed',
                  'prng_init_from', 'prng_distribution',
-                 'indep_gaussian']
+                 'indep_gaussian', 'fp32_flag']
             )
 
         if 'f_stencil' not in self.params_dict:
@@ -2117,7 +2117,7 @@ class ShanChenMultiPhase(RootLB):
             raise Exception("Missing 'psi_code', e.g. psi_code = '(PsiType) exp(-1/ln_0)'")
 
         if 'lang' not in self.params_dict:
-            raise Exception("Param lang = CUDA_T | OCL_T is needed")
+            raise Exception("Param lang = CUDA_T | OCL_T | CTYPES_T is needed")
 
         if 'psi_sym' not in self.params_dict:
             raise Exception(
@@ -2149,8 +2149,14 @@ class ShanChenMultiPhase(RootLB):
         if 'fluctuations' not in self.params_dict:
             self.params_dict['fluctuations'] = None
 
+        if 'fp32_flag' not in self.params_dict:
+            self.params_dict['fp32_flag'] = False
+
         self.custom_types = \
             CheckOCLFP(tenet = self.tenet, custom_types = self.custom_types)
+        
+        if self.params_dict['fp32_flag']:
+            self.custom_types = SwitchToFP32(self.custom_types)
 
         print(self.custom_types.Push())
             
