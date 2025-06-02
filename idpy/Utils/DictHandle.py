@@ -96,6 +96,9 @@ def Edit_Float32ToFloat(elem = None, verbose = False):
 		return float(elem), True
 	else:
 		return elem, None
+	
+def Edit_AllFloat(elem = None, verbose = False):
+	return float(elem), True
 
 def Check_WhichNDArray(elem = None, verbose = False):
 	return elem, type(elem) == np.ndarray
