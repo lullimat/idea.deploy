@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -85,11 +85,11 @@ class SCFStencils:
         if len_2s[-1] == 32:
             found = True
             self.e_max = 16
-            
+
         while not found:
             n_eq += self.n_eqs_order(self.e_max)
             #if n_eq == len(self.unique_groups_indices):
-            if n_eq == len(self.len_2s):
+            if n_eq >= len(self.len_2s):
                 found = True
             else:
                 self.e_max += 2
@@ -188,6 +188,8 @@ class SCFStencils:
             for _ in self.typ_eq_s:
                 for __ in self.typ_eq_s[_]:
                     eqs_list.append(__)
+
+            ##print(eqs_list)
                     
         if len(eqs_list) != len(self.w_sym_list) and not override:
             print("Number of equations %d != Number of weights: %d; %s" %

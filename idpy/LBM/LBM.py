@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -45,7 +45,15 @@ from idpy.IdpyCode import idpy_langs_sys, idpy_langs_list
 
 from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyFunction
-from idpy.IdpyCode.IdpyCode import IdpyMethod, IdpyLoop
+from idpy.IdpyCode.IdpyCode import IdpyMethod, IdpyLoop, IdpyLoopProfile
+
+from idpy.LBM.LBMKernelsMeta import K_MRTCollideStreamMeta, K_SRTCollideStreamMeta
+from idpy.LBM.LBMKernelsMeta import K_StreamPeriodicMeta
+from idpy.IdpyCode.IdpyUnroll import _get_seq_macros
+
+from idpy.IdpyStencils.IdpyStencils import IdpyStencil
+
+import matplotlib.pyplot as plt
 
 if idpy_langs_sys[OCL_T]:
     import pyopencl as cl
@@ -89,14 +97,24 @@ FStencils['D2E4'] = {'Es': ((1, 0), (0, 1), (-1, 0), (0, -1),
                             1/12, 1/12, 1/12, 1/12)}
 
 FStencils['D2E6'] = {'Es': ((1, 0), (0, 1), (-1, 0), (0, -1),
-                            (1, 1), (-1, 1), (-1, -1), (1, -1)),
-                     'Ws': (1/3, 1/3, 1/3, 1/3,
-                            1/12, 1/12, 1/12, 1/12)}
+                            (1, 1), (-1, 1), (-1, -1), (1, -1),
+                            (2, 0), (0, 2), (-2, 0), (0, -2)),
+                     'Ws': (4/15, 4/15, 4/15, 4/15,
+                            1/10, 1/10, 1/10, 1/10,
+                            1/120, 1/120, 1/120, 1/120)}
 
 FStencils['D2E8'] = {'Es': ((1, 0), (0, 1), (-1, 0), (0, -1),
-                            (1, 1), (-1, 1), (-1, -1), (1, -1)),
-                     'Ws': (1/3, 1/3, 1/3, 1/3,
-                            1/12, 1/12, 1/12, 1/12)}
+                            (1, 1), (-1, 1), (-1, -1), (1, -1),
+                            (2, 0), (0, 2), (-2, 0), (0, -2),
+                            (2, 1), (1, 2), (-1, 2), (-2, 1),
+                            (-2, -1), (-1, -2), (1, -2), (2, -1),
+                            (2, 2), (-2, 2), (-2, -2), (2, -2)),
+                     'Ws': (4/21, 4/21, 4/21, 4/21,
+                            4/45, 4/45, 4/45, 4/45,
+                            1/60, 1/60, 1/60, 1/60,
+                            2/315, 2/315, 2/315, 2/315,
+                            2/315, 2/315, 2/315, 2/315,
+                            1/5040, 1/5040, 1/5040, 1/5040)}
 
 FStencils['D3E4'] = {'Es': ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
                             (1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0),
@@ -170,7 +188,12 @@ LBMTypes = CustomTypes({'PopType': 'double',
                         'NType': 'double', 
                         'UType': 'double',
                         'PsiType': 'double',
+                        'ChiType': 'double',
+                        'ThetaType': 'double',
+                        'MuType': 'double',
                         'SCFType': 'double',
+                        'NoiseType': 'double',
+                        'ForceType': 'double',
                         'SType': 'int',
                         'WType': 'double',
                         'LengthType': 'double',
@@ -226,6 +249,40 @@ def ComputeCenterOfMass(lbm, c_i = ''):
     return _mass, _cm_coords
 
 
+def GetSnapshotN(lbm):
+    first_flag = False
+
+    if 'snapshots_n_k' not in lbm.sims_idpy_memory:
+        lbm.sims_idpy_memory['snapshots_n_k'] = 0
+        first_flag = True
+
+    if 'root_snapshots' in lbm.sims_vars:
+        _root_snaps = lbm.sims_vars['root_snapshots']
+    else:
+        _root_snaps = './'
+
+    if 'dpi_snapshots' in lbm.sims_vars:
+        _dpi_snaps = lbm.sims_vars['dpi_snapshots']
+    else:
+        _dpi_snaps = 150
+
+
+    _n_swap = lbm.GetDensityField()
+    _dim = len(lbm.sims_vars['dim_sizes'])
+
+    if _dim == 3:
+        _n_swap = _n_swap[lbm.sims_vars['dim_sizes'][2]//2,:,:] 
+
+    _k_fig = lbm.sims_idpy_memory['snapshots_n_k']
+    _fig = plt.figure()
+    plt.imshow(_n_swap, origin = 'lower')
+    plt.savefig(_root_snaps + 'snapshot_' + ('%010d' % (_k_fig)) + '.png', dpi = _dpi_snaps)
+    plt.close()
+
+    lbm.sims_idpy_memory['snapshots_n_k'] += 1
+    
+    return False
+
 def CheckCenterOfMassDeltaPConvergence(lbm):
     _first_flag = False
     if 'cm_conv' not in lbm.aux_vars:
@@ -273,12 +330,17 @@ def CheckCenterOfMassDeltaPConvergence(lbm):
         print()
 
     lbm.sims_vars['cm_conv'].append(np.copy(lbm.sims_vars['cm_coords']))
-    lbm.sims_vars['delta_p'].append(_delta_p)
-    lbm.sims_vars['p_in'].append(_p_in)
-    lbm.sims_vars['p_out'].append(_p_out)
+    lbm.sims_vars['delta_p'].append(float(_delta_p))
+    lbm.sims_vars['p_in'].append(float(_p_in))
+    lbm.sims_vars['p_out'].append(float(_p_out))
     lbm.sims_vars['is_centered_seq'].append(lbm.sims_vars['is_centered'])
     
     return _break_f
+
+def CheckMinMaxAveN(lbm):
+    _u_swap = lbm.sims_idpy_memory['n'].D2H()
+    print(np.mean(_u_swap), np.amax(_u_swap), np.amin(_u_swap))
+    return False
 
 def CheckUConvergence(lbm):
     first_flag = False
@@ -375,7 +437,7 @@ def InitStencilWeights(xi_stencil, custom_types):
     XI_list = [x for xi in xi_stencil['XIs'] for x in xi]
     XI_list = np.array(XI_list, NPT.C[custom_types['SType']])
     W_list = np.array(xi_stencil['Ws'], NPT.C[custom_types['WType']])
-    c2 = xi_stencil['c2']
+    c2 = float(xi_stencil['c2'])
     return Q, XI_list, W_list, c2
 
 def InitFStencilWeights(f_stencil, custom_types):
@@ -387,8 +449,13 @@ def InitFStencilWeights(f_stencil, custom_types):
     and the square of the sound speed c2
     all types are cast to the appropriate np type
     '''
-    EQ = len(f_stencil['Es'])
-    E_list = [x for e in f_stencil['Es'] for x in e]
+    if 'Es' in f_stencil:
+        EQ = len(f_stencil['Es'])
+        E_list = [x for e in f_stencil['Es'] for x in e]
+    if 'XIs' in f_stencil:
+        EQ = len(f_stencil['XIs'])
+        E_list = [x for e in f_stencil['XIs'] for x in e]
+        
     E_list = np.array(E_list, NPT.C[custom_types['SType']])
     EW_list = np.array(f_stencil['Ws'], NPT.C[custom_types['WType']])
     return EQ, E_list, EW_list
@@ -409,12 +476,22 @@ class RootLB(IdpySims):
             
         self.kwargs = \
             GetParamsClean(kwargs, [self.params_dict],
-                           needed_params = ['custom_types', 'dim_sizes', 'xi_stencil'])
+                           needed_params = ['custom_types', 'dim_sizes', 'xi_stencil',
+                                            'root_dim_sizes', 'root_strides', 'root_coord'])
 
         if 'dim_sizes' not in self.params_dict:
             raise Exception("Missing parameter 'dim_sizes'")
         if 'xi_stencil' not in self.params_dict:
             raise Exception("Missing parameter 'xi_stencil'")
+
+        if 'root_dim_sizes' not in self.params_dict:
+            self.params_dict['root_dim_sizes'] = 'L'
+            
+        if 'root_strides' not in self.params_dict:
+            self.params_dict['root_strides'] = 'STR'
+            
+        if 'root_coord' not in self.params_dict:
+            self.params_dict['root_coord'] = 'x'        
 
         custom_types = None
         if 'custom_types' in self.params_dict:
@@ -430,15 +507,66 @@ class RootLB(IdpySims):
             self.sims_vars['dim_strides'], self.sims_vars['dim_center'], \
             self.sims_vars['V'] = InitDimSizesStridesVolume(dim_sizes, custom_types)
 
+        '''
+        Managing one-dimensional case
+        '''
+        if len(self.sims_vars['dim_strides']) == 0:
+            self.sims_vars['dim_strides'] = self.sims_vars['dim_sizes']
+
+
         self.sims_vars['Q'], self.sims_vars['XI_list'], \
             self.sims_vars['W_list'], self.sims_vars['c2'] = \
                 InitStencilWeights(xi_stencil, custom_types)
 
+        '''
+        Defining ordering lambdas for populations and velocity
+        '''
+        self.sims_vars['ordering_lambdas'] = \
+            defaultdict(
+                lambda: defaultdict(dict)
+            )
+
+        self.sims_vars['ordering_lambdas']['gpu']['pop'] = \
+            lambda pos, q: str(pos) + ' + ' + str(q) +  ' * V'
+        self.sims_vars['ordering_lambdas']['cpu']['pop'] = \
+            lambda pos, q: str(q) + ' + ' + str(pos) +  ' * Q'
+        
+        self.sims_vars['ordering_lambdas']['gpu']['u'] = \
+            lambda pos, d: str(pos) + ' + ' + str(d) +  ' * V'
+        self.sims_vars['ordering_lambdas']['cpu']['u'] = \
+            lambda pos, d: str(d) + ' + ' + str(pos) +  ' * DIM'
+        
+        '''
+        Defining Constants
+        '''
         self.constants = {'V': self.sims_vars['V'],
                           'Q': self.sims_vars['Q'],
                           'DIM': self.sims_vars['DIM'],
                           'CM2': 1/self.sims_vars['c2'],
-                          'CM4': 1/(self.sims_vars['c2'] ** 2)}
+                          'CM4': 1/(self.sims_vars['c2'] ** 2),
+                          'PI': np.pi}
+
+        '''
+        Macros for meta-programming kernels
+        '''
+        ## dim_sizes
+        _swap_macros_sizes = \
+            _get_seq_macros(self.sims_vars['DIM'], self.params_dict['root_dim_sizes'])
+        for _i, _ in enumerate(self.sims_vars['dim_sizes']):
+            self.constants[_swap_macros_sizes[_i]] = _
+
+        ## dim_strides
+        '''
+        _swap_macros_strides = \
+            _get_seq_macros(self.sims_vars['DIM'] - 1, self.params_dict['root_strides'])
+        '''
+        _swap_macros_strides = \
+            _get_seq_macros(
+                len(self.sims_vars['dim_strides']), 
+                self.params_dict['root_strides'])
+            
+        for _i, _ in enumerate(self.sims_vars['dim_strides']):
+            self.constants[_swap_macros_strides[_i]] = _
 
         '''
         memory to be allocated
@@ -450,16 +578,16 @@ class RootLB(IdpySims):
                                  'XI_list': None,
                                  'W_list': None}
         
-    def InitMemory(self, tenet, custom_types): 
+    def InitMemory(self, tenet, custom_types):
         self.sims_idpy_memory['pop'] = \
             IdpyMemory.Zeros(shape = self.sims_vars['V'] * self.sims_vars['Q'],
                              dtype = NPT.C[custom_types['PopType']],
                              tenet = tenet)
-        
+
         self.sims_idpy_memory['dim_sizes'] = \
             IdpyMemory.OnDevice(self.sims_vars['dim_sizes'],
                                 tenet = tenet)
-        
+
         self.sims_idpy_memory['dim_strides'] = \
             IdpyMemory.OnDevice(self.sims_vars['dim_strides'],
                                 tenet = tenet)
@@ -467,10 +595,10 @@ class RootLB(IdpySims):
         self.sims_idpy_memory['dim_center'] = \
             IdpyMemory.OnDevice(self.sims_vars['dim_center'],
                                 tenet = tenet)
-        
+
         self.sims_idpy_memory['XI_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['XI_list'], tenet = tenet)
-        
+    
         self.sims_idpy_memory['W_list'] = \
             IdpyMemory.OnDevice(self.sims_vars['W_list'], tenet = tenet)
 
@@ -478,6 +606,185 @@ class RootLB(IdpySims):
         IdpySims.DumpSnapshot(self, file_name = file_name,
                               custom_types = self.custom_types)
 
+    def GetWalls(self, walls):
+        if 'xi_opposite' not in self.sims_idpy_memory:
+            _swap_idpy_stencil=IdpyStencil(self.params_dict['xi_stencil'])
+            _swap_opposite = np.zeros(self.sims_vars['Q'], dtype=NPT.C[self.custom_types['SType']])
+            for q in _swap_idpy_stencil.opposite:
+                _swap_opposite[q]=_swap_idpy_stencil.opposite[q]
+
+            self.sims_idpy_memory['xi_opposite'] = \
+                IdpyMemory.OnDevice(_swap_opposite, tenet = self.tenet)
+
+        if 'walls' not in self.sims_idpy_memory:
+            self.sims_idpy_memory['walls'] = \
+                IdpyMemory.Const(
+                    shape = self.sims_vars['V'], 
+                    dtype = NPT.C[self.custom_types['FlagType']], 
+                    const = 1, 
+                    tenet = self.tenet)
+
+        _dim_sizes_rev = list(self.sims_vars['dim_sizes'])
+        _dim_sizes_rev.reverse()
+        if list(walls.shape) == _dim_sizes_rev:
+            _walls_swap = np.array(walls, dtype=NPT.C[self.custom_types['FlagType']])
+            self.sims_idpy_memory['walls'].H2D(np.ravel(_walls_swap))
+
+
+    def GetDensityField(self):
+        _n_swap = self.sims_idpy_memory['n'].D2H()
+        _n_swap = _n_swap.reshape(np.flip(self.sims_vars['dim_sizes']))
+        return _n_swap
+
+    def GetVelocityField(self):
+        if 'set_ordering' not in self.params_dict:
+            raise Exception("Variable 'set_ordering' not present in 'params_dict'")
+        
+        _u_swap = self.sims_idpy_memory['u'].D2H()
+
+        _u_dims = None
+        if self.params_dict['set_ordering'] == 'cpu':
+            _u_dims = np.flip(np.append([self.sims_vars['DIM']], self.sims_vars['dim_sizes']))
+        if self.params_dict['set_ordering'] == 'gpu':
+            _u_dims = np.flip(np.append(self.sims_vars['dim_sizes'], [self.sims_vars['DIM']]))
+            
+        _u_swap = _u_swap.reshape(_u_dims)
+        return _u_swap
+
+    def GetPopulations(self):
+        if 'set_ordering' not in self.params_dict:
+            raise Exception("Variable 'set_ordering' not present in 'params_dict'")
+        
+        _pop_swap = self.sims_idpy_memory['pop'].D2H()
+
+        _pop_dims = None
+        if self.params_dict['set_ordering'] == 'cpu':
+            _pop_dims = np.flip(np.append([self.sims_vars['Q']], self.sims_vars['dim_sizes']))
+        if self.params_dict['set_ordering'] == 'gpu':
+            _pop_dims = np.flip(np.append(self.sims_vars['dim_sizes'], [self.sims_vars['Q']]))
+            
+        _pop_swap = _pop_swap.reshape(_pop_dims)
+        return _pop_swap
+    
+    def SRTCollisionPushStreamMeta(self):
+        _K_SRTCollideStreamMeta = \
+            K_SRTCollideStreamMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag, 
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'], 
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                collect_mul = False, stream_mode = 'push',
+                pressure_mode = 'compute',
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+    
+        Idea = \
+            _K_SRTCollideStreamMeta(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'],
+                     self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['n']])
+        
+        return _K_SRTCollideStreamMeta
+
+    def MRTCollisionPushStreamMeta(self, relaxation_matrix = None, omega_syms_vals = None):
+        if relaxation_matrix is None:
+            raise Exception("Missing argument 'relaxation_matrix'")
+        if omega_syms_vals is None:
+            raise Exception("Missing argument 'omega_syms_vals'")        
+        
+        _K_MRTCollideStreamMeta = \
+            K_MRTCollideStreamMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag, 
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'],
+                relaxation_matrix = relaxation_matrix,
+                omega_syms_vals = omega_syms_vals,
+                ordering_lambda_pop = self.sims_vars['ordering']['pop'],
+                ordering_lambda_u = self.sims_vars['ordering']['u'],
+                collect_mul = False, stream_mode = 'push',
+                pressure_mode = 'compute',
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+    
+        Idea = \
+            _K_MRTCollideStreamMeta(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'],
+                     self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['n']])
+        
+        return _K_MRTCollideStreamMeta
+    
+    def StreamingStepMeta(self, stream_mode = 'push'):
+        _K_StreamPeriodicMeta = \
+            K_StreamPeriodicMeta(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants, f_classes = [],
+                optimizer_flag = self.optimizer_flag,
+                XIStencil = self.params_dict['xi_stencil'],
+                use_ptrs = self.params_dict['use_ptrs'],
+                ordering_lambda = self.sims_vars['ordering']['pop'],
+                collect_mul = False, pressure_mode = 'compute',
+                stream_mode = stream_mode,
+                root_dim_sizes = self.params_dict['root_dim_sizes'],
+                root_strides = self.params_dict['root_strides'],
+                root_coord = self.params_dict['root_coord']
+            )
+
+        Idea = \
+            _K_StreamPeriodicMeta(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'], self.sims_idpy_memory['pop']])
+
+        return _K_StreamPeriodicMeta    
+
+    def StreamingStep(self):
+        _K_StreamPeriodic = \
+            K_StreamPeriodic(
+                custom_types = self.custom_types.Push(),
+                constants = self.constants,
+                f_classes = [F_PosFromIndex,
+                             F_IndexFromPos],
+                optimizer_flag = self.optimizer_flag
+            )        
+
+        Idea = \
+            _K_StreamPeriodic(
+                tenet = self.tenet, 
+                grid = self.sims_vars['grid'], 
+                block = self.sims_vars['block']
+            )
+
+        Idea.Deploy([self.sims_idpy_memory['pop_swap'],
+                     self.sims_idpy_memory['pop'],
+                     self.sims_idpy_memory['XI_list'],
+                     self.sims_idpy_memory['dim_sizes'],
+                     self.sims_idpy_memory['dim_strides']])
+
+        return _K_StreamPeriodic
+    
 class ShanChenMultiPhase(RootLB):
     def __init__(self, *args, **kwargs):
         self.SetupRoot(*args, **kwargs)
@@ -496,7 +803,7 @@ class ShanChenMultiPhase(RootLB):
                             'pop': False}
 
 
-    def MainLoop(self, time_steps, convergence_functions = []):
+    def MainLoop(self, time_steps, convergence_functions = [], profiling = False):
         _all_init = []
         for key in self.init_status:
             _all_init.append(self.init_status[key])
@@ -526,9 +833,11 @@ class ShanChenMultiPhase(RootLB):
                                              f_classes = [F_PosFromIndex,
                                                           F_IndexFromPos],
                                              optimizer_flag = self.optimizer_flag)
+
+        _loop_class = IdpyLoop if not profiling else IdpyLoopProfile
         
         self._MainLoop = \
-            IdpyLoop(
+            _loop_class(
                 [self.sims_idpy_memory],
                 [
                     [
@@ -551,7 +860,8 @@ class ShanChenMultiPhase(RootLB):
                         (_K_StreamPeriodic(tenet = self.tenet,
                                            grid = self.sims_vars['grid'],
                                            block = self.sims_vars['block']), ['pop_swap', 'pop',
-                                                                              'XI_list', 'dim_sizes',
+                                                                              'XI_list',
+                                                                              'dim_sizes',
                                                                               'dim_strides']),
                         (M_SwapPop(tenet = self.tenet), ['pop_swap', 'pop'])
                     ]
@@ -561,13 +871,13 @@ class ShanChenMultiPhase(RootLB):
         '''
         now the loop: need to implement the exit condition
         '''
-        old_step = 0
-        for step in time_steps:
-            print(step, step - old_step)
+        old_step, _profiling_results = 0, {}
+        for step in time_steps[1:]:
+            print("Step:", step)
             '''
             Very simple timing, reasonable for long executions
             '''
-            self._MainLoop.Run(range(step - old_step))
+            _profiling_results[step] = self._MainLoop.Run(range(step - old_step))
             
             old_step = step
             if len(convergence_functions):
@@ -577,6 +887,11 @@ class ShanChenMultiPhase(RootLB):
 
                 if OneTrue(checks):
                     break
+
+        if profiling:
+            return _profiling_results
+        else:
+            return None
         
     def ComputeMoments(self):
         if not self.init_status['pop']:
@@ -621,7 +936,7 @@ class ShanChenMultiPhase(RootLB):
                      self.sims_idpy_memory['W_list']])
         
         self.init_status['pop'] = True
-
+        
     def DeltaPLaplace(self, inside = None, outside = None):
         if 'n_in_n_out' not in self.sims_idpy_memory:
             self.sims_idpy_memory['n_in_n_out'] = \
@@ -747,7 +1062,7 @@ class ShanChenMultiPhase(RootLB):
         self.InitPopulations()
 
         
-    def InitRadialInterface(self, n_g, n_l, R, full_flag = True):
+    def InitRadialInterface(self, n_g, n_l, R, W = 1, full_flag = True):
         '''
         Record init values
         '''
@@ -765,6 +1080,7 @@ class ShanChenMultiPhase(RootLB):
         n_g = NPT.C[self.custom_types['NType']](n_g)
         n_l = NPT.C[self.custom_types['NType']](n_l)
         R = NPT.C[self.custom_types['LengthType']](R)
+        W = NPT.C[self.custom_types['LengthType']](W)
         full_flag = NPT.C[self.custom_types['FlagType']](full_flag)
         
         Idea = _K_InitRadialInterface(tenet = self.tenet,
@@ -776,7 +1092,7 @@ class ShanChenMultiPhase(RootLB):
                      self.sims_idpy_memory['dim_sizes'],
                      self.sims_idpy_memory['dim_strides'],
                      self.sims_idpy_memory['dim_center'],
-                     n_g, n_l, R, full_flag])
+                     n_g, n_l, R, W, full_flag])
         
         self.init_status['n'] = True
         self.init_status['u'] = True
@@ -801,7 +1117,7 @@ class ShanChenMultiPhase(RootLB):
             K_InitFlatInterface(custom_types = self.custom_types.Push(),
                                 constants = self.constants,
                                 f_classes = [F_PosFromIndex,
-                                             F_NFlatProfile],
+                                             F_NFlatProfilePeriodic],
                                 optimizer_flag = self.optimizer_flag)
 
         n_g = NPT.C[self.custom_types['NType']](n_g)
@@ -829,11 +1145,11 @@ class ShanChenMultiPhase(RootLB):
         '''
         self.InitPopulations()
 
-
     def InitVars(self):
         '''
         sims_vars
         '''
+        self.sims_vars['tau'] = self.params_dict['tau']
         self.sims_vars['QE'], self.sims_vars['E_list'], self.sims_vars['EW_list'] = \
             InitFStencilWeights(f_stencil = self.params_dict['f_stencil'],
                                 custom_types = self.custom_types)
@@ -956,9 +1272,9 @@ class ShanChenMultiPhase(RootLB):
                          **self.kwargs)
         
     def End(self):
+        self.tenet.FreeMemoryDict(memory_dict = self.sims_idpy_memory)
         self.tenet.End()
-
-                           
+        ##del self.tenet                 
         
 '''
 Functions
@@ -1081,6 +1397,50 @@ class F_NFlatProfile(IdpyFunction):
         return tanh((LengthType)(x - (x0 - 0.5 * w))) - tanh((LengthType)(x - (x0 + 0.5 * w)));
         """
 
+class F_NFlatProfilePeriodic(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'NType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'SType x': ['const'],
+                       'SType x0': ['const'],
+                       'LengthType w': ['const'],
+                       'SType d_size': ['const']}
+
+        self.functions[IDPY_T] = """
+        SType xm = d_size/2, xp = 0;
+        SType delta = x0 - xm;
+        if(delta >= 0){
+            if(x < x0 - xm) xp = x - (x0 - xm) + d_size;
+            else xp = x - (x0 - xm);
+        }else{
+            if(x < x0 + xm) xp = x - (x0 + xm) + d_size;
+            else xp = x - (x0 + xm);
+        }
+        return tanh((LengthType)(xp - (xm - 0.5 * w))) - tanh((LengthType)(xp - (xm + 0.5 * w)));
+        """
+
+class F_NFlatProfilePeriodicR(IdpyFunction):
+    def __init__(self, custom_types = None, f_type = 'NType'):
+        IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
+        self.params = {'SType x': ['const'],
+                       'LengthType x0': ['const'],
+                       'LengthType w': ['const'],
+                       'SType d_size': ['const']}
+
+        self.functions[IDPY_T] = """
+        SType xm = d_size/2;
+        LengthType xp = 0;
+        SType delta = x0 - xm;
+        if(delta >= 0){
+            if(x < x0 - xm) xp = x - (x0 - xm) + d_size;
+            else xp = x - (x0 - xm);
+        }else{
+            if(x < x0 + xm) xp = x - (x0 + xm) + d_size;
+            else xp = x - (x0 + xm);
+        }
+        return tanh((LengthType)(xp - (xm - 0.5 * w))) - tanh((LengthType)(xp - (xm + 0.5 * w)));
+        """
+
+
 class F_PointDistanceCenterFirst(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'LengthType'):
         IdpyFunction.__init__(self, custom_types = custom_types,
@@ -1116,10 +1476,10 @@ Kernels
 '''
 class K_CenterOfMass(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
         self.params = {'NType * cm_coords': ['global', 'restrict'],
@@ -1138,10 +1498,10 @@ class K_CenterOfMass(IdpyKernel):
 
 class K_CheckU(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
         self.SetCodeFlags('g_tid')
         self.params = {'UType * delta_u': ['global', 'restrict'],
                        'UType * old_u': ['global', 'restrict'],
@@ -1166,10 +1526,10 @@ class K_CheckU(IdpyKernel):
 
 class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
         self.SetCodeFlags('g_tid')
         self.params = {'PopType * pop': ['global', 'restrict'],
                        'UType * u': ['global', 'restrict'],
@@ -1218,16 +1578,15 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
             }
 
             // Compute square norm of Guo shifted velocity
-            UType u_dot_u = 0.;
-            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d];}
+            UType u_dot_u = 0., F_dot_u = 0.;
+            for(int d=0; d<DIM; d++){u_dot_u += lu[d]*lu[d]; F_dot_u  += F[d] * lu[d];}
 
             // Cycle over the populations: equilibrium + Guo
             for(int q=0; q<Q; q++){
-                UType u_dot_xi = 0., F_dot_xi = 0., F_dot_u = 0.; 
+                UType u_dot_xi = 0., F_dot_xi = 0.; 
                 for(int d=0; d<DIM; d++){
                     u_dot_xi += lu[d] * XI_list[d + q*DIM];
                     F_dot_xi += F[d] * XI_list[d + q*DIM];
-                    F_dot_u  += F[d] * lu[d];
                 }
 
                 PopType leq_pop = 1., lguo_pop = 0.;
@@ -1251,7 +1610,7 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
 
 class K_ComputePsi(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [], psi_code = None,
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         if psi_code is None:
             raise Exception("Missing argument psi_code")
 
@@ -1259,7 +1618,7 @@ class K_ComputePsi(IdpyKernel):
         
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
         self.SetCodeFlags('g_tid')
         self.params = {'PsiType * psi': ['global', 'restrict'],
                        'NType * n': ['global', 'restrict', 'const']}
@@ -1303,13 +1662,12 @@ class K_StreamPeriodic(IdpyKernel):
         }
         """
 
-
 class K_ComputeMoments(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1339,10 +1697,10 @@ class K_ComputeMoments(IdpyKernel):
         
 class K_InitPopulations(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1359,7 +1717,7 @@ class K_InitPopulations(IdpyKernel):
             UType lu[DIM], u_dot_u = 0.;
             // Copying the velocity
             for(int d=0; d<DIM; d++){
-                lu[d] = u[g_tid + d * V]; u_dot_u += lu[d];
+                lu[d] = u[g_tid + d * V]; u_dot_u += lu[d] * lu[d];
             }
 
             // Loop over the populations
@@ -1381,7 +1739,7 @@ class K_InitPopulations(IdpyKernel):
         
         }
         """
-            
+
 class K_InitFlatInterface(IdpyKernel):
     '''
     class K_InitFlatInterface:
@@ -1390,10 +1748,10 @@ class K_InitFlatInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files = ['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1415,14 +1773,14 @@ class K_InitFlatInterface(IdpyKernel):
             NType delta_n = full_flag * (n_l - n_g) + (1 - full_flag) * (n_g - n_l);
 
             n[g_tid] = 0.5 * (n_g + n_l) + \
-            0.5 * delta_n * (F_NFlatProfile(dim_center[direction], g_tid_pos[direction], width) - 1.);
+            0.5 * delta_n * (F_NFlatProfilePeriodic(g_tid_pos[direction], dim_center[direction], width, dim_sizes[direction]) - 1.);
 
             for(int d=0; d<DIM; d++){
             u[g_tid + d * V] = 0.;
             }
         }
         """
-
+        
 class K_InitRadialInterface(IdpyKernel):
     '''
     class K_InitRadialInterface:
@@ -1431,10 +1789,10 @@ class K_InitRadialInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1444,7 +1802,7 @@ class K_InitRadialInterface(IdpyKernel):
                        'SType * dim_strides': ['global', 'restrict', 'const'],
                        'SType * dim_center': ['global', 'restrict', 'const'],
                        'NType n_g': ['const'], 'NType n_l': ['const'],
-                       'LengthType R': ['const'],
+                       'LengthType R': ['const'], 'LengthType W': ['const'],
                        'FlagType full_flag': ['const']}
 
         self.kernels[IDPY_T] = """
@@ -1456,7 +1814,7 @@ class K_InitRadialInterface(IdpyKernel):
         NType delta_n = full_flag * (n_l - n_g) + (1 - full_flag) * (n_g - n_l);
 
         n[g_tid] = 0.5 * (n_g + n_l) - \
-        0.5 * delta_n * tanh((LengthType)(r - R));
+        0.5 * delta_n * tanh((LengthType)(r - R) / W);
 
         for(int d=0; d<DIM; d++){
         u[g_tid + d * V] = 0.;
@@ -1473,10 +1831,10 @@ class K_InitCylinderInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None):
+                 optimizer_flag = None, headers_files=['math.h']):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag, headers_files=headers_files)
 
         self.SetCodeFlags('g_tid')
 
@@ -1567,3 +1925,7 @@ class M_SwapPop(IdpyMethod):
 
         return IdpyMethod.PassIdpyStream(self, idpy_stream = idpy_stream)
 
+    def DeployProfiling(self, swap_list = None, idpy_stream = None):
+        swap_list[0], swap_list[1] = swap_list[1], swap_list[0]
+
+        return IdpyMethod.PassIdpyStream(self, idpy_stream = idpy_stream), 0

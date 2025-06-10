@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2021 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -99,7 +99,11 @@ class IdpySims(threading.Thread):
                     print(key, _type, len(self.sims_dump_vars), key not in self.sims_not_dump_vars)
                     '''
                     if _type == np.__name__ or _type == 'builtins':
-                        _grp_vars.create_dataset(key, data = self.sims_vars[key])
+                        ##print(key, _type, self.sims_vars[key])
+                        if self.sims_vars[key] is not None:
+                            _grp_vars.create_dataset(key, data = self.sims_vars[key])
+                        else:
+                            _grp_vars.create_dataset(key, data = h5py.Empty("f"))
                     else:
                         print("Key: ", key, "not builtin/numpy: not dumped!")
         
@@ -127,7 +131,7 @@ class IdpySims(threading.Thread):
         _grp_custom_types = _grp.create_group("custom_types")
         for key, value in custom_types.Push().items():
             _grp_custom_types.create_dataset(str(key),
-                                             data = np.string_(value))
+                                             data = np.bytes_(value))
             
         _out_f.close()
 

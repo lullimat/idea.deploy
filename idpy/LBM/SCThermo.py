@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -37,13 +37,16 @@ from sympy import Rational, diff, simplify
 from sympy import lambdify as sp_lambdify
 from sympy import symbols as sp_symbols
 from sympy import exp as sympy_exp
+from sympy import log as sympy_log
 from sympy.solvers.solveset import nonlinsolve
 from sympy.solvers import solve
 from functools import reduce
 import math
+import sympy as sp
 
 from idpy.LBM.SCFStencils import SCFStencils
 from idpy.Utils.ManageData import ManageData
+import ast as ast_module
 
 def FindSingleZeroRange(func, x_init, delta_val):
     old_val, new_val = func(x_init), func(x_init)
@@ -72,7 +75,7 @@ def FindZeroRanges(func, n_range, n_bins, n_delta, debug_flag = False):
     return zero_ranges
 
 def FindExtrema(func, f_arg, arg_range = (0.01,3.), arg_bins = 256):
-    d_func = lambda f_arg_: diff(func,f_arg).subs(f_arg, f_arg_)
+    d_func = lambda f_arg_: float(diff(func,f_arg).subs(f_arg, f_arg_).evalf())
     arg_delta = (arg_range[1] - arg_range[0])/arg_bins
     zero_ranges = FindZeroRanges(d_func, arg_range, arg_bins, arg_delta)
 
@@ -113,7 +116,7 @@ class ShanChen:
         P_subs_swap = self.P.subs(self.psi, self.psi_f)
         P_subs_swap = P_subs_swap.subs(self.theta, self.theta_val)
         P_subs_swap = P_subs_swap.subs(self.e2, self.e2_val)
-        
+            
         self.d_P = diff(P_subs_swap, self.n)
         self.dd_P = diff(self.d_P, self.n)
         #print([self.d_P, self.dd_P])
@@ -138,6 +141,7 @@ class ShanChen:
             print("Extrema:", self.range_ext)
             self.extrema = FindExtrema(self.P_subs, self.n,
                                        arg_range = (self.n_eps, self.range_ext))
+
             self.coexistence_range = self.FindCoexistenceRange()
             print("Coexistence range (n, P): ", self.coexistence_range)
             print()            
@@ -147,8 +151,11 @@ class ShanChen:
     def PressureTensorInit(self, py_stencil):
         self.PTensor = self.PressureTensor(py_stencil)
 
-    def FlatInterfaceProperties(self, which_sol = 0, eps_val = None):
+    def FlatInterfacePropertiesOld(self, which_sol = 0, eps_val = None):
         self.FInterface = self.FlatInterface(self, self.PTensor, which_sol, eps_val)
+
+    def FlatInterfaceProperties(self, which_sol = 0, eps_val = None, tau = 1, forcing = 'guo'):
+        self.FInterface = self.FlatInterface(self, self.PTensor, which_sol, eps_val, tau, forcing)
             
     def FindCoexistenceRange(self):
         coexistence_range = []
@@ -157,7 +164,8 @@ class ShanChen:
         negative pressures
         '''
         if self.extrema[1][1] > 0:
-            func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1])
+            func_f = lambda f_arg_: \
+                float((self.P_subs.subs(self.n, f_arg_) - self.extrema[1][1]).evalf())
             # Looking for the LEFT limit starting from ZERO
             # and ending after the first stationary point
             arg_swap = bisect(func_f, self.n_eps, self.extrema[0][0])
@@ -168,7 +176,8 @@ class ShanChen:
             
         # Looking for the RIGHT limit starting from the RIGHT extremum
         # that is certainly at the LEFT of the value we are looking for
-        func_f = lambda f_arg_: (self.P_subs.subs(self.n, f_arg_) - self.extrema[0][1])
+        func_f = lambda f_arg_: \
+            float((self.P_subs.subs(self.n, f_arg_) - self.extrema[0][1]).evalf())
         arg_swap = bisect(func_f, self.extrema[1][0] + self.n_eps, self.range_ext + self.n_eps)
         p_swap = self.P_subs.subs(self.n, arg_swap)
         coexistence_range.append((arg_swap, p_swap))
@@ -179,7 +188,7 @@ class ShanChen:
     ####################################################################################
 
     class FlatInterface:
-        def __init__(self, SC, PTensor, which_sol, eps_val):
+        def __init__(self, SC, PTensor, which_sol, eps_val, tau = 1, forcing = 'guo'):
             self.SC, self.PTensor = SC, PTensor
             # defining epsilon
             if eps_val is None:
@@ -190,6 +199,7 @@ class ShanChen:
             print("eps_val:", self.eps_val)
                 
             self.beta_val = self.PTensor.p_consts_wf['\beta'](self.PTensor.py_stencil.w_sol[which_sol])
+            print("beta_val:", self.beta_val)
             self.sigma_c_val = self.PTensor.p_consts_wf['\sigma_c'](self.PTensor.py_stencil.w_sol[which_sol])
             self.tolman_c_val = self.PTensor.p_consts_wf['t_c'](self.PTensor.py_stencil.w_sol[which_sol])
             self.dndx = None
@@ -200,14 +210,62 @@ class ShanChen:
             self.beta = self.PTensor.p_consts_sym['\beta']
             self.sigma_c = self.PTensor.p_consts_sym['\sigma_c']
             self.tolman_c = self.PTensor.p_consts_sym['t_c']
-            # Defining the integrand
-            self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
-            # Substituting \theta and e_2 and psi and eps and G
-            self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
-            self.integrand = self.integrand.subs(self.SC.e2, 1)
-            self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
-            self.integrand = self.integrand.subs(self.eps, self.eps_val)
-            self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+
+            if forcing == 'guo':
+                # Defining the integrand
+                self.integrand = \
+                    (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
+                # Substituting \theta and e_2 and psi and eps and G
+                self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
+                self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
+                self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
+                self.integrand = self.integrand.subs(self.eps, self.eps_val)
+                self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+            
+            if forcing == 'sc' or forcing == 'ks':
+                '''
+                Forcing tau = 1 for Kupershtokh, i.e. 'ks' 
+                '''
+                if forcing == 'ks':
+                    tau = 1
+                
+                _prefactor = 0
+
+                if self.SC.psi_f == sympy_exp(-1/self.SC.n):
+                    _prefactor = \
+                        sympy_exp(
+                            self.eps * \
+                            ((self.SC.psi_f ** 2) * (sympy_log(self.SC.psi_f) - 1 / 2) / 2)
+                        )
+                if self.SC.psi_f == 1 - sympy_exp(-self.SC.n):
+                    _prefactor = \
+                        sympy_exp(
+                            self.eps * (sp.Ei(-2 * self.SC.n) - sp.Ei(-self.SC.n))
+                        )
+                
+                # Defining the integrand
+                self.integrand = \
+                    (self.p_0 - self.SC.P) * self.SC.d_psi_f * _prefactor / self.SC.psi_f
+                
+                # Substituting \theta and e_2 and psi and eps and G
+                self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
+                self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
+                self.integrand = \
+                    self.integrand.subs(self.eps,
+                                        -2 * ((2*tau - 1) ** 2) * self.SC.G * self.SC.e2)
+                
+                self.integrand = self.integrand.subs(self.SC.e2, self.SC.e2_val)
+                self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+
+            # # Defining the integrand
+            # self.integrand = (self.p_0 - self.SC.P)*self.SC.d_psi_f/(self.SC.psi_f**(1 + self.eps))
+            # # Substituting \theta and e_2 and psi and eps and G
+            # self.integrand = self.integrand.subs(self.SC.theta, self.SC.theta_val)
+            # self.integrand = self.integrand.subs(self.SC.e2, 1)
+            # self.integrand = self.integrand.subs(self.SC.psi, self.SC.psi_f)
+            # self.integrand = self.integrand.subs(self.eps, self.eps_val)
+            # self.integrand = self.integrand.subs(self.SC.G, self.SC.G_val)
+
             # Make a function of n and p_0
             self.integrand_np = \
                 (lambda n_, p_ :
@@ -233,8 +291,8 @@ class ShanChen:
             arg_delta = (arg_range[1] - arg_range[0])/arg_bins
             
             delta_func_f = (lambda arg_: 
-                            (self.SC.P_subs.subs(self.SC.n, arg_) - 
-                             self.SC.P_subs.subs(self.SC.n, arg_range[0])))
+                            float((self.SC.P_subs.subs(self.SC.n, arg_) - 
+                                   self.SC.P_subs.subs(self.SC.n, arg_range[0])).evalf()))
             
             zero_ranges = FindZeroRanges(delta_func_f, arg_range, arg_bins, arg_delta,
                                          debug_flag = False)
@@ -252,7 +310,7 @@ class ShanChen:
             
             return target_values
 
-        def MechanicEquilibrium(self, n_bins = 32):
+        def MechanicEquilibrium(self, n_bins = 2 ** 5):
             # Need to find the zero of self.maxwell_integral_delta
             # Delta can vary between (0, and the difference between the gas maximum
             # and the beginning of the coexistence region
@@ -394,14 +452,14 @@ class ShanChen:
             self.chi_i_c, self.chi_t_c, self.chi_n_c = [0] * 25, [0] * 25, [0] * 25
             
             # alpha
-            self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 2, 4, 4
-            self.alpha_c[9], self.alpha_c[10] = 12, 24
-            self.alpha_c[13], self.alpha_c[16], self.alpha_c[17] = Rational(88, 3), 40, 80
+            self.alpha_c[4], self.alpha_c[5], self.alpha_c[8] = 24, 48, 48
+            self.alpha_c[9], self.alpha_c[10] = 144, 288
+            self.alpha_c[13], self.alpha_c[16], self.alpha_c[17] = 336, 480, 960
             # beta
             self.beta_c[1], self.beta_c[2], self.beta_c[4], self.beta_c[5], self.beta_c[8] = \
-                Rational("1/2"), 1, 6, 13, 12
-            self.beta_c[9], self.beta_c[10] = Rational(57, 2), 58
-            self.beta_c[13], self.beta_c[16], self.beta_c[17] = Rational(203, 3), 88, 177
+                6, 12, 72, 156, 144
+            self.beta_c[9], self.beta_c[10] = 342, 696
+            self.beta_c[13], self.beta_c[16], self.beta_c[17] = 828, 1056, 2124
             # gamma
             self.gamma_c[5], self.gamma_c[8], self.gamma_c[10] = 1, 4, Rational(8, 3)
             self.gamma_c[13], self.gamma_c[17] = Rational(68, 3), 5
@@ -415,7 +473,7 @@ class ShanChen:
             # sigma_c
             self.sigma_c_c[1], self.sigma_c_c[4], self.sigma_c_c[5] = -6, -96, -108
             self.sigma_c_c[9], self.sigma_c_c[10] = -486, -768
-            self.sigma_c_c[13], self.sigma_c_c[16], self.sigma_c_c[17] = -300, -1536, 2700
+            self.sigma_c_c[13], self.sigma_c_c[16], self.sigma_c_c[17] = -300, -1536, -2700
             # tolman_c
             self.tolman_c_c[1], self.tolman_c_c[4], self.tolman_c_c[5] = \
                 -Rational('1/2'), -6, -6
@@ -458,11 +516,11 @@ class ShanChen:
             self.p_consts_w = {}
             self.p_consts_w['\alpha'] = 0
             for len2 in self.py_stencil.len_2s:
-                self.p_consts_w['\alpha'] += -12*self.alpha_c[len2] * self.w_sym[len2]
+                self.p_consts_w['\alpha'] += -self.alpha_c[len2] * self.w_sym[len2]
 
             self.p_consts_w['\beta'] = 0
             for len2 in self.py_stencil.len_2s:
-                self.p_consts_w['\beta'] += 12*self.beta_c[len2] * self.w_sym[len2]
+                self.p_consts_w['\beta'] += self.beta_c[len2] * self.w_sym[len2]
             
             self.p_consts_w['\gamma'] = 0
             for len2 in self.py_stencil.len_2s:
@@ -528,7 +586,9 @@ class ShanChanEquilibriumCache(ManageData):
     def __init__(self,
                  stencil = None,
                  G = None, c2 = None, psi_f = None,
-                 dump_file = 'SCEqCache'):
+                 dump_file = 'SCEqCache.json', n_eps = 1e-2, 
+                 forcing = 'guo', tau = 1):
+        
         ManageData.__init__(self, dump_file = dump_file)
 
         if stencil is None:
@@ -542,14 +602,26 @@ class ShanChanEquilibriumCache(ManageData):
 
         if psi_f is None:
             raise Exception("Missing argument psi_f")
+        
+        if forcing == 'ks':
+            forcing = 'sc'
+            tau = 1
 
+        if forcing == 'guo':
+            tau = 1
+
+        self.n_eps = n_eps
 
         '''
         Looking for the file and data
         '''
-        self.is_file, self.is_key = ManageData.Read(self), False
+        self.is_file, self.is_key = ManageData.Read(self, kind = 'json'), False
         self.dict_string = (str(psi_f) + "_" + str(float(G)) + "_" +
-                            str(c2) + "_" + str(stencil.w_sol[0]))
+                            str(c2) + "_" + str(stencil.w_sol[0]) + "_" +
+                            str(forcing) + "_" + str(tau))
+
+        self.dict_string = self.dict_string.replace(" ", "_")
+        
         if self.is_file:
             if self.dict_string in ManageData.WhichData(self):
                 self.data = ManageData.PullData(self, self.dict_string)
@@ -575,24 +647,37 @@ class ShanChanEquilibriumCache(ManageData):
 
             _e2_expr = stencil.e_expr[2]
             self.e2_lambda = sp_lambdify([w_sym_list], _e2_expr)
+            _e4_expr = stencil.e_expr[4]
+            self.e4_lambda = sp_lambdify([w_sym_list], _e4_expr)
 
+            '''
+            This part expects the weights to be provided in order
+            starting from w(1)...need to change it
+            '''
             _weights_list = None
             if len(stencil.w_sol[0]) != 10:
                 len_diff = 10 - len(stencil.w_sol[0])
                 if len_diff < 0:
-                    raise Exception("The number of weights must be 5 at most!")
+                    raise Exception("The number of weights must be 10 at most!")
                 _weights_list = stencil.w_sol[0] + [0 for i in range(len_diff)]
             else:
                 _weights_list = stencil.w_sol[0]
 
+            print("e2:", self.e2_lambda(_weights_list))
+            print("e4:", self.e4_lambda(_weights_list))
+            print()
 
             _shan_chen = \
                 ShanChen(psi_f = psi_f, G_val = G,
                          theta_val = c2,
-                         e2_val = self.e2_lambda(_weights_list))
+                         e2_val = self.e2_lambda(_weights_list),
+                         n_eps = self.n_eps)
 
             _shan_chen.PressureTensorInit(stencil)
-            _shan_chen.FlatInterfaceProperties()
+            _shan_chen.FlatInterfaceProperties(which_sol = 0,
+                                               eps_val = None,
+                                               tau = tau,
+                                               forcing = forcing)
             _shan_chen.FInterface.MechanicEquilibrium()
 
             _mech_eq_target = _shan_chen.FInterface.mech_eq_target
@@ -606,15 +691,15 @@ class ShanChanEquilibriumCache(ManageData):
             _n_c = _shan_chen.n_c
             _G_c = _shan_chen.G_c
 
-            _data_dict = {'G_c': _G_c, 'n_c': _n_c,
-                          'n_l': _n_l, 'n_g': _n_g,
-                          'p_0': _p_0, 'sigma_f': _sigma_f}
+            _data_dict = {'G_c': float(_G_c), 'n_c': float(_n_c),
+                          'n_l': float(_n_l), 'n_g': float(_n_g),
+                          'p_0': float(_p_0), 'sigma_f': float(_sigma_f)}
 
             
             self.PushData(data = _data_dict,
                           key = self.dict_string)
 
-            self.Dump()
+            self.Dump(kind = 'json', indent = 4)
 
     def GetFromCache(self):
         return ManageData.PullData(self, key = self.dict_string)

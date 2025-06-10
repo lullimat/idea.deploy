@@ -32,7 +32,7 @@ Provides classes containing language specific definitions
 from collections import defaultdict
 
 from idpy.Utils.IsModuleThere import AreModulesThere
-from . import CUDA_T, OCL_T, IDPY_T
+from . import CUDA_T, OCL_T, CTYPES_T, METAL_T, IDPY_T
 
 class AddrQualif:
     '''
@@ -61,9 +61,22 @@ class AddrQualif:
                                   'const': """__const""",
                                   'local': """__local""",
                                   'restrict': '',
-                                  'restrict': '',
                                   'shared': '',
                                   'device': ''}
+
+        self.qualifiers[CTYPES_T] = {'global': '',
+                                     'const': """const""",
+                                     'local': '',
+                                     'restrict': """__restrict__""",
+                                     'shared': '',
+                                     'device': ''}
+
+        self.qualifiers[METAL_T] = {'global': '',
+                                     'const': """const""",
+                                     'local': '',
+                                     'restrict': """__restrict__""",
+                                     'shared': '',
+                                     'device': ''}        
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
@@ -81,7 +94,10 @@ class KernQualif:
         - first entry: language
         - second entry: common naming (when available)
         '''
-        self.qualifiers = {CUDA_T: """__global__ void""", OCL_T: """__kernel void"""}
+        self.qualifiers = {CUDA_T: """__global__ void""",
+                           OCL_T: """__kernel void""",
+                           CTYPES_T: """""", 
+                           METAL_T: """kernel"""}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
@@ -95,7 +111,10 @@ class FuncQualif:
     '''
     def __init__(self):
         self.qualifiers = defaultdict(dict)
-        self.qualifiers = {CUDA_T: """__device__""", OCL_T: """ """}
+        self.qualifiers = {CUDA_T: """__device__""",
+                           OCL_T: """ """,
+                           CTYPES_T: """ """, 
+                           METAL_T: """ """}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
