@@ -70,7 +70,7 @@ The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'
 ### Automatic installation of *idea.deploy*
 In order to install the idea.deploy environment one can copy and paste the line below
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/lullimat/idea.deploy/refs/heads/devel/idpy-bootstrap.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/lullimat/idea.deploy/refs/heads/master/idpy-bootstrap.sh)"
 ```
 
 ### Manual installation of *idea.deploy* python virtual environment: idpy-env
