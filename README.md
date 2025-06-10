@@ -19,7 +19,7 @@ For reproducing the papers results please look below in the **Installation** Sec
 ## Available Peer-Reviewed Papers
 
 ### **Higher-order Tuning of Interface Physics in Multiphase Lattice Boltzmann**
-- Publisher link: [https://doi.org/10.1103/zf89-yy1w](https://doi.org/10.1103/zf89-yy1w)
+- Publisher link: <a href="https://doi.org/10.1103/zf89-yy1w" target="_blank" rel="noopener noreferrer">https://doi.org/10.1103/zf89-yy1w</a>
 - arXiv link: [https://arxiv.org/abs/2505.23647](https://arxiv.org/abs/2505.23647)
 - GitHub link: [https://github.com/lullimat/arXiv-2505.23647.git](https://github.com/lullimat/arXiv-2505.23647.git)
 
