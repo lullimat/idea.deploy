@@ -55,6 +55,17 @@ For reproducing the papers results please look below in the **Installation** Sec
 - arXiv link: [https://arxiv.org/abs/2009.12522](https://arxiv.org/abs/2009.12522)
 - github link: [https://github.com/lullimat/arXiv-2009.12522](https://github.com/lullimat/arXiv-2009.12522)
 
+## Available Preprints
+### **The exact evaluation of hexagonal spin-networks and topological quantum neural networks**
+- arXiv link: [https://arxiv.org/abs/2310.03632](https://arxiv.org/abs/2310.03632)
+- GitHub link: [https://github.com/lullimat/arXiv-2310.03632](https://github.com/lullimat/arXiv-2310.03632)
+
+### **Metastable and Unstable Dynamics in multi-phase lattice Boltzmann**
+- arXiv link: [https://arxiv.org/abs/2212.07848](https://arxiv.org/abs/2212.07848)
+- GitHub link: [https://github.com/lullimat/arXiv-2212.07848](https://github.com/lullimat/arXiv-2212.07848)
+
+The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal from the root directory of 'idea.deploy' the command ```git checkout devel``` before using it.
+
 ## Installation
 ### Automatic installation of *idea.deploy*
 In order to install the idea.deploy environment one can copy and paste the line below
@@ -105,7 +116,6 @@ idpy-load
 ```bash
 cd papers
 ```
-
 ```bash
 python idpy-papers.py
 ```
