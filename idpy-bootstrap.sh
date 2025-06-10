@@ -40,7 +40,6 @@ fi
 
 git clone "${IDPY_REPO}" "${IDPY_DIR}"
 cd "${IDPY_DIR}"
-git checkout devel
 
 bash idpy-init.sh
 

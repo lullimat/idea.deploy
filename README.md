@@ -45,8 +45,6 @@ For reproducing the papers results please look below in the **Installation** Sec
 - arXiv link: [https://arxiv.org/abs/2112.02574](https://arxiv.org/abs/2112.02574)
 - github link: [https://github.com/lullimat/arXiv-2112.02574.git](https://github.com/lullimat/arXiv-2112.02574.git)
 
-The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'. Make sure you type in the terminal from the root directory of 'idea.deploy' the command ```git checkout devel``` before using it.
-
 ### **Mesoscale Perspective on the Tolman Length**
 - Publisher link: [https://journals.aps.org/pre/abstract/10.1103/PhysRevE.105.015301](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.105.015301)
 - arXiv link: [https://arxiv.org/abs/2105.08772](https://arxiv.org/abs/2105.08772)
@@ -59,7 +57,7 @@ The Jupyter notebook has only been tested in the 'devel' branch of 'idea.deploy'
 
 ## Installation
 ### Automatic installation of *idea.deploy*
-In order to install the idea.deploy environment (on the devel branch for now) on can copy and paste the line below
+In order to install the idea.deploy environment one can copy and paste the line below
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/lullimat/idea.deploy/refs/heads/devel/idpy-bootstrap.sh)"
 ```
@@ -71,7 +69,6 @@ At the moment the main code base for the project is written in python and it hea
 
 ### Typical usage for reproducing the results reported in a paper
 
-**In this moment we are merging the ```devel``` and the ```master``` branches. Please, use the ```devel``` branch as the default for now (see below)**
 1. Open a terminal session and go to the directory you want to clone the repository to
 
 2. Clone the repository
@@ -82,11 +79,6 @@ git clone https://github.com/lullimat/idea.deploy.git
 3. Enter the repository
 ```bash
 cd idea.deploy
-```
-
-3a. **Temporary:** Change to ```devel``` branch
-```bash
-git checkout devel
 ```
 
 4. Install the virtual environment
@@ -159,9 +151,7 @@ The purpose of the idea.deploy project can be described in three points
 
 
 ## Git model
-This project will consist of this one repository with two branches, 'master' and
-
-'devel'. All the papers and work in progress will be developed in separated git repositories so that important updates from the software side will be pushed into the master branch much faster while the original scientific work will be available only when ready. The folder ./collabs will serve as a docking point for ongoing research and will be kept empty while the folder ./papers will contain the most updated version of the preprints in ./papers/arxiv:* and the related symlink ./papers/doi:* -> ./papers/arxiv:* when the work is published on a peer-reviewed journal.
+This project will consist of this one repository with two branches, 'master' and 'devel'. All the papers and work in progress will be developed in separated git repositories so that important updates from the software side will be pushed into the master branch much faster while the original scientific work will be available only when ready. The folder ./collabs will serve as a docking point for ongoing research and will be kept empty while the folder ./papers will contain the most updated version of the preprints in ./papers/arxiv:* and the related symlink ./papers/doi:* -> ./papers/arxiv:* when the work is published on a peer-reviewed journal.
 
 This scheme should allow for the parallel improvement of the code (all research private repositories in ./collabs would be served by the most updated version) while keeping a clean separation of the ongoing projects that will be publicly available once, at least, posted on the arxiv.
 
