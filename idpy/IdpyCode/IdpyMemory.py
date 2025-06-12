@@ -123,10 +123,10 @@ if idpy_langs_sys[OCL_T]:
             self.lang, self.queue = OCL_T, queue
 
         def H2D(self, ary, async_=None):
-            return super().set(ary = ary, queue = self.queue, async_ = None)
+            return super().set(ary = ary, queue = self.queue)
 
         def D2H(self, ary = None, async_=None):
-            return super().get(queue = self.queue, ary = ary, async_ = None)
+            return super().get(queue = self.queue, ary = ary)
 
         def SetConst(self, const = 0., wait_for = None):
             super().fill(value = const, queue = self.queue, wait_for = wait_for)
