@@ -31,6 +31,7 @@ Provides a database for cloning the published papers
 
 from collections import defaultdict
 import subprocess, os
+import argparse
 
 class IdpyPapers:
     def __init__(self):
@@ -83,7 +84,7 @@ class IdpyPapers:
                          "Giacomo Falcucci", "Mauro Sbragaglia", "Dong Yang",
                          "Xiaowen Shan"],
              "doi": "10.1103/PhysRevE.109.045304", 
-             "doi-dir": "10.1103-PhysRevE.109.045304",
+             "doi-dir": "doi-10.1103-PhysRevE.109.045304",
              "git": "https://github.com/lullimat/arXiv-2212.07848.git"}
 
         self.arxiv_papers['arXiv-2310.03632'] = \
@@ -96,12 +97,16 @@ class IdpyPapers:
         self.arxiv_papers['arXiv-2503.05743'] = \
             {"Title": "A note on the lattice momentum balance in the lattice Boltzmann interaction-framework", 
              "Authors": ["Francesca Pelusi", "Matteo Lulli", "Christophe Coreixas", "Mauro Sbragaglia", "Xiaowen Shan"], 
-             "doi": "", "doi-dir": "", "git": "https://github.com/lullimat/arXiv-2503.05743.git"}
+             "doi": "https://doi.org/10.1063/5.0266637", 
+             "doi-dir": "doi-10.1063-5.0266637", 
+             "git": "https://github.com/lullimat/arXiv-2503.05743.git"}
 
         self.arxiv_papers['arXiv-2505.23647'] = \
             {"Title": "Higher-order Tuning of Interface Physics in Multiphase Lattice Boltzmann", 
              "Authors": ["Matteo Lulli", "Emily S. C. Ching"], 
-             "doi": "", "doi-dir": "", "git": "https://github.com/lullimat/arXiv-2505.23647.git"}
+             "doi": "https://doi.org/10.1103/zf89-yy1w", 
+             "doi-dir": "doi-10.1103-zf89-yy1w", 
+             "git": "https://github.com/lullimat/arXiv-2505.23647.git"}
 
     def GitClone(self, key):
         subprocess.call(["git", "clone", self.arxiv_papers[key]['git']])
@@ -112,20 +117,36 @@ class IdpyPapers:
             os.symlink(key, self.arxiv_papers[key]['doi-dir'])
 
 if __name__ == "__main__":
-    print("Welcome!")
-    print("Here you can retreive the papers published in the idea.deploy framework")
-    
-    print("")
+    parser = argparse.ArgumentParser(description="Clone repositories for published papers in the idea.deploy framework")
+    parser.add_argument("--repo", type=str, help="Repository string (e.g., arXiv-2009.12522)", default=None)
+    args = parser.parse_args()
+
     idpy_papers = IdpyPapers()
-    idpy_papers.ShowPapers()
-    key = input("Copy and paste the repository string: ")
-    key = str(key)
-    if key in idpy_papers.arxiv_papers:
-        print("Cloning the repository...")
-        idpy_papers.GitClone(key)
-        print()
-        idpy_papers.SymLink(key)
-        
+
+    if args.repo:
+        key = args.repo
+        if key in idpy_papers.arxiv_papers:
+            print(f"Cloning the repository for {key}...")
+            idpy_papers.GitClone(key)
+            print()
+            idpy_papers.SymLink(key)
+        else:
+            raise Exception(f"{key} not present in the database!")
     else:
-        raise Exception(key, "not present in the data base!")
+        print("Welcome!")
+        print("Here you can retreive the papers published in the idea.deploy framework")
+        
+        print("")
+        idpy_papers = IdpyPapers()
+        idpy_papers.ShowPapers()
+        key = input("Copy and paste the repository string: ")
+        key = str(key)
+        if key in idpy_papers.arxiv_papers:
+            print("Cloning the repository...")
+            idpy_papers.GitClone(key)
+            print()
+            idpy_papers.SymLink(key)
+            
+        else:
+            raise Exception(key, "not present in the data base!")
         
