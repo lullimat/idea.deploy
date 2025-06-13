@@ -78,12 +78,12 @@ PY3p11_F=$(command -v python3.11 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p12_F=$(command -v python3.12 >/dev/null 2>&1 && echo 1 || echo 0)
 PY3p13_F=$(command -v python3.13 >/dev/null 2>&1 && echo 1 || echo 0)
 ##
-if ((${PY3p13_F}))
+if ((${PY3p13_F} && 0))
 then
     ID_PYTHON=python3.13
     PY_PATH=$(which python3.13)
     echo "Found ${PY_PATH}"
-elif ((${PY3p12_F}))
+elif ((${PY3p12_F} && 0))
 then
     ID_PYTHON=python3.12
     PY_PATH=$(which python3.12)
