@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2025 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -88,7 +88,7 @@ class IdpyPapers:
              "git": "https://github.com/lullimat/arXiv-2212.07848.git"}
 
         self.arxiv_papers['arXiv-2310.03632'] = \
-            {"Title": "The exact evaluation of hexagonal spin-networks and topological quantum neural networks",
+            {"Title": "Exact evaluation of hexagonal spin-networks and topological quantum neural networks",
              "Authors": ["Matteo Lulli", "Antonino Marciano", "Emanuele Zappala"],
              "doi": "10.1002/prop.70005", 
              "doi-dir": "doi-10.1002-prop.70005",
