@@ -108,12 +108,11 @@ if idpy_langs_sys[OCL_T]:
     from idpy.OpenCL.OpenCL import Tenet as CLTenet
 
     class IdpyArrayOCL(cl_array.Array):
-        def __init__(self, queue = None, shape = None, dtype = None,
+        def __init__(self, shape = None, queue = None, dtype = None,
                      order = 'C',
                      allocator = None, data = None,
                      offset = 0, strides = None,
                      events = None):
-            
             super().__init__(cq = queue, shape = shape,
                              dtype = dtype, order = order,
                              allocator = allocator, data = data,
