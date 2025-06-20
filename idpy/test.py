@@ -1,5 +1,5 @@
 __author__ = "Matteo Lulli"
-__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__copyright__ = "Copyright (c) 2020-2025 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
 __credits__ = ["Matteo Lulli"]
 __license__ = """
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -178,7 +178,8 @@ class TestCTypesTypes(unittest.TestCase):
                 'long long int': ctypes.c_int64,
                 'unsigned long': ctypes.c_uint64,
                 'unsigned long long int': ctypes.c_uint64,
-                'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte
+                'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte, 
+                'unsigned': ctypes.c_uint32
             }
         self.known_ctypes_types = {value: key for (key, value) in self.known_c_types.items()}
 
