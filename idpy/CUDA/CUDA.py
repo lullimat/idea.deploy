@@ -31,7 +31,7 @@ __email__ = "matteo.lulli@gmail.com"
 __status__ = "Development"
 
 
-import pycuda as cu
+from pycuda.tools import DeviceMemoryPool
 import pycuda.driver as cu_driver
 from collections import defaultdict
 
@@ -80,7 +80,7 @@ class Tenet:
         return self.cuda_context.detach()
 
     def SetMemoryPool(self):
-        self.mem_pool = cu.tools.DeviceMemoryPool()
+        self.mem_pool = DeviceMemoryPool()
         self.allocator = self.mem_pool.allocate
 
 class CUDA:
