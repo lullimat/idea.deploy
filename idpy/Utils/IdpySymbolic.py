@@ -32,6 +32,7 @@ Provides some functions and classes for symbolic manipulations
 import sympy as sp
 import numpy as np
 from functools import reduce
+
 from idpy.Utils.Geometry import FlipVector, IsSameVector
 from idpy.Utils.Statements import AllTrue
 from idpy.Utils.Combinatorics import GetUniquePermutations, SplitTuplePerm, cycle_list
@@ -174,7 +175,7 @@ class SymmetricTensor:
     '''
     This class assumes that only the indices i <= j <= k ... are passed'''
     def __init__(self, c_dict = None, list_values = None, list_ttuples = None,
-                 d = None, rank = None):
+                 d = None, rank = None, dtype=np.float64):
 
         if c_dict is None and list_values is None and list_ttuples is None:
             raise Exception("Missing arguments: either 'c_dict' or 'list_values' and 'list_ttuples'")
@@ -183,13 +184,28 @@ class SymmetricTensor:
         if c_dict is not None and (list_values is not None or list_ttuples is not None):
             raise Exception("Arguments conflict: either 'c_dict' or 'list_values' and 'list_ttuples'")
         
+        self.dtype = dtype
         self.d, self.rank = d, rank
         if c_dict is not None:
             self.c_dict = c_dict
         else:
             self.c_dict = dict(zip(list_ttuples, list_values))
-            
-        self.shape = self.set_shape()
+
+        # Similar to JSymmetricTensor, we need to check if the c_dict contains np.array objects
+        # and gate on whether they have the same shape
+        self.has_np_arrays = False
+        for key in self.c_dict:
+            if isinstance(self.c_dict[key], np.ndarray):
+                self.has_np_arrays = True
+                break
+        if self.has_np_arrays:
+            self.shape = self.set_shape()
+            # check if the shapes are the same
+            for key in self.c_dict:
+                if self.c_dict[key].shape != self.shape:
+                    raise ValueError("the shapes of the np.array objects in the c_dict are not the same")
+        else:
+            self.shape = 0
 
     def set_shape(self):
         _key_0 = list(self.c_dict)[0]
@@ -207,26 +223,103 @@ class SymmetricTensor:
                 _index = tuple(_index)
                 
             return self.c_dict[_index]
+
+    def __setitem__(self, _index, value):
+        if isinstance(_index, tuple):
+            _index = list(_index)
+            if hasattr(self, "ranks"):  # JSymmetricTensor
+                _i0 = _index[:self.ranks[0]]
+                _i1 = _index[self.ranks[0]:]
+                _i0.sort(); _i1.sort()
+                _index = tuple(_i0 + _i1)
+            else:  # SymmetricTensor
+                _index.sort()
+                _index = tuple(_index)
+        self.c_dict[_index] = value
+
+    def __repr__(self):
+        header = f"SymmetricTensor(d={self.d}, rank={self.rank})"
+        lines = [header, "c_dict:"]
+        for key in sorted(self.c_dict.keys(), key=lambda k: (0 if isinstance(k, int) else 1, repr(k))):
+            lines.append(f"  {key}: {self.c_dict[key]!r}")
+        return "\n".join(lines)
+
+    def _repr_pretty_(self, p, cycle):
+        if cycle:
+            p.text("SymmetricTensor(...)")
+            return
+        p.text(repr(self))
         
     '''
     Implements the tensor product without the full-symmetry assumption -> JSymmetricTensor
     '''
     def __or__(self, b):
-        if isinstance(b, SymmetricTensor):
-            if self.d != b.d:
-                raise Exception("The two fully symmetric tensors must have the same dimensionality")
-            
-            taylor_indices_0 = TaylorTuples(list(range(self.d)), self.rank)
-            taylor_indices_1 = TaylorTuples(list(range(self.d)), b.rank)
+        if not isinstance(b, SymmetricTensor):
+            return NotImplemented
+        if self.d != b.d:
+            raise Exception("The two fully symmetric tensors must have the same dimensionality")
 
-            j_c_dict = {}
-            for tt0 in taylor_indices_0:
-                tt0_tuple = tt0 if isinstance(tt0, tuple) else (tt0,)
-                for tt1 in taylor_indices_1:
-                    tt1_tuple = tt1 if isinstance(tt1, tuple) else (tt1,)
-                    j_c_dict[tt0_tuple + tt1_tuple] = self[tt0] * b[tt1]
+        def _index_tuples(rank, d):
+            if rank == 0:
+                return [()]
+            raw = TaylorTuples(list(range(d)), rank)
+            return [t if isinstance(t, tuple) else (t,) for t in raw]
 
-            return JSymmetricTensor(c_dict=j_c_dict, d=self.d, rank=self.rank + b.rank, ranks=[self.rank, b.rank])
+        def _canonical_index(tt, rank):
+            if rank == 0:
+                return 0
+            if rank == 1:
+                return tt[0] if isinstance(tt, tuple) else tt
+            return tt if isinstance(tt, tuple) else (tt,)
+
+        def _component(tensor, tt):
+            return tensor.c_dict[_canonical_index(tt, tensor.rank)]
+
+        def _joint_key(tt0, tt1, r0, r1):
+            if r0 == 0 and r1 == 0:
+                return 0
+            if r0 == 0:
+                return _canonical_index(tt1, r1)
+            if r1 == 0:
+                return _canonical_index(tt0, r0)
+            t0 = tt0 if isinstance(tt0, tuple) else (tt0,)
+            t1 = tt1 if isinstance(tt1, tuple) else (tt1,)
+            return t0 + t1
+
+        j_c_dict = {}
+        for tt0 in _index_tuples(self.rank, self.d):
+            for tt1 in _index_tuples(b.rank, self.d):
+                key = _joint_key(tt0, tt1, self.rank, b.rank)
+                j_c_dict[key] = _component(self, tt0) * _component(b, tt1)
+
+        # if self.rank == 0 and b.rank > 0:
+        #     ranks = [b.rank, 0]
+        # elif b.rank == 0:
+        #     ranks = [self.rank, 0]
+        # else:
+        ranks = [self.rank, b.rank]
+
+        if self.rank == 0 and b.rank == 0:
+            return SymmetricTensor(d=self.d, rank=0, c_dict={0: self[0] * b[0]})
+
+        return JSymmetricTensor(
+            c_dict=j_c_dict,
+            d=self.d,
+            rank=self.rank + b.rank,
+            ranks=ranks,
+        )
+
+        # taylor_indices_0 = TaylorTuples(list(range(self.d)), self.rank)
+        # taylor_indices_1 = TaylorTuples(list(range(self.d)), b.rank)
+
+        # j_c_dict = {}
+        # for tt0 in taylor_indices_0:
+        #     tt0_tuple = tt0 if isinstance(tt0, tuple) else (tt0,)
+        #     for tt1 in taylor_indices_1:
+        #         tt1_tuple = tt1 if isinstance(tt1, tuple) else (tt1,)
+        #         j_c_dict[tt0_tuple + tt1_tuple] = self[tt0] * b[tt1]
+
+        # return JSymmetricTensor(c_dict=j_c_dict, d=self.d, rank=self.rank + b.rank, ranks=[self.rank, b.rank])
 
 
     '''
@@ -235,45 +328,105 @@ class SymmetricTensor:
     '''
     def __xor__(self, b):
         if b.d != self.d:
-            raise Exception('Dimensionalities of the two SymmetricTensor differ!',
-                            self.d, b.d)
+            raise Exception(
+                'Dimensionalities of the two SymmetricTensor differ!',
+                self.d, b.d,
+            )
 
         A, B = self, b
         new_rank = A.rank + B.rank
-        """
-        - I need to check if the symmetric tensor contains scalars or sympy arrays
-        - once I know which product function to use, then I need to cycle over all possible
-        indices of a fully symmetric tensor of rank 'new_rank' and take the products
-        - I need to associate the first self.rank indices to self and the remaining to b
-        """
-        _shapes = [A.shape, B.shape]
-        _shapes_types = [type(A.shape), type(B.shape)]
-        _largest_shape = None
 
-        _product, _symt_out = None, False
-        if int in _shapes_types and tuple in _shapes_types:
-            _product = lambda x, y: x * y
-            for _i, _ in enumerate(_shapes_types): 
-                if _ == tuple:
-                    _largest_shape = _shapes[_i]
-        elif AllTrue([_ == tuple for _ in _shapes_types]):
-            _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
-            _symt_out = True
+        # --- choose elementwise product by backend ---
+        if A.has_np_arrays or B.has_np_arrays:
+            if not (A.has_np_arrays and B.has_np_arrays):
+                raise ValueError(
+                    "SymmetricTensor.__xor__: both operands must be "
+                    "np.ndarray-backed (or both symbolic)"
+                )
             if A.shape != B.shape:
-                raise Exception("Cannot perform the element-wise product")
-        elif AllTrue([_ == int for _ in _shapes_types]):
+                raise ValueError(
+                    f"SymmetricTensor.__xor__: shape mismatch {A.shape} vs {B.shape}"
+                )
             _product = lambda x, y: x * y
-        
+            out_dtype = np.result_type(A.dtype, B.dtype)
+
+        else:
+            _shapes_types = [type(A.shape), type(B.shape)]
+            if int in _shapes_types and tuple in _shapes_types:
+                # mixed scalar / sympy-array shape bookkeeping (legacy)
+                _product = lambda x, y: x * y
+                out_dtype = A.dtype
+            elif AllTrue([_ == tuple for _ in _shapes_types]):
+                # both sympy-matrix-like (shape is a tuple, not np arrays)
+                if A.shape != B.shape:
+                    raise Exception("Cannot perform the element-wise product")
+                _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
+                out_dtype = A.dtype
+            elif AllTrue([_ == int for _ in _shapes_types]):
+                # pure scalars
+                _product = lambda x, y: x * y
+                out_dtype = A.dtype
+            else:
+                raise TypeError(
+                    f"SymmetricTensor.__xor__: unsupported shape types {_shapes_types}"
+                )
+
+        if _product is None:
+            raise RuntimeError("SymmetricTensor.__xor__: no product rule selected")
+
         ttuples_new = TaylorTuples(list(range(A.d)), new_rank)
         swap_dict = {}
         for t in ttuples_new:
             t_A, t_B = tuple(t[:A.rank]), tuple(t[A.rank:])
             t_A = t_A if len(t_A) > 1 else t_A[0]
             t_B = t_B if len(t_B) > 1 else t_B[0]
-            
             swap_dict[t] = _product(A[t_A], B[t_B])
+
+        return SymmetricTensor(
+            d=A.d, rank=new_rank, c_dict=swap_dict, dtype=out_dtype
+        )
+
+    # def __xor__(self, b):
+    #     if b.d != self.d:
+    #         raise Exception('Dimensionalities of the two SymmetricTensor differ!',
+    #                         self.d, b.d)
+
+    #     A, B = self, b
+    #     new_rank = A.rank + B.rank
+    #     """
+    #     - I need to check if the symmetric tensor contains scalars or sympy arrays
+    #     - once I know which product function to use, then I need to cycle over all possible
+    #     indices of a fully symmetric tensor of rank 'new_rank' and take the products
+    #     - I need to associate the first self.rank indices to self and the remaining to b
+    #     """
+    #     _shapes = [A.shape, B.shape]
+    #     _shapes_types = [type(A.shape), type(B.shape)]
+    #     _largest_shape = None
+
+    #     _product, _symt_out = None, False
+    #     if int in _shapes_types and tuple in _shapes_types:
+    #         _product = lambda x, y: x * y
+    #         for _i, _ in enumerate(_shapes_types): 
+    #             if _ == tuple:
+    #                 _largest_shape = _shapes[_i]
+    #     elif AllTrue([_ == tuple for _ in _shapes_types]):
+    #         _product = lambda x, y: sp.matrix_multiply_elementwise(x, y)
+    #         _symt_out = True
+    #         if A.shape != B.shape:
+    #             raise Exception("Cannot perform the element-wise product")
+    #     elif AllTrue([_ == int for _ in _shapes_types]):
+    #         _product = lambda x, y: x * y
         
-        return SymmetricTensor(d=A.d, rank=new_rank, c_dict=swap_dict)
+    #     ttuples_new = TaylorTuples(list(range(A.d)), new_rank)
+    #     swap_dict = {}
+    #     for t in ttuples_new:
+    #         t_A, t_B = tuple(t[:A.rank]), tuple(t[A.rank:])
+    #         t_A = t_A if len(t_A) > 1 else t_A[0]
+    #         t_B = t_B if len(t_B) > 1 else t_B[0]
+            
+    #         swap_dict[t] = _product(A[t_A], B[t_B])
+        
+    #     return SymmetricTensor(d=A.d, rank=new_rank, c_dict=swap_dict)
         
         
     '''
@@ -290,6 +443,11 @@ class SymmetricTensor:
             if _b.d != self.d:
                 raise Exception('Dimensionalities of the two SymmetricTensor differ!',
                                 self.d, _b.d)
+
+            # rank-0 × rank-0: single scalar in c_dict[0]
+            if self.rank == 0 and _b.rank == 0:
+                val = self[0] * _b[0]
+                return val
 
             if _b.rank != self.rank:
                 """
@@ -553,13 +711,57 @@ class SymmetricTensor:
 
         return SymmetricTensor(c_dict = _sum_dict, d = self.d, rank = self.rank)
 
+# Helper returning a zero SymmetricTensor
+def ZeroSymmetricTensor(d, rank, shape=None, dtype=np.float64):
+    if rank == 0:
+        if shape is None:
+            return SymmetricTensor(d=d, rank=0, c_dict={0: 0})
+        else:
+            return SymmetricTensor(d=d, rank=0, c_dict={0: np.zeros(shape, dtype=dtype)})
+    elif rank > 0:
+        c_dict = {}
+        for tt in TaylorTuples(list(range(d)), rank):
+            if shape is not None:
+                c_dict[tt] = np.zeros(shape, dtype=dtype)
+            else:
+                c_dict[tt] = 0
+        return SymmetricTensor(d=d, rank=rank, c_dict=c_dict)
+    else:
+        raise ValueError("rank must be non-negative")
+
 """
 class JSymmetricTensor
 - for rank 1 tensors need to pass the argument ranks = [1], without a second entry
 """
+class _ConvolutionView:
+    def __init__(self, tensor, *, reverse_shift=False, periodic=True):
+        self.tensor = tensor
+        self._reverse_shift = reverse_shift
+        self.periodic = periodic
+
+    @property
+    def H(self):
+        return _ConvolutionView(
+            self.tensor, reverse_shift=not self._reverse_shift, periodic=self.periodic
+        )
+
+    @property
+    def bnd(self):
+        return _ConvolutionView(self.tensor, reverse_shift=self._reverse_shift, periodic=False)
+
+    @property
+    def reverse_shift(self):
+        return _ConvolutionView(self.tensor, reverse_shift=True, periodic=self.periodic)
+
+    def __matmul__(self, b):
+        return self.tensor._matmul_impl(
+            b, reverse_shift=self._reverse_shift, periodic=self.periodic
+        )
+
+
 class JSymmetricTensor:
     def __init__(self, c_dict = None, list_values = None, list_ttuples = None,
-                 d = None, rank = None, ranks = None):
+                 d = None, rank = None, ranks = None, dtype=np.float64):
         
         if c_dict is None and list_values is None and list_ttuples is None:
             raise Exception("Missing arguments: either 'c_dict' or 'list_values' and 'list_ttuples'")
@@ -569,20 +771,48 @@ class JSymmetricTensor:
             raise Exception("Arguments conflict: either 'c_dict' or 'list_values' and 'list_ttuples'")
         if ranks is None or sum(ranks) != rank:
             raise Exception("Missing arguments: 'ranks' needs to be a list of two values adding to 'rank'!")
+        self.dtype = dtype
 
         self.d, self.rank, self.ranks = d, rank, ranks
         if c_dict is not None:
             self.c_dict = c_dict
         else:
             self.c_dict = dict(zip(list_ttuples, list_values))
-            
-        # self.shape = self.set_shape()
+
+        ## Need to check if the c_dict contains np.array objects
+        ## and gate on whether they have the same shape
+        self.has_np_arrays = False
+        for key in self.c_dict:
+            if isinstance(self.c_dict[key], np.ndarray):
+                self.has_np_arrays = True
+                break
+        if self.has_np_arrays:
+            self.shape = self.set_shape()
+            # check if the shapes are the same
+            for key in self.c_dict:
+                if self.c_dict[key].shape != self.shape:
+                    raise ValueError("the shapes of the np.array objects in the c_dict are not the same")
+        else:
+            self.shape = 0
+
 
     def set_shape(self):
         _key_0 = list(self.c_dict)[0]
         _shape = (0 if not hasattr(self.c_dict[_key_0], 'shape') else
                   self.c_dict[_key_0].shape)
         return _shape
+
+    @property
+    def H(self):
+        return _ConvolutionView(self, reverse_shift=True, periodic=True)
+
+    @property
+    def reverse_shift(self):
+        return _ConvolutionView(self, reverse_shift=True, periodic=True)
+
+    @property
+    def bnd(self):
+        return _ConvolutionView(self, reverse_shift=False, periodic=False)
         
     def __getitem__(self, _index):
         if isinstance(_index, slice):
@@ -596,6 +826,32 @@ class JSymmetricTensor:
                 _index = tuple(_index_0 + _index_1)
                 
             return self.c_dict[_index]
+
+    def __setitem__(self, _index, value):
+        if isinstance(_index, tuple):
+            _index = list(_index)
+            if hasattr(self, "ranks"):  # JSymmetricTensor
+                _i0 = _index[:self.ranks[0]]
+                _i1 = _index[self.ranks[0]:]
+                _i0.sort(); _i1.sort()
+                _index = tuple(_i0 + _i1)
+            else:  # SymmetricTensor
+                _index.sort()
+                _index = tuple(_index)
+        self.c_dict[_index] = value            
+
+    def __repr__(self):
+        header = f"JSymmetricTensor(d={self.d}, rank={self.rank}, ranks={self.ranks})"
+        lines = [header, "c_dict:"]
+        for key in sorted(self.c_dict.keys(), key=lambda k: (0 if isinstance(k, int) else 1, repr(k))):
+            lines.append(f"  {key}: {self.c_dict[key]!r}")
+        return "\n".join(lines)
+
+    def _repr_pretty_(self, p, cycle):
+        if cycle:
+            p.text("JSymmetricTensor(...)")
+            return
+        p.text(repr(self))
         
     def GetFullySymmetric(self):
         taylor_indices = TaylorTuples(list(range(self.d)), self.rank)
@@ -640,10 +896,124 @@ class JSymmetricTensor:
 
     def __mul__(self, b):
         if isinstance(b, SymmetricTensor):
+            def _index_tuples(rank, d):
+                if rank == 0:
+                    return [()]
+                raw = TaylorTuples(list(range(d)), rank)
+                return [t if isinstance(t, tuple) else (t,) for t in raw]
+
+            def _canonical_index(tt, rank):
+                if rank == 0:
+                    return 0
+                if rank == 1:
+                    return tt[0] if isinstance(tt, tuple) else tt
+                return tt if isinstance(tt, tuple) else (tt,)
+
+            def _joint_key(tt0, tt1, r0, r1):
+                if r0 == 0 and r1 == 0:
+                    return 0
+                if r0 == 0:
+                    return _canonical_index(tt1, r1)
+                if r1 == 0:
+                    return _canonical_index(tt0, r0)
+                t0 = tt0 if isinstance(tt0, tuple) else (tt0,)
+                t1 = tt1 if isinstance(tt1, tuple) else (tt1,)
+                return t0 + t1
+
+            # multiply by scalar SymmetricTensor (rank 0)
+            if b.rank == 0:
+                s = b[0]
+                mul_c_dict = {k: self.c_dict[k] * s for k in self.c_dict}
+                if self.ranks[1] == 0:
+                    return SymmetricTensor(c_dict=mul_c_dict, d=self.d, rank=self.ranks[0])
+                if self.ranks[0] == 0:
+                    return SymmetricTensor(c_dict=mul_c_dict, d=self.d, rank=self.ranks[1])
+                return JSymmetricTensor(
+                    c_dict=mul_c_dict, d=self.d, rank=self.rank, ranks=self.ranks
+                )
+
+            # 0|B : nonzero block is the second factor
+            if self.ranks[0] == 0:
+                sub = SymmetricTensor(
+                    c_dict=dict(self.c_dict), d=self.d, rank=self.ranks[1]
+                )
+                return sub * b
+
+            # A|0 : nonzero block is the first factor
+            if self.ranks[1] == 0:
+                sub = SymmetricTensor(
+                    c_dict=dict(self.c_dict), d=self.d, rank=self.ranks[0]
+                )
+                return sub * b
+
+            # general A|B with both partial ranks > 0
+            res_c_dict = {}
+            for tt0 in _index_tuples(self.ranks[0], self.d):
+                c_dict_swap = {}
+                for tt1 in _index_tuples(self.ranks[1], self.d):
+                    key = _joint_key(tt0, tt1, self.ranks[0], self.ranks[1])
+                    c_dict_swap[_canonical_index(tt1, self.ranks[1])] = self.c_dict[key]
+
+                sub_tensor = SymmetricTensor(
+                    c_dict=c_dict_swap, d=self.d, rank=self.ranks[1]
+                )
+                contracion = sub_tensor * b
+
+                if isinstance(contracion, SymmetricTensor):
+                    for tt_c in contracion.c_dict:
+                        out_key = _joint_key(
+                            tt0, tt_c, self.ranks[0], contracion.rank
+                        )
+                        res_c_dict[out_key] = contracion[tt_c]
+                else:
+                    res_c_dict[_canonical_index(tt0, self.ranks[0])] = contracion
+
+            if not res_c_dict:
+                raise Exception("Empty contraction result in JSymmetricTensor.__mul__")
+
+            first_elem_index = list(res_c_dict.keys())[0]
+            new_full_rank = (
+                len(first_elem_index)
+                if isinstance(first_elem_index, tuple)
+                else 1
+            )
+            new_1_rank = new_full_rank - self.ranks[0]
+
+            if new_1_rank > 0:
+                return JSymmetricTensor(
+                    c_dict=res_c_dict,
+                    d=self.d,
+                    rank=new_full_rank,
+                    ranks=[self.ranks[0], new_1_rank],
+                )
+            return SymmetricTensor(
+                c_dict=res_c_dict, d=self.d, rank=new_full_rank
+            )
+
+        elif not isinstance(b, SymmetricTensor) and not isinstance(b, JSymmetricTensor):
+            mul_c_dict = {tt: self.c_dict[tt] * b for tt in self.c_dict}
+            return JSymmetricTensor(
+                d=self.d, rank=self.rank, ranks=self.ranks, c_dict=mul_c_dict
+            )
+
+        return NotImplemented
+
+    def __mul__old(self, b):
+        if isinstance(b, SymmetricTensor):
             """
             - For each 0-multi-index we can build a SymmetricTensor for the 1-multi-index part
             - at this point the contraction would be given by calling __mul__ between this sub-tensor and b
             """
+            # scalar factor (rank 0)
+            if b.rank == 0:
+                s = b[0]
+                mul_c_dict = {k: self.c_dict[k] * s for k in self.c_dict}
+                if self.ranks[1] == 0:
+                    return SymmetricTensor(c_dict=mul_c_dict, d=self.d, rank=self.ranks[0])
+                return JSymmetricTensor(
+                    c_dict=mul_c_dict, d=self.d, rank=self.rank, ranks=self.ranks
+                )
+
             taylor_indices_0 = TaylorTuples(list(range(self.d)), self.ranks[0])
             taylor_indices_1 = TaylorTuples(list(range(self.d)), self.ranks[1])
             
@@ -691,6 +1061,184 @@ class JSymmetricTensor:
         else:
             raise Exception("Can only subtract Joint/Symmetric Tensors")
 
+    def _convolve_step(self, a, b, *, reverse_shift=False, periodic=True):
+        if not isinstance(a, np.ndarray) or not isinstance(b, np.ndarray):
+            raise TypeError("_convolve_step expects np.ndarray inputs")
+        if a.ndim != b.ndim:
+            raise ValueError(
+                f"dimensionality mismatch: kernel ndim={a.ndim}, field ndim={b.ndim}"
+            )
+        if not periodic and any(ks > fs for ks, fs in zip(a.shape, b.shape)):
+            raise ValueError(
+                f"kernel shape {a.shape} cannot exceed field shape {b.shape} with open boundaries"
+            )
+
+        # Cache nonzero taps per kernel layout
+        if not hasattr(self, "_conv_taps_cache"):
+            self._conv_taps_cache = {}
+        key = (a.shape, a.dtype.str, a.tobytes())
+        taps = self._conv_taps_cache.get(key)
+        if taps is None:
+            center = tuple(s // 2 for s in a.shape)
+            nz = np.nonzero(a)
+            if nz[0].size == 0:
+                offsets = np.zeros((0, a.ndim), dtype=np.int64)
+                coeffs = np.zeros((0,), dtype=a.dtype)
+            else:
+                offsets = np.array(list(zip(*nz)), dtype=np.int64) - np.array(center, dtype=np.int64)
+                coeffs = a[nz]            
+            self._conv_taps_cache[key] = (offsets, coeffs)
+            taps = (offsets, coeffs)
+
+        offsets, coeffs = taps
+        if reverse_shift:
+            offsets = -offsets
+
+        out = np.zeros_like(b, dtype=np.result_type(a.dtype, b.dtype))
+
+        if periodic:
+            axes = tuple(range(b.ndim))
+            for off, c in zip(offsets, coeffs):
+                out += c * np.roll(b, shift=tuple(int(x) for x in off), axis=axes)
+            return out
+
+        # open boundaries (zero outside)
+        for off, c in zip(offsets, coeffs):
+            src = []
+            dst = []
+            valid = True
+            for n, s in zip(b.shape, off):
+                s = int(s)
+                if s >= 0:
+                    if s >= n:
+                        valid = False
+                        break
+                    src.append(slice(0, n - s))
+                    dst.append(slice(s, n))
+                else:
+                    if -s >= n:
+                        valid = False
+                        break
+                    src.append(slice(-s, n))
+                    dst.append(slice(0, n + s))
+            if valid:
+                out[tuple(dst)] += c * b[tuple(src)]
+
+        return out
+
+    def _convolve(self, b, *, reverse_shift=False, periodic=True):
+        output_tensor = \
+            ZeroSymmetricTensor(d=self.d, rank=self.ranks[0], shape=b.shape, dtype=self.dtype)
+
+        def _as_tuple_index(index):
+            if isinstance(index, tuple):
+                return index
+            # key `0` is scalar only for full rank-0 tensors; for rank>0 it is
+            # a valid first component index and must stay explicit.
+            if index == 0 and self.rank == 0:
+                return ()
+            return (index,)
+
+        def _canonical_index(index_tuple, rank):
+            if rank == 0:
+                return 0
+            if rank == 1:
+                return index_tuple[0]
+            return index_tuple
+
+        for full_tt in self.c_dict:
+            full_tt_tuple = _as_tuple_index(full_tt)
+            tt_0_tuple = full_tt_tuple[:self.ranks[0]]
+            tt_1_tuple = full_tt_tuple[self.ranks[0]:]
+
+            tt_0 = _canonical_index(tt_0_tuple, self.ranks[0])
+            tt_1 = _canonical_index(tt_1_tuple, self.ranks[1])
+
+            output_tensor[tt_0] += self._convolve_step(
+                self[full_tt], b[tt_1], reverse_shift=reverse_shift, periodic=periodic
+            )
+
+        return output_tensor
+
+    def _validate_convolution_operand(self, b):
+        if not isinstance(b, (JSymmetricTensor, SymmetricTensor)):
+            raise ValueError(
+                "only JSymmetricTensor and SymmetricTensor are supported for __matmul__"
+            )
+
+        if not self.has_np_arrays or not b.has_np_arrays:
+            raise ValueError(
+                "only JSymmetricTensor and SymmetricTensor with np.array objects are supported for __matmul__"
+            )
+
+        if isinstance(b, JSymmetricTensor) and b.ranks[0] != self.ranks[1]:
+            raise ValueError("only full contraction is supported for __matmul__")
+        elif isinstance(b, SymmetricTensor) and b.rank != self.ranks[1]:
+            raise ValueError("only full contraction is supported for __matmul__")
+
+    def _matmul_impl(self, b, *, reverse_shift=False, periodic=True):
+        self._validate_convolution_operand(b)
+        return self._convolve(b, reverse_shift=reverse_shift, periodic=periodic)
+
+    def __matmul__(self, b):
+        ## The idea of this method is that both self and b
+        ## contain (for now) np.array objects in their c_dict
+        ## in this case self acts a convolution stencil while
+        ## the convolution operation needs to be performed either with
+        ## or without periodic boundary conditions
+        return self._matmul_impl(b, reverse_shift=False, periodic=True)
+
+    def trace_symmetric(self, symbolic_flag=False):
+        """
+        Trace over the Sym^n basis for a JSymmetricTensor with ranks [n, n]:
+            tr(A) = sum_t m(t) * A[t|t],
+        where t runs over canonical symmetric tuples (TaylorTuples) and
+            m(t) = n! / prod_i c_i!
+        is the multiplicity of tuple t (c_i are repeated-index counts in t).
+        """
+        if len(self.ranks) != 2 or self.ranks[0] != self.ranks[1]:
+            raise Exception("trace_symmetric requires a JSymmetricTensor with ranks=[n, n]")
+
+        n = self.ranks[0]
+        ttuples = TaylorTuples(list(range(self.d)), n)
+
+        # scalar identity case (n=0)
+        if n == 0:
+            key = list(self.c_dict.keys())[0]
+            return self.c_dict[key]
+
+        if symbolic_flag:
+            import sympy as sp
+            from collections import Counter
+
+            tr = sp.Integer(0)
+            n_fact = sp.factorial(n)
+
+            for t in ttuples:
+                t_tuple = t if isinstance(t, tuple) else (t,)
+                counts = Counter(t_tuple).values()
+                mult = n_fact / sp.prod(sp.factorial(c) for c in counts)  # exact Rational/Integer
+                tr += mult * self[t_tuple + t_tuple]
+
+            return sp.simplify(tr)
+        else:
+            import math
+            from collections import Counter
+
+            tr = 0.0
+            n_fact = math.factorial(n)
+
+            for t in ttuples:
+                t_tuple = t if isinstance(t, tuple) else (t,)
+                counts = Counter(t_tuple).values()
+                denom = 1
+                for c in counts:
+                    denom *= math.factorial(c)
+                mult = n_fact / denom
+                tr += mult * self[t_tuple + t_tuple]
+
+            return tr
+
 def GetAJSymmetricTensor(d, rank, ranks, root_sym = 'A'):
     taylor_indices_0 = TaylorTuples(list(range(d)), ranks[0])
     taylor_indices_1 = TaylorTuples(list(range(d)), ranks[1])
@@ -705,17 +1253,31 @@ def GetAJSymmetricTensor(d, rank, ranks, root_sym = 'A'):
 
     return JSymmetricTensor(c_dict = swap_dict, d = d, rank = rank, ranks=ranks)
 
+def GetZeroSymmetricTensor(d=None, rank=None):
+    if rank == 0:
+        return SymmetricTensor(d=d, rank=0, c_dict={0: 0})
+
+    ttuples = TaylorTuples(list(range(d)), rank)
+    return SymmetricTensor(d=d, rank=rank, list_ttuples=ttuples,
+                           list_values=[0] * len(ttuples))
+
 def GetASymmetricTensor(dim, order, root_sym = 'A'):
-    _taylor_indices = TaylorTuples(list(range(dim)), order)
-    _swap_dict = {}
-    for _i, _index_tuple in enumerate(_taylor_indices):
-        _lower_indices = reduce(lambda x, y: str(x) + ',' + str(y), _index_tuple)
-        _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_{" + _lower_indices + "}")
-    return SymmetricTensor(c_dict = _swap_dict, d = dim, rank = order)
+    if order == 0:
+        return SymmetricTensor(d=dim, rank=order, c_dict={0: sp.Symbol(root_sym)})
+    elif order > 0:
+        _taylor_indices = TaylorTuples(list(range(dim)), order)
+        _swap_dict = {}
+        for _i, _index_tuple in enumerate(_taylor_indices):
+            _lower_indices = reduce(lambda x, y: str(x) + ',' + str(y), _index_tuple)
+            _swap_dict[_index_tuple] = sp.Symbol(root_sym + "_{" + _lower_indices + "}")
+        return SymmetricTensor(c_dict = _swap_dict, d = dim, rank = order)
 
 def GetFullyIsotropicTensor(d=None, rank=None):
     if rank % 2:
         raise Exception("rank must be even!")
+
+    if rank == 0:
+        return SymmetricTensor(d=d, rank=0, c_dict={0: 1})
 
     ttuples = TaylorTuples(list(range(d)), 2)
     values = [1 if t[0] == t[1] else 0 for t in ttuples]
@@ -779,7 +1341,10 @@ def GetGeneralizedKroneckerDelta(d=None, rank=None):
 
         return gen_kr 
         
-def GetPiTensor(d=None, half_rank=None):
+def GetPiTensor(d=None, half_rank=None, symbolic_flag=False):
+    if half_rank == 0:
+        return SymmetricTensor(d=d, rank=0, c_dict={0: 1})
+
     # Building the half_rank = 1 case
     ttuples = TaylorTuples(list(range(d)), 2)
     values = [1 if t[0] == t[1] else 0 for t in ttuples]
@@ -800,7 +1365,7 @@ def GetPiTensor(d=None, half_rank=None):
 
         # tuple_map = lambda in_tuple: map(lambda perm: SplitTuplePerm(in_tuple=in_tuple, perm=perm, split_point=2), index_lists_1)
 
-        follow_Pi_hrankm1 = GetPiTensor(d, half_rank=half_rank-1)
+        follow_Pi_hrankm1 = GetPiTensor(d, half_rank=half_rank-1, symbolic_flag=symbolic_flag)
 
         tuples_map = lambda in_tuple: map(lambda perm: SplitTuplePerm(in_tuple=in_tuple, perm=perm, split_point=half_rank), index_lists)
         summands = lambda in_tuple: map(lambda out_tuple: lead_kr_2[(out_tuple[0][0], out_tuple[1][0])] * follow_Pi_hrankm1[out_tuple[0][1:] + out_tuple[1][1:]], tuples_map(in_tuple))
@@ -809,9 +1374,26 @@ def GetPiTensor(d=None, half_rank=None):
         taylor_indices_0 = TaylorTuples(list(range(d)), half_rank)
         taylor_indices_1 = TaylorTuples(list(range(d)), half_rank)
 
+        scale = sp.Rational(1, half_rank) if symbolic_flag else (1.0 / half_rank)
+
         swap_dict = {}
         for tt0 in taylor_indices_0:
             for tt1 in taylor_indices_1:
-                swap_dict[tt0 + tt1] = sum_results(tt0 + tt1) / half_rank
+                swap_dict[tt0 + tt1] = sum_results(tt0 + tt1) * scale
 
         return JSymmetricTensor(d=d, rank=2*half_rank, ranks=[half_rank, half_rank], c_dict=swap_dict)
+
+def FromTuplesToPows(dim, order):
+    if order == 0:
+        return [(0,) * dim]
+    else:
+        fully_sym_comp = TaylorTuples(list(range(dim)), order)
+        fully_sym_pows = [np.unique(c, return_counts=True) for c in fully_sym_comp]
+
+        pows_list = [[0] * dim for _ in range(len(fully_sym_comp))]
+        for i, (pows, counts) in enumerate(fully_sym_pows):
+            for idx, p in zip(pows, counts):
+                pows_list[i][idx] += int(p)
+
+        pows_list = [tuple(pows) for pows in pows_list]
+        return pows_list, fully_sym_comp
