@@ -37,6 +37,15 @@ from idpy.Utils.Geometry import FlipVector, IsSameVector
 from idpy.Utils.Statements import AllTrue
 from idpy.Utils.Combinatorics import GetUniquePermutations, SplitTuplePerm, cycle_list
 
+
+def _is_device_array(x):
+    """IdpyMemory arrays expose a non-None .lang tag."""
+    return getattr(x, 'lang', None) is not None
+
+
+def _is_array_like(x):
+    return isinstance(x, np.ndarray) or _is_device_array(x)
+
 '''
 Function MergeTuples:
 
@@ -191,19 +200,17 @@ class SymmetricTensor:
         else:
             self.c_dict = dict(zip(list_ttuples, list_values))
 
-        # Similar to JSymmetricTensor, we need to check if the c_dict contains np.array objects
-        # and gate on whether they have the same shape
+        # Array-backed fields: numpy ndarray and/or Idpy device arrays (hasattr lang)
         self.has_np_arrays = False
         for key in self.c_dict:
-            if isinstance(self.c_dict[key], np.ndarray):
+            if _is_array_like(self.c_dict[key]):
                 self.has_np_arrays = True
                 break
         if self.has_np_arrays:
             self.shape = self.set_shape()
-            # check if the shapes are the same
             for key in self.c_dict:
-                if self.c_dict[key].shape != self.shape:
-                    raise ValueError("the shapes of the np.array objects in the c_dict are not the same")
+                if getattr(self.c_dict[key], 'shape', None) != self.shape:
+                    raise ValueError("the shapes of the array objects in the c_dict are not the same")
         else:
             self.shape = 0
 
@@ -779,19 +786,18 @@ class JSymmetricTensor:
         else:
             self.c_dict = dict(zip(list_ttuples, list_values))
 
-        ## Need to check if the c_dict contains np.array objects
+        ## Need to check if the c_dict contains array-backed objects
         ## and gate on whether they have the same shape
         self.has_np_arrays = False
         for key in self.c_dict:
-            if isinstance(self.c_dict[key], np.ndarray):
+            if _is_array_like(self.c_dict[key]):
                 self.has_np_arrays = True
                 break
         if self.has_np_arrays:
             self.shape = self.set_shape()
-            # check if the shapes are the same
             for key in self.c_dict:
-                if self.c_dict[key].shape != self.shape:
-                    raise ValueError("the shapes of the np.array objects in the c_dict are not the same")
+                if getattr(self.c_dict[key], 'shape', None) != self.shape:
+                    raise ValueError("the shapes of the array objects in the c_dict are not the same")
         else:
             self.shape = 0
 
@@ -1062,18 +1068,31 @@ class JSymmetricTensor:
             raise Exception("Can only subtract Joint/Symmetric Tensors")
 
     def _convolve_step(self, a, b, *, reverse_shift=False, periodic=True):
-        if not isinstance(a, np.ndarray) or not isinstance(b, np.ndarray):
-            raise TypeError("_convolve_step expects np.ndarray inputs")
-        if a.ndim != b.ndim:
+        if not _is_array_like(a) or not _is_array_like(b):
+            raise TypeError("_convolve_step expects array-like inputs")
+        if getattr(a, 'ndim', None) != getattr(b, 'ndim', None):
             raise ValueError(
-                f"dimensionality mismatch: kernel ndim={a.ndim}, field ndim={b.ndim}"
+                f"dimensionality mismatch: kernel ndim={getattr(a, 'ndim', None)}, "
+                f"field ndim={getattr(b, 'ndim', None)}"
             )
         if not periodic and any(ks > fs for ks, fs in zip(a.shape, b.shape)):
             raise ValueError(
                 f"kernel shape {a.shape} cannot exceed field shape {b.shape} with open boundaries"
             )
 
-        # Cache nonzero taps per kernel layout
+        device_a, device_b = _is_device_array(a), _is_device_array(b)
+        if device_a or device_b:
+            if not (device_a and device_b):
+                raise TypeError(
+                    "device convolution requires both kernel and field to be Idpy arrays"
+                )
+            if not periodic:
+                raise NotImplementedError(
+                    "device open-boundary convolution is not implemented yet"
+                )
+            return self._convolve_step_device(a, b, reverse_shift=reverse_shift)
+
+        # Cache nonzero taps per kernel layout (numpy path)
         if not hasattr(self, "_conv_taps_cache"):
             self._conv_taps_cache = {}
         key = (a.shape, a.dtype.str, a.tobytes())
@@ -1086,7 +1105,7 @@ class JSymmetricTensor:
                 coeffs = np.zeros((0,), dtype=a.dtype)
             else:
                 offsets = np.array(list(zip(*nz)), dtype=np.int64) - np.array(center, dtype=np.int64)
-                coeffs = a[nz]            
+                coeffs = a[nz]
             self._conv_taps_cache[key] = (offsets, coeffs)
             taps = (offsets, coeffs)
 
@@ -1126,15 +1145,60 @@ class JSymmetricTensor:
 
         return out
 
-    def _convolve(self, b, *, reverse_shift=False, periodic=True):
-        output_tensor = \
-            ZeroSymmetricTensor(d=self.d, rank=self.ranks[0], shape=b.shape, dtype=self.dtype)
+    def _extract_conv_taps(self, a, *, reverse_shift=False):
+        """Host-side tap extraction (works for numpy or via D2H)."""
+        a_np = np.asarray(a.D2H() if _is_device_array(a) and hasattr(a, 'D2H') else a)
+        center = tuple(s // 2 for s in a_np.shape)
+        nz = np.nonzero(a_np)
+        if nz[0].size == 0:
+            offsets = np.zeros((0, a_np.ndim), dtype=np.int64)
+            coeffs = np.zeros((0,), dtype=a_np.dtype)
+        else:
+            offsets = np.array(list(zip(*nz)), dtype=np.int64) - np.array(center, dtype=np.int64)
+            coeffs = a_np[nz]
+        if reverse_shift:
+            offsets = -offsets
+        return offsets, coeffs, a_np.shape
 
+    def _convolve_step_device(self, a, b, *, reverse_shift=False):
+        from idpy.IdpyStencils.IdpyConvolution import (
+            convolve_periodic, get_active_tenet, get_convolution_shape,
+        )
+        from idpy.IdpyCode import IdpyMemory
+        if get_active_tenet() is None:
+            raise RuntimeError(
+                "device convolution requires set_active_tenet(tenet) first"
+            )
+        offsets, coeffs, _kshape = self._extract_conv_taps(
+            a, reverse_shift=reverse_shift,
+        )
+        tenet = get_active_tenet()
+        if getattr(b, 'ndim', 1) >= 2:
+            shape = tuple(int(s) for s in b.shape)
+            host_b = np.asfortranarray(
+                np.asarray(b.D2H() if hasattr(b, 'D2H') else b)
+            )
+            src = IdpyMemory.OnDevice(host_b.ravel(order='F'), tenet=tenet)
+            out_flat = convolve_periodic(
+                src, offsets, coeffs, shape=shape, tenet=tenet,
+            )
+            host_out = np.asarray(
+                out_flat.D2H() if hasattr(out_flat, 'D2H') else out_flat
+            )
+            host_out = np.asfortranarray(host_out.reshape(shape, order='F'))
+            return IdpyMemory.OnDevice(host_out, tenet=tenet)
+
+        shape = get_convolution_shape()
+        if shape is None:
+            raise ValueError(
+                "flat device field requires set_convolution_shape(shape)"
+            )
+        return convolve_periodic(b, offsets, coeffs, shape=shape, tenet=tenet)
+
+    def _convolve(self, b, *, reverse_shift=False, periodic=True):
         def _as_tuple_index(index):
             if isinstance(index, tuple):
                 return index
-            # key `0` is scalar only for full rank-0 tensors; for rank>0 it is
-            # a valid first component index and must stay explicit.
             if index == 0 and self.rank == 0:
                 return ()
             return (index,)
@@ -1146,6 +1210,10 @@ class JSymmetricTensor:
                 return index_tuple[0]
             return index_tuple
 
+        sample = next(iter(b.c_dict.values()))
+        on_device = _is_device_array(sample)
+
+        c_dict_out = {}
         for full_tt in self.c_dict:
             full_tt_tuple = _as_tuple_index(full_tt)
             tt_0_tuple = full_tt_tuple[:self.ranks[0]]
@@ -1154,10 +1222,38 @@ class JSymmetricTensor:
             tt_0 = _canonical_index(tt_0_tuple, self.ranks[0])
             tt_1 = _canonical_index(tt_1_tuple, self.ranks[1])
 
-            output_tensor[tt_0] += self._convolve_step(
-                self[full_tt], b[tt_1], reverse_shift=reverse_shift, periodic=periodic
+            term = self._convolve_step(
+                self[full_tt], b[tt_1],
+                reverse_shift=reverse_shift, periodic=periodic,
+            )
+            if tt_0 not in c_dict_out:
+                c_dict_out[tt_0] = term
+            elif on_device:
+                from idpy.IdpyCode import IdpyMemory
+                from idpy.IdpyStencils.IdpyConvolution import get_active_tenet
+                s = np.asarray(
+                    c_dict_out[tt_0].D2H()
+                    if hasattr(c_dict_out[tt_0], 'D2H') else c_dict_out[tt_0]
+                )
+                t = np.asarray(term.D2H() if hasattr(term, 'D2H') else term)
+                acc = np.asfortranarray(s + t)
+                c_dict_out[tt_0] = IdpyMemory.OnDevice(
+                    acc, tenet=get_active_tenet(),
+                )
+            else:
+                c_dict_out[tt_0] = c_dict_out[tt_0] + term
+
+        if on_device:
+            return SymmetricTensor(
+                d=self.d, rank=self.ranks[0],
+                c_dict=c_dict_out, dtype=self.dtype,
             )
 
+        output_tensor = ZeroSymmetricTensor(
+            d=self.d, rank=self.ranks[0], shape=b.shape, dtype=self.dtype,
+        )
+        for key, val in c_dict_out.items():
+            output_tensor[key] = val
         return output_tensor
 
     def _validate_convolution_operand(self, b):
@@ -1168,7 +1264,8 @@ class JSymmetricTensor:
 
         if not self.has_np_arrays or not b.has_np_arrays:
             raise ValueError(
-                "only JSymmetricTensor and SymmetricTensor with np.array objects are supported for __matmul__"
+                "only JSymmetricTensor and SymmetricTensor with array-backed "
+                "components are supported for __matmul__"
             )
 
         if isinstance(b, JSymmetricTensor) and b.ranks[0] != self.ranks[1]:
