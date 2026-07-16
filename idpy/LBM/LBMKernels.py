@@ -34,7 +34,7 @@ IdpyFunction's
 class F_PosFromIndex(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'void'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'SType * pos': [],
+        self.params = {'SType * pos': ['thread'],
                        'SType * dim_sizes': ['global', 'const'],
                        'SType * dim_strides': ['global', 'const'],
                        'unsigned int index': ['const']}
@@ -50,7 +50,7 @@ class F_PosFromIndex(IdpyFunction):
 class F_IndexFromPos(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'SType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'SType * pos': ['const'],
+        self.params = {'SType * pos': ['thread', 'const'],
                        'SType * dim_strides': ['global', 'const']}
 
         self.functions[IDPY_T] = """

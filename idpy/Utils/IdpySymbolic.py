@@ -194,16 +194,24 @@ class SymmetricTensor:
         # Similar to JSymmetricTensor, we need to check if the c_dict contains np.array objects
         # and gate on whether they have the same shape
         self.has_np_arrays = False
+        _has_shaped = False
         for key in self.c_dict:
-            if isinstance(self.c_dict[key], np.ndarray):
+            _val = self.c_dict[key]
+            if isinstance(_val, np.ndarray):
                 self.has_np_arrays = True
+                _has_shaped = True
                 break
-        if self.has_np_arrays:
+            if isinstance(_val, sp.MatrixBase):
+                _has_shaped = True
+                break
+        if _has_shaped:
             self.shape = self.set_shape()
             # check if the shapes are the same
             for key in self.c_dict:
                 if self.c_dict[key].shape != self.shape:
-                    raise ValueError("the shapes of the np.array objects in the c_dict are not the same")
+                    raise ValueError(
+                        "the shapes of the np.array/Matrix objects in the c_dict are not the same"
+                    )
         else:
             self.shape = 0
 
@@ -782,16 +790,24 @@ class JSymmetricTensor:
         ## Need to check if the c_dict contains np.array objects
         ## and gate on whether they have the same shape
         self.has_np_arrays = False
+        _has_shaped = False
         for key in self.c_dict:
-            if isinstance(self.c_dict[key], np.ndarray):
+            _val = self.c_dict[key]
+            if isinstance(_val, np.ndarray):
                 self.has_np_arrays = True
+                _has_shaped = True
                 break
-        if self.has_np_arrays:
+            if isinstance(_val, sp.MatrixBase):
+                _has_shaped = True
+                break
+        if _has_shaped:
             self.shape = self.set_shape()
             # check if the shapes are the same
             for key in self.c_dict:
                 if self.c_dict[key].shape != self.shape:
-                    raise ValueError("the shapes of the np.array objects in the c_dict are not the same")
+                    raise ValueError(
+                        "the shapes of the np.array/Matrix objects in the c_dict are not the same"
+                    )
         else:
             self.shape = 0
 

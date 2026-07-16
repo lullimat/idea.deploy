@@ -6,6 +6,48 @@
 # For the time being, the verbose flag needs to be changed here
 VERBOSE_FLAG=0
 
+PRESERVE_SOURCES=0
+PURGE_SOURCES=0
+
+usage() {
+    echo "Usage: bash idpy-clean.sh [--preserve-sources|--purge-sources] [-h|--help]"
+    echo
+    echo "  (default)             Remove the venv and run 'make clean' in pymetallic if present"
+    echo "  --preserve-sources    Remove the venv only; keep sources and Metal build artifacts"
+    echo "  --purge-sources       Remove the venv and delete py-env/sources entirely"
+    echo "  -h, --help            Show this help"
+}
+
+while [ ${#} -gt 0 ]
+do
+    case "${1}" in
+        --preserve-sources)
+            PRESERVE_SOURCES=1
+            shift
+            ;;
+        --purge-sources)
+            PURGE_SOURCES=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: ${1}"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+if ((PRESERVE_SOURCES)) && ((PURGE_SOURCES))
+then
+    echo "Error: --preserve-sources and --purge-sources are mutually exclusive"
+    usage
+    exit 1
+fi
+
 source .idpy-env
 echo
 echo "Welcome to the idea.deploy cleaning script!"
@@ -45,6 +87,40 @@ then
 fi
 echo "done"
 echo
+#################################
+## Cleaning py-env/sources
+if ((PURGE_SOURCES))
+then
+	echo -n "Purging sources under ${SOURCES_ROOT}..."
+	if [ -d "${SOURCES_ROOT}" ]
+	then
+		if ((${VERBOSE_FLAG}))
+		then
+			echo
+			echo rm -rf "${SOURCES_ROOT}"
+		fi
+		rm -rf "${SOURCES_ROOT}"
+	fi
+	echo "done"
+	echo
+elif ((PRESERVE_SOURCES))
+then
+	echo "Preserving sources and Metal build artifacts under ${SOURCES_ROOT}"
+	echo
+else
+	echo -n "Cleaning Metal build artifacts..."
+	if [ -d "${PYMETALLIC_SRC}" ] && [ -f "${PYMETALLIC_SRC}/Makefile" ]
+	then
+		if ((${VERBOSE_FLAG}))
+		then
+			echo
+			echo "(cd \"${PYMETALLIC_SRC}\" && make clean)"
+		fi
+		(cd "${PYMETALLIC_SRC}" && make clean)
+	fi
+	echo "done"
+	echo
+fi
 #################################
 ## Deleting python tests output
 echo -n "Checking python tests outputs..."

@@ -44,7 +44,7 @@ class K_ComputeDensityPsiWallsMeta(IdpyKernel):
                  optimizer_flag = None, 
                  XIStencil = None, use_ptrs = False, ordering_lambda = None,
                  walls_array_var = 'walls',
-                 psi_code = None, headers_files=['math.h']):
+                 psi_code = None, headers_files=('math.h',)):
         
         self.expect_lambda_args = 2
         
@@ -108,7 +108,7 @@ class K_ComputeDensityPsiMeta(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, 
                  XIStencil = None, use_ptrs = False, ordering_lambda = None,
-                 psi_code = None, headers_files=['math.h']):
+                 psi_code = None, headers_files=('math.h',)):
         
         self.expect_lambda_args = 2
         
@@ -528,7 +528,7 @@ class K_ForceCollideStreamWallsSCMPMeta(IdpyKernel):
                  ordering_lambda_pop = None, ordering_lambda_u = None,
                  collect_mul = False, stream_mode = 'push', pressure_mode = 'compute',
                  root_dim_sizes = 'L', root_strides = 'STR', root_coord = 'x', 
-                 walls_array_var = 'walls', headers_files=['math.h']):
+                 walls_array_var = 'walls', headers_files=('math.h',)):
         
         self.expect_lambda_args = 2
 
@@ -711,7 +711,7 @@ class K_ForceCollideStreamWallsMirrorsSCMPMeta(IdpyKernel):
                  ordering_lambda_pop = None, ordering_lambda_u = None,
                  collect_mul = False, stream_mode = 'push', pressure_mode = 'compute',
                  root_dim_sizes = 'L', root_strides = 'STR', root_coord = 'x', 
-                 walls_array_var = 'walls', headers_files=['math.h']):
+                 walls_array_var = 'walls', headers_files=('math.h',)):
         
         self.expect_lambda_args = 2
 
@@ -1225,7 +1225,7 @@ class K_ComputeVelocityAfterForceSCMPWallsMeta(IdpyKernel):
                  ordering_lambda_pop = None, ordering_lambda_u = None,
                  collect_mul = False, pressure_mode = 'compute',
                  root_dim_sizes = 'L', root_strides = 'STR', root_coord = 'x', 
-                 walls_array_var = 'walls', headers_files=['math.h']):
+                 walls_array_var = 'walls', headers_files=('math.h',)):
 
         self.expect_lambda_args = 2
         
@@ -1375,7 +1375,7 @@ class K_ForceGross2011CollideStreamSCMPMeta(IdpyKernel):
                  collect_mul = False, stream_mode = 'push', pressure_mode = 'compute',
                  root_dim_sizes = 'L', root_strides = 'STR', root_coord = 'x',
                  distribution = 'flat', which_box_m = 'cos', parallel_streams = 1,
-                 generator = 'MMIX', headers_files=['math.h']):
+                 generator = 'MMIX', headers_files=('math.h',)):
         
         self.expect_lambda_args = 2
 

@@ -101,7 +101,7 @@ class F_PointDistanceCenterFirst(IdpyFunction):
         IdpyFunction.__init__(self, custom_types = custom_types,
                               f_type = f_type)
         self.params = {'SType * a': ['global', 'const'],
-                       'SType * b': ['const']}
+                       'SType * b': ['thread', 'const']}
 
         self.functions[IDPY_T] = """
         LengthType dist = 0;
@@ -115,8 +115,8 @@ class F_PointDistance(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'LengthType'):
         IdpyFunction.__init__(self, custom_types = custom_types,
                               f_type = f_type)
-        self.params = {'SType * a': ['const'],
-                       'SType * b': ['const']}
+        self.params = {'SType * a': ['thread', 'const'],
+                       'SType * b': ['thread', 'const']}
 
         self.functions[IDPY_T] = """
         LengthType dist = 0;
@@ -561,7 +561,7 @@ class K_Collision_ShanChenGuoMultiPhaseWallsGravity(IdpyKernel):
 
 class K_ComputePsi(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [], psi_code = None,
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         if psi_code is None:
             raise Exception("Missing argument psi_code")
 
@@ -610,7 +610,7 @@ class K_InitFlatInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -651,7 +651,7 @@ class K_InitSingleFlatInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -691,7 +691,7 @@ class K_InitRadialInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag,

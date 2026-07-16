@@ -45,7 +45,7 @@ class K_ComputeMomentsWallsMeta(IdpyKernel):
                  optimizer_flag = None, XIStencil = None, use_ptrs = False,
                  walls_array_var = 'walls',
                  ordering_lambda_pop = None, ordering_lambda_u = None, 
-                 headers_files=['math.h']):
+                 headers_files=('math.h',)):
 
         self.expect_lambda_args = 2
         
@@ -125,7 +125,7 @@ class K_ComputeMomentsMeta(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, XIStencil = None, use_ptrs = False,
                  ordering_lambda_pop = None, ordering_lambda_u = None, 
-                 headers_files=['math.h']):
+                 headers_files=('math.h',)):
 
         self.expect_lambda_args = 2
         
@@ -389,7 +389,7 @@ class K_InitPopulationsMeta(IdpyKernel):
 class K_CheckUMeta(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, use_ptrs = False,
-                 ordering_lambda_u = None, headers_files=['math.h']):
+                 ordering_lambda_u = None, headers_files=('math.h',)):
 
         self.expect_lambda_args = 2
 
@@ -501,7 +501,7 @@ class K_CheckUMetaWalls(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, use_ptrs = False,
                  walls_array_var = 'walls',
-                 ordering_lambda_u = None, headers_files=['math.h']):
+                 ordering_lambda_u = None, headers_files=('math.h',)):
 
         self.expect_lambda_args = 2
 
@@ -896,7 +896,7 @@ class K_IsotropyFilter(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None, XIStencil = None, use_ptrs = False, search_depth=6,
                  declare_const_dict = {'new_pop': True}, output_pop = 'pop_iso',
-                 ordering_lambda_pop = None, collect_mul = False, headers_files=['math.h']):
+                 ordering_lambda_pop = None, collect_mul = False, headers_files=('math.h',)):
 
         self.expect_lambda_args = 2
         

@@ -12,6 +12,12 @@ ID_BASHRC_SOURCE_ALIASES="source ${VENV_ALIASES}"
 
 ID_CUDA_PATH_FOUND=${VENV_ROOT}/cuda_path_found
 
+# Local Metal bridge; cloned/patched/built when Darwin + swiftc are available
+SOURCES_ROOT=${VENV_ROOT}/sources
+PYMETALLIC_SRC=${SOURCES_ROOT}/pymetallic
+PYMETALLIC_REPO=https://github.com/seantrue/pymetallic.git
+PYMETALLIC_PIN=824e4714e791268faaae14565e778bd481b5a722
+
 # SERVERS
 PYPI_SERVERS[0]=pypi.python.org
 PYPI_SERVERS[1]=pypi.douban.com

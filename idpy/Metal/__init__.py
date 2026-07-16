@@ -41,4 +41,4 @@ sys.path.append(_idea_dot_deploy_path)
 
 from idpy import idpy_os_found
 
-METAL_T = "metalcompute"
+METAL_T = "pymetallic"

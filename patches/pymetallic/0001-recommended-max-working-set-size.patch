@@ -1,0 +1,42 @@
+diff --git a/src/SwiftMetalBridge.swift b/src/SwiftMetalBridge.swift
+index 00e731b..233b7f4 100644
+--- a/src/SwiftMetalBridge.swift
++++ b/src/SwiftMetalBridge.swift
+@@ -41,6 +41,12 @@ public func metal_device_get_name(_ devicePtr: UnsafeMutableRawPointer) -> Unsaf
+     return UnsafePointer(strdup(name))
+ }
+ 
++@_cdecl("metal_device_recommended_max_working_set_size")
++public func metal_device_recommended_max_working_set_size(_ devicePtr: UnsafeMutableRawPointer) -> UInt64 {
++    let device = Unmanaged<MTLDevice>.fromOpaque(devicePtr).takeUnretainedValue()
++    return device.recommendedMaxWorkingSetSize
++}
++
+ @_cdecl("metal_device_supports_shader_barycentric_coordinates")
+ public func metal_device_supports_shader_barycentric_coordinates(_ devicePtr: UnsafeMutableRawPointer) -> Bool {
+     let device = Unmanaged<MTLDevice>.fromOpaque(devicePtr).takeUnretainedValue()
+diff --git a/src/pymetallic/metallic.py b/src/pymetallic/metallic.py
+index 2c18b6c..003f740 100644
+--- a/src/pymetallic/metallic.py
++++ b/src/pymetallic/metallic.py
+@@ -48,6 +48,8 @@ def _setup_function_signatures(lib: ctypes.CDLL) -> None:
+     lib.metal_get_device_count.restype = ctypes.c_int32
+     lib.metal_device_get_name.argtypes = [c_void_p]
+     lib.metal_device_get_name.restype = c_char_p
++    lib.metal_device_recommended_max_working_set_size.argtypes = [c_void_p]
++    lib.metal_device_recommended_max_working_set_size.restype = c_uint64
+     lib.metal_device_supports_shader_barycentric_coordinates.argtypes = [c_void_p]
+     lib.metal_device_supports_shader_barycentric_coordinates.restype = c_bool
+ 
+@@ -367,6 +369,11 @@ class Device:
+         name_ptr = lib.metal_device_get_name(self._device_ptr)
+         return name_ptr.decode("utf-8") if name_ptr else "Unknown Device"
+ 
++    @property
++    def recommended_max_working_set_size(self) -> int:
++        lib = _get_metal_lib()
++        return int(lib.metal_device_recommended_max_working_set_size(self._device_ptr))
++
+     def supports_shader_barycentric_coordinates(self) -> bool:
+         lib = _get_metal_lib()
+         return bool(
