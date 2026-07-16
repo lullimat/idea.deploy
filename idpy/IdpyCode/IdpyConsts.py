@@ -55,28 +55,32 @@ class AddrQualif:
                                    'restrict': """__restrict__""",
                                    'shared': """__shared__""",
                                    'device': """__device__""",
-                                   'global': ''}
+                                   'global': '',
+                                   'thread': ''}
 
         self.qualifiers[OCL_T] = {'global': """__global""",
                                   'const': """__const""",
                                   'local': """__local""",
                                   'restrict': '',
                                   'shared': '',
-                                  'device': ''}
+                                  'device': '',
+                                  'thread': ''}
 
         self.qualifiers[CTYPES_T] = {'global': '',
                                      'const': """const""",
                                      'local': '',
                                      'restrict': """__restrict__""",
                                      'shared': '',
-                                     'device': ''}
+                                     'device': '',
+                                     'thread': ''}
 
-        self.qualifiers[METAL_T] = {'global': '',
-                                     'const': """const""",
-                                     'local': '',
-                                     'restrict': """__restrict__""",
-                                     'shared': '',
-                                     'device': ''}        
+        self.qualifiers[METAL_T] = {'global': """device""",
+                                    'const': """const""",
+                                    'local': """threadgroup""",
+                                    'restrict': '',
+                                    'shared': """threadgroup""",
+                                    'device': """device""",
+                                    'thread': """thread"""}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]
@@ -97,7 +101,7 @@ class KernQualif:
         self.qualifiers = {CUDA_T: """__global__ void""",
                            OCL_T: """__kernel void""",
                            CTYPES_T: """""", 
-                           METAL_T: """kernel"""}
+                           METAL_T: """kernel void"""}
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]

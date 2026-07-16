@@ -38,6 +38,7 @@ as long as the different meta-declarations are consistent
 import numpy as np
 from collections import defaultdict
 from pathlib import Path
+import sys
 
 from functools import reduce
 
@@ -52,10 +53,33 @@ from idpy.IdpyCode import idpy_copyright
 from idpy.IdpyCode.IdpyUnroll import _codify_comment
 from idpy.Utils.SimpleTiming import SimpleTiming
 
+# Max signed 64-bit; larger ints need an unsigned C literal suffix in macros.
+_C_INT64_MAX = 0x7fffffffffffffff
+
+
+def _format_c_macro_value(value, lang=None):
+    '''
+    Format a Python constant for #define / -D emission.
+    Values above signed int64 max (e.g. ID_RANDMAX_MMIX = 2^64-1) need an
+    explicit unsigned suffix or compilers warn / mis-parse the literal.
+    '''
+    if isinstance(value, bool):
+        return '1' if value else '0'
+    if isinstance(value, int):
+        if value > _C_INT64_MAX:
+            # Metal has no long long; unsigned long is 64-bit.
+            if lang == METAL_T:
+                return str(value) + 'UL'
+            return str(value) + 'ULL'
+        return str(value)
+    return str(value)
+
 if idpy_langs_sys[CUDA_T]:
     from idpy.IdpyCode.IdpyMemory import IdpyArrayCUDA
 if idpy_langs_sys[OCL_T]:
     from idpy.IdpyCode.IdpyMemory import IdpyArrayOCL
+if idpy_langs_sys[METAL_T]:
+    from idpy.IdpyCode.IdpyMemory import IdpyArrayMETAL
 
 # Need this to implement types checks
 from idpy.Utils.CustomTypes import CustomTypes
@@ -81,7 +105,7 @@ if idpy_langs_sys[CTYPES_T]:
     from idpy.CTypes.CTypes import CTYPES_N_THREAD
 
 if idpy_langs_sys[METAL_T]:
-    import metalcompute as mtc
+    import pymetallic
     from idpy.Metal.Metal import Tenet as MTTenet
     from idpy.Metal.Metal import Metal
 
@@ -107,8 +131,8 @@ class IdpyKernel:
 
         if type(custom_types) is not dict:
             raise Exception("custom_types param must be a dict")
-        if headers_files is not None and type(headers_files) is not list:
-            raise Exception("headers_files param must be a list")
+        if headers_files is not None and type(headers_files) not in (list, tuple):
+            raise Exception("headers_files param must be a list or tuple")
         if include_dirs is not None and type(include_dirs) is not list:
             raise Exception("include_dirs param must be a list")
         if definitions_files is not None and type(definitions_files) is not list:
@@ -133,7 +157,12 @@ class IdpyKernel:
         if self.declare_macros not in ['header', 'macro']:
             raise Exception("declare_macros must be either 'header' or 'macro'")
         
-        self.headers_files = headers_files
+        # Copy so callers' mutable defaults (e.g. headers_files=['math.h'])
+        # are not emptied by lang-specific remove() in Code(). Prefer tuple
+        # defaults so the shared default object cannot be mutated.
+        self.headers_files = (
+            list(headers_files) if headers_files is not None else None
+        )
         self.declarations = {}
 
         '''
@@ -194,7 +223,10 @@ class IdpyKernel:
             # Constants
             if self.declare_macros == 'macro':
                 for const in self.constants:
-                    self.macros.append("-D " + const + "=" + str(self.constants[const]))
+                    self.macros.append(
+                        "-D " + const + "=" +
+                        _format_c_macro_value(self.constants[const], lang)
+                    )
                 
             # Types
             if self.declare_types == 'macro':
@@ -212,7 +244,10 @@ class IdpyKernel:
             # Constants
             if self.declare_macros == 'macro':
                 for const in self.constants:
-                    self.macros += (" -D " + const + "=" + str(self.constants[const]))
+                    self.macros += (
+                        " -D " + const + "=" +
+                        _format_c_macro_value(self.constants[const], lang)
+                    )
                 
             # Types
             # https://stackoverflow.com/questions/13531100/escaping-space-in-opencl-compiler-arguments
@@ -233,7 +268,10 @@ class IdpyKernel:
             # Constants
             if self.declare_macros == 'macro':            
                 for const in self.constants:
-                    self.macros += (" -D " + const + "=" + str(self.constants[const]))
+                    self.macros += (
+                        " -D " + const + "=" +
+                        _format_c_macro_value(self.constants[const], lang)
+                    )
                 
             # Types
             # https://stackoverflow.com/questions/13531100/escaping-space-in-opencl-compiler-arguments
@@ -253,7 +291,12 @@ class IdpyKernel:
             if self.macros == '':
                 self.macros = None
                 
-            return self.macros             
+            return self.macros
+
+        if lang == METAL_T:
+            # Metal uses typedef/#define in source (header mode)
+            self.macros = None
+            return self.macros
 
     def GetCodeFlags(self):
         return self.code_flags
@@ -296,6 +339,9 @@ class IdpyKernel:
             ("""for(unsigned int """ + self.gthread_id_code + """=0; """ + 
                 self.gthread_id_code + """< """ + CTYPES_N_THREAD + """; """ + self.gthread_id_code + """++){\n""")
 
+        # Metal: g_tid is a kernel parameter with [[thread_position_in_grid]]
+        _swap[METAL_T] = ""
+
         return _swap
 
     def SetLocalThreadId(self):
@@ -308,6 +354,7 @@ class IdpyKernel:
                         """
                         get_local_id(0) + 
                         (get_local_id(1) + get_local_id(2) * get_local_size(1)) * get_local_size(0);\n""")
+        _swap[METAL_T] = ""
         return _swap
 
     def SetLocalThreadCoords(self):
@@ -325,6 +372,7 @@ class IdpyKernel:
                         """get_local_id(1);\n""" +
                         """unsigned int """ + self.lthread_id_coords_code + """_z""" + """ = """ + \
                         """get_local_id(2);\n""")
+        _swap[METAL_T] = ""
         return _swap
 
     def SetLocalBlockCoords(self):
@@ -342,6 +390,7 @@ class IdpyKernel:
                         """get_group_id(1);\n""" +
                         """unsigned int """ + self.block_coords_code + """_z""" + """ = """ + \
                         """get_group_id(2);\n""")
+        _swap[METAL_T] = ""
         return _swap
 
     def WriteAsHeader(self, lang = None, prepend_path = None):
@@ -380,10 +429,13 @@ class IdpyKernel:
         
         return _swap
 
-    def DeclareMacros(self):
+    def DeclareMacros(self, lang = None):
         _swap = ''
         for c_macro in self.constants:
-            _swap  += '#define ' + c_macro + ' ' + str(self.constants[c_macro]) + '\n'
+            _swap += (
+                '#define ' + c_macro + ' ' +
+                _format_c_macro_value(self.constants[c_macro], lang) + '\n'
+            )
         _swap += '\n'
         
         return _swap    
@@ -402,19 +454,32 @@ class IdpyKernel:
         # Inserting headers
         ## Checking for 'math.h'
 
+        if lang == METAL_T:
+            self.code += "#include <metal_stdlib>\n"
+            self.code += "using namespace metal;\n"
+            # Default Metal tanh/exp/log overflow to NaN for large |x| on Apple
+            # GPUs (e.g. tanh(|x|≳44)); precise:: stays finite and saturates.
+            self.code += "#define tanh(X) precise::tanh(X)\n"
+            self.code += "#define exp(X) precise::exp(X)\n"
+            self.code += "#define log(X) precise::log(X)\n"
+            self.code += "#define log2(X) precise::log2(X)\n"
+            self.code += "#define log10(X) precise::log10(X)\n\n"
+
         if self.headers_files is not None:
-            _swap_headers_files = self.headers_files.copy()
-
-            if lang == CUDA_T or lang == OCL_T:
-                if 'math.h' in self.headers_files:
-                    self.headers_files.remove('math.h')
-
+            # Work on a local copy — never mutate self.headers_files in place
+            # (shared default lists like ['math.h'] must stay intact for CTYPES).
+            _headers_for_code = list(self.headers_files)
+            if lang == CUDA_T or lang == OCL_T or lang == METAL_T:
+                if 'math.h' in _headers_for_code:
+                    _headers_for_code.remove('math.h')
+            _saved_headers = self.headers_files
+            self.headers_files = _headers_for_code
             self.code += self.IncludeHeaders()
-            self.headers_files = _swap_headers_files.copy()
+            self.headers_files = _saved_headers
 
         # Inserting macros
         if self.declare_macros == 'header':
-            self.code += self.DeclareMacros()
+            self.code += self.DeclareMacros(lang=lang)
         # Inserting types
         if self.declare_types == 'typedef':
             self.code += self.DeclareTypes()
@@ -429,8 +494,15 @@ class IdpyKernel:
         else:
             self.code += self.return_type + " " + self.name
 
-        # Kernel Paremeters
-        self.code += WriteCodeParams(self.params, AddrQ)
+        # Kernel Parameters
+        if lang == METAL_T:
+            g_tid = (self.gthread_id_code
+                     if self.code_flags[self.gthread_id_code] else None)
+            self.code += WriteCodeParams(
+                self.params, AddrQ, metal_kernel=True, g_tid_name=g_tid
+            )
+        else:
+            self.code += WriteCodeParams(self.params, AddrQ)
 
         # Inserting kernel body
         self.code += """{\n"""
@@ -488,6 +560,7 @@ class IdpyKernel:
             class Idea:
                 def __init__(self, k_dict = None):
                     self.k_dict, self.lang = k_dict, OCL_T
+                    self.st = SimpleTiming()
 
                 def Deploy(self, args_list = None, idpy_stream = None):
                     _args_data = []
@@ -515,6 +588,22 @@ class IdpyKernel:
                             _args_data.append(arg.data)
                         else:
                             _args_data.append(arg)
+
+                    # Apple OpenCL event timestamps are unreliable; use host
+                    # wall clock (enqueue + wait), matching Metal DeployProfiling.
+                    if sys.platform == "darwin":
+                        self.st.Start()
+                        self.k_dict['_kernel_function'].set_args(*_args_data)
+                        _swap_event = cl.enqueue_nd_range_kernel(
+                            self.k_dict['tenet'],
+                            self.k_dict['_kernel_function'],
+                            global_work_size=self.k_dict['grid'],
+                            local_work_size=self.k_dict['block'],
+                            wait_for=idpy_stream)
+                        _swap_event.wait()
+                        self.st.End()
+                        _time_sec = self.st.GetElapsedTime()['time_s']
+                        return _swap_event, _time_sec
 
                     self.k_dict['_kernel_function'].set_args(*_args_data)
                     _swap_event = cl.enqueue_nd_range_kernel(self.k_dict['tenet'],
@@ -604,7 +693,77 @@ class IdpyKernel:
                 
                 
             return Idea({'_kernel_function': _kernel_function, '_kernel_name': self.name,
-                         'tenet': tenet, 'grid': grid, 'block': block})            
+                         'tenet': tenet, 'grid': grid, 'block': block})
+
+        if idpy_langs_sys[METAL_T] and isinstance(tenet, MTTenet):
+            _source = self.Code(METAL_T)
+            _library = pymetallic.Library(tenet.device, _source)
+            _function = _library.make_function(self.name)
+            _pipeline = tenet.device.compute_pipeline_state(_function) \
+                if hasattr(tenet.device, 'compute_pipeline_state') else \
+                pymetallic.ComputePipelineState(tenet.device, _function)
+
+            # CUDA (grid, block) -> Metal global threads = grid * block per dim
+            _global = tuple(map(lambda x, y: x * y, block, grid))
+            if len(_global) < 3:
+                _global = _global + (1,) * (3 - len(_global))
+            _block = block if len(block) == 3 else block + (1,) * (3 - len(block))
+
+            class Idea:
+                def __init__(self, k_dict = None):
+                    self.k_dict, self.lang = k_dict, METAL_T
+                    self.st = SimpleTiming()
+
+                def _bind_args(self, args_list):
+                    _args_data = []
+                    for arg in args_list:
+                        if isinstance(arg, IdpyArrayMETAL):
+                            _args_data.append(arg.data)
+                        elif isinstance(arg, np.ndarray):
+                            _args_data.append(
+                                pymetallic.Buffer.from_numpy(
+                                    self.k_dict['tenet'].device, arg
+                                )
+                            )
+                        else:
+                            # numpy scalar / Python scalar -> 1-element buffer
+                            _arr = np.array([arg])
+                            _args_data.append(
+                                pymetallic.Buffer.from_numpy(
+                                    self.k_dict['tenet'].device, _arr
+                                )
+                            )
+                    return _args_data
+
+                def Deploy(self, args_list = None, idpy_stream = None):
+                    if idpy_stream is not None:
+                        print("Metal Deploy: idpy_stream is not available; "
+                              "using synchronous command buffer")
+                    tenet = self.k_dict['tenet']
+                    _args_data = self._bind_args(args_list)
+                    command_buffer = tenet.queue.make_command_buffer()
+                    encoder = command_buffer.make_compute_command_encoder()
+                    encoder.set_compute_pipeline_state(self.k_dict['_pipeline'])
+                    for i, buf in enumerate(_args_data):
+                        encoder.set_buffer(buf, 0, i)
+                    encoder.dispatch_threads(
+                        self.k_dict['global'], self.k_dict['block']
+                    )
+                    encoder.end_encoding()
+                    command_buffer.commit()
+                    command_buffer.wait_until_completed()
+                    return None
+
+                def DeployProfiling(self, args_list = None, idpy_stream = None):
+                    self.st.Start()
+                    self.Deploy(args_list, idpy_stream)
+                    self.st.End()
+                    _time_sec = self.st.GetElapsedTime()['time_s']
+                    return None, _time_sec
+
+            return Idea({'_pipeline': _pipeline, '_kernel_name': self.name,
+                         'tenet': tenet, 'grid': grid, 'block': _block,
+                         'global': _global})
 
     def ResetCode(self):
         self.code = ""
@@ -665,23 +824,53 @@ class IdpyFunction:
     def ResetCode(self):
         self.code = ""
 
-def WriteCodeParams(params = None, AddrQ = None):
+def WriteCodeParams(params = None, AddrQ = None,
+                    metal_kernel = False, g_tid_name = None):
     _code = ""
     _code += "("
+    buffer_i = 0
     for param in params:
         restrict_flag = False
+        qualifiers_prefix = ""
         for qualifier in params[param]:
             if qualifier == 'restrict':
                 restrict_flag = True
             else:
-                _code += AddrQ[qualifier] + " "
-        if restrict_flag:
-            _splitted = param.split('*')
-            _code += _splitted[0] + ' * ' + AddrQ['restrict'] + ' ' + _splitted[1] + ','
+                qualifiers_prefix += AddrQ[qualifier] + " "
+
+        is_pointer = '*' in param
+        if metal_kernel and not is_pointer:
+            # Scalar kernel args: constant T & name [[buffer(i)]]
+            _parts = param.rsplit(None, 1)
+            _code += ("constant " + _parts[0] + " & " + _parts[1] +
+                      " [[buffer(" + str(buffer_i) + ")]], ")
+            buffer_i += 1
+        elif metal_kernel:
+            if restrict_flag:
+                _splitted = param.split('*')
+                _code += (qualifiers_prefix + _splitted[0] + '* ' +
+                          (AddrQ['restrict'] + ' ' if AddrQ['restrict'] else '') +
+                          _splitted[1].strip() +
+                          " [[buffer(" + str(buffer_i) + ")]], ")
+            else:
+                _code += (qualifiers_prefix + param +
+                          " [[buffer(" + str(buffer_i) + ")]], ")
+            buffer_i += 1
         else:
-            _code += param + ","
-    # Eliminating last comma
-    _code = _code[:-1]
+            _code += qualifiers_prefix
+            if restrict_flag:
+                _splitted = param.split('*')
+                _code += _splitted[0] + ' * ' + AddrQ['restrict'] + ' ' + _splitted[1] + ','
+            else:
+                _code += param + ","
+
+    if metal_kernel and g_tid_name is not None:
+        _code += "uint " + g_tid_name + " [[thread_position_in_grid]], "
+
+    # Eliminating last comma/space
+    _code = _code.rstrip()
+    if _code.endswith(","):
+        _code = _code[:-1]
     _code += """)"""
     return _code
 
@@ -695,6 +884,8 @@ class IdpyMethod:
             self.lang = CUDA_T
         if idpy_langs_sys[CTYPES_T] and isinstance(tenet, CTTenet):
             self.lang = CTYPES_T
+        if idpy_langs_sys[METAL_T] and isinstance(tenet, MTTenet):
+            self.lang = METAL_T
 
         '''
         Mocking the kernels variables
@@ -712,7 +903,7 @@ class IdpyMethod:
             else:
                 return idpy_stream[0]
 
-        if self.lang == CUDA_T or self.lang == CTYPES_T:
+        if self.lang == CUDA_T or self.lang == CTYPES_T or self.lang == METAL_T:
             return None
 
 
@@ -755,7 +946,13 @@ class IdpyLoop:
             if idpy_langs_sys[CTYPES_T]:
                 return [None for _ in range(len(seq))]
             else:
-                raise Exception("CTypes not present on the system")                
+                raise Exception("CTypes not present on the system")
+
+        if seq[0][0].lang == METAL_T:
+            if idpy_langs_sys[METAL_T]:
+                return None
+            else:
+                raise Exception("Metal not present on the system")
 
     def SetLang(self, seq):
         return seq[0][0].lang
@@ -848,6 +1045,18 @@ class IdpyLoop:
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
 
+                '''
+                Metal
+                '''
+                if self.langs[seq_i] == METAL_T:
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        _stream = self.meta_streams[seq_i]
+                        Idea.Deploy(_args, idpy_stream = _stream)
+                        self.PutArgs(seq_i, _indices, _args)
+
         self.idloop_k_offset += \
             self.idloop_k_type(loop_range[-1] - loop_range[0] + 1)
         ## print("self.idloop_k_offset", self.idloop_k_offset)                      
@@ -876,7 +1085,13 @@ class IdpyLoop:
                 Waiting
                 '''
                 _end.record(stream = self.meta_streams[seq_i])
-                _end.synchronize()                
+                _end.synchronize()
+
+            '''
+            Metal: Deploy is already synchronous
+            '''
+            if self.langs[seq_i] == METAL_T:
+                pass
 
 '''
 most likely to be deleted before merging to master
@@ -897,6 +1112,15 @@ def IdpyProfile(idea_object = None, args_list = [], idpy_stream = None):
     _kernel_name = idea_object.k_dict['_kernel_name']
     
     if _lang == OCL_T:
+        # Apple OpenCL event timestamps are unreliable; use host wall clock.
+        if sys.platform == "darwin":
+            _st = SimpleTiming()
+            _st.Start()
+            _idpy_stream_out = idea_object.Deploy(args_list, idpy_stream)
+            _idpy_stream_out.wait()
+            _st.End()
+            _time_sec = _st.GetElapsedTime()['time_s']
+            return _idpy_stream_out, _time_sec
         _idpy_stream_out = idea_object.Deploy(args_list, idpy_stream)
         _idpy_stream_out.wait()
         _time_sec = (_idpy_stream_out.profile.end - _idpy_stream_out.profile.start) * 1e-9
@@ -918,7 +1142,15 @@ def IdpyProfile(idea_object = None, args_list = [], idpy_stream = None):
         idea_object.Deploy(args_list, idpy_stream)
         _st.End()
         _time_sec = _st.GetElapsedTime()['time_s']
-        return idpy_stream, _time_sec        
+        return idpy_stream, _time_sec
+
+    if _lang == METAL_T:
+        _st = SimpleTiming()
+        _st.Start()
+        idea_object.Deploy(args_list, idpy_stream)
+        _st.End()
+        _time_sec = _st.GetElapsedTime()['time_s']
+        return idpy_stream, _time_sec
                         
 
 class IdpyLoopProfile:
@@ -949,7 +1181,13 @@ class IdpyLoopProfile:
             if idpy_langs_sys[CTYPES_T]:
                 return [None for _ in range(len(seq))]
             else:
-                raise Exception("OpenCL not present on the system")                
+                raise Exception("OpenCL not present on the system")
+
+        if seq[0][0].lang == METAL_T:
+            if idpy_langs_sys[METAL_T]:
+                return None
+            else:
+                raise Exception("Metal not present on the system")
 
     def SetLang(self, seq):
         return seq[0][0].lang
@@ -1052,7 +1290,22 @@ class IdpyLoopProfile:
                         _stream_swap, _time_swap = \
                             Idea.DeployProfiling(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
-                        _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]                        
+                        _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
+
+                '''
+                Metal
+                '''
+                if self.langs[seq_i] == METAL_T:
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        _stream = self.meta_streams[seq_i]
+                        _stream_swap, _time_swap = \
+                            Idea.DeployProfiling(_args, idpy_stream = _stream)
+                        self.PutArgs(seq_i, _indices, _args)
+                        if hasattr(Idea, 'k_dict'):
+                            _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
 
         '''
         Collecting profiling values
@@ -1103,6 +1356,11 @@ class IdpyLoopList:
                 return [None for _ in range(len(seq))]
             else:
                 raise Exception("OpenCL not present on the system")
+        if seq[0][0].lang == METAL_T:
+            if idpy_langs_sys[METAL_T]:
+                return None
+            else:
+                raise Exception("Metal not present on the system")
 
     def SetLang(self, seq):
         return seq[0][0].lang
@@ -1158,6 +1416,15 @@ class IdpyLoopList:
                         '''
                         Deploying
                         '''
+                        Idea.Deploy(_args, idpy_stream = _stream)
+                        self.PutArgs(seq_i, _indices, _args)
+
+                if self.langs[seq_i] == METAL_T:
+                    for item_i in range(seq_len):
+                        _item = self.sequences[seq_i][item_i]
+                        Idea, _indices = _item[0], _item[1]
+                        _args = self.SetArgs(seq_i, _indices)
+                        _stream = self.meta_streams[seq_i]
                         Idea.Deploy(_args, idpy_stream = _stream)
                         self.PutArgs(seq_i, _indices, _args)
 

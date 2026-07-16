@@ -174,6 +174,16 @@ def GetTenet(params_dict):
         else:
             raise Exception("Selected lang = CTYPES_T but the 'ctypes' module is not found in your python environment!")
 
+    if 'lang' in params_dict and params_dict['lang'] == METAL_T:
+        if idpy_langs_sys[METAL_T]:
+            metal = Metal()
+            device = 0 if 'device' not in params_dict else params_dict['device']
+            metal.SetDevice(device)
+            print("Metal: ", metal.GetDeviceName())
+            return metal.GetTenet()
+        else:
+            raise Exception("Selected lang = METAL_T but the 'pymetallic' module is not found in your python environment!")
+
 '''
 Method CheckOCLFP
 what about unsigned 64 bits integers?
@@ -219,6 +229,18 @@ def SwitchToFP32(custom_types):
         _swap_dict[key] = value
         
     return CustomTypes(_swap_dict)
+
+def CheckMetalFP(tenet, custom_types):
+    '''
+    Apple Metal GPUs do not provide FP64. Always downcast to FP32
+    when the active tenet is Metal.
+    '''
+    if idpy_langs_sys[METAL_T] and isinstance(tenet, idpy_tenet_types[METAL_T]):
+        print("\nThe Metal device",
+              tenet.GetDeviceName(),
+              "does not support 64 bits floating-point variables")
+        return SwitchToFP32(custom_types)
+    return custom_types
 
 '''
 Method GetParamsClean
@@ -295,12 +317,17 @@ def IdpyHardware():
         from idpy.Metal.Metal import Metal
         print("Metal Found!")
         metal = Metal()
+        gpus_list = metal.DiscoverGPUs()
         print("\nListing GPUs:")
-        print(metal.GetDeviceName())
+        for gpu_i in gpus_list:
+            print("Metal GPU[" + str(gpu_i) + "]")
+            for key in gpus_list[gpu_i]:
+                print(key, ": ", gpus_list[gpu_i][key])
+            print()
         del metal
         print()
         print("=" * 80)
-        print()                
+        print()
 
 '''
 Methods: GridAndBlocks

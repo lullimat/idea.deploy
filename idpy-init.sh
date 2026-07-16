@@ -236,6 +236,26 @@ fi
 #####################
 MPICC_F=$(which mpicc 1>/dev/null 2>/dev/null && echo 1 || echo 0)
 
+#####################
+## Checking Metal / pymetallic (macOS)
+#####################
+METAL_F=0
+SWIFT_F=$(command -v swiftc >/dev/null 2>&1 && echo 1 || echo 0)
+echo -n "Checking Metal/pymetallic prerequisites..."
+if [[ "${IDEP_OS}" == "MacOS" ]]
+then
+    if ((SWIFT_F))
+    then
+        METAL_F=1
+        echo "Found (Darwin + swiftc); will clone/patch/build via scripts/install-pymetallic.sh"
+    else
+        echo "Skipping"
+        echo "  - swiftc not found (install Xcode / Swift toolchain for Metal)"
+    fi
+else
+    echo "Skipping (Metal is macOS-only; OS=${IDEP_OS})"
+fi
+
 echo "Sourcing virtual environment"
 source ${VENV}/bin/activate
 
@@ -283,6 +303,12 @@ then
     ## Adding virtual environemtn to jupyter
     ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
     ## --env ${CUDA_EXPORT}
+fi
+
+## Build/install local pymetallic for Metal (new and existing venvs)
+if ((METAL_F))
+then
+    bash scripts/install-pymetallic.sh || echo "WARNING: scripts/install-pymetallic.sh failed; Metal backend will be unavailable."
 fi
 
 echo

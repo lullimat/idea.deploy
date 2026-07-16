@@ -34,7 +34,7 @@ from idpy.Utils.CustomTypes import CustomTypes
 
 from idpy.IdpyCode import GetParamsClean, GetTenet
 from idpy.IdpyCode import IdpyMemory
-from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, IDPY_T
+from idpy.IdpyCode import CUDA_T, OCL_T, CTYPES_T, METAL_T, IDPY_T
 from idpy.IdpyCode import idpy_langs_sys, idpy_tenet_types
 
 from idpy.IdpyCode.IdpyUnroll import _codify_newl, _codify_comment
@@ -60,7 +60,7 @@ It is a child class of idpy.IdpyCode.IdpySims.IdpySims
 CRNGS(**kwargs):
 kwargs must be a dictionary.
 Necessary Arguments
-- 'lang': language type. Possible values ['CUDA_T', 'OCL_T'], used for setting the 64-bits type that differ between CUDA and OpenCL.
+- 'lang': language type. Possible values ['CUDA_T', 'OCL_T', 'CTYPES_T', 'METAL_T'], used for setting the 64-bits type that differ between CUDA/Metal and OpenCL.
 
 Optional Arguments
 - 'kind': type of congruential generator. Defaults to 'MINSTD'. Possible values are
@@ -107,24 +107,29 @@ class CRNGS(IdpySims):
         '''
         Setting custom types: handling here the different
         type namings for 64-bits unsigned integers for 
-        CUDA and OpenCL
+        CUDA, OpenCL, and Metal (MSL has no long long)
         '''
         if self.sims_vars['kind'] == 'MINSTD' or self.sims_vars['kind'] == 'NUMREC':
-            if self.params_dict['lang'] == CUDA_T or self.params_dict['lang'] == CTYPES_T:
+            if self.params_dict['lang'] in (CUDA_T, CTYPES_T):
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned int',
                                                  'UINT64': 'unsigned long long int'})
             if self.params_dict['lang'] == OCL_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned int',
-                                                 'UINT64': 'unsigned long'})                
+                                                 'UINT64': 'unsigned long'})
+            if self.params_dict['lang'] == METAL_T:
+                self.custom_types = CustomTypes({'CRNGType': 'unsigned int',
+                                                 'UINT64': 'unsigned long'})
         """
         - To be deleted...
         if self.sims_vars['kind'] == 'NUMREC':
             self.custom_types = CustomTypes({'CRNGType': 'unsigned int'})
         """
         if self.sims_vars['kind'] == 'MMIX':
-            if self.params_dict['lang'] == CUDA_T or self.params_dict['lang'] == CTYPES_T:
+            if self.params_dict['lang'] in (CUDA_T, CTYPES_T):
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned long long int'})
             if self.params_dict['lang'] == OCL_T:
+                self.custom_types = CustomTypes({'CRNGType': 'unsigned long'})
+            if self.params_dict['lang'] == METAL_T:
                 self.custom_types = CustomTypes({'CRNGType': 'unsigned long'})
 
         '''
@@ -231,9 +236,11 @@ class CRNGS(IdpySims):
             self.tenet = GetTenet(self.params_dict)
 
         '''
-        Check if OpenCL device supports 64-bits variables
-        The flag 'fp64' is set True by default because only OpenCL devices
-        might bring up the issue
+        Check if OpenCL / Metal device supports 64-bits variables
+        The flag 'fp64' is set True by default because only some devices
+        might bring up the issue. Apple Metal has no FP64; treat like
+        OpenCL-without-double and force MINSTD (MMIX needs 64-bit seeds
+        and ID_RANDMAX macros that break the FP32 path).
         '''
         self.params_dict['fp64'] = True
         
@@ -247,7 +254,17 @@ class CRNGS(IdpySims):
                           "does not support 64-bits integers needed by",
                           self.params_dict['kind'])
                     print("Switching CRNG kind to 'MINSTD'")
-                    self.params_dict['kind'] = 'MINSTD'                    
+                    self.params_dict['kind'] = 'MINSTD'
+
+        if idpy_langs_sys[METAL_T] and isinstance(self.tenet, idpy_tenet_types[METAL_T]):
+            self.params_dict['fp64'] = False
+            if self.params_dict['kind'] in ['MMIX']:
+                print("The Metal device",
+                      self.tenet.GetDeviceName(),
+                      "does not support 64-bits integers needed by",
+                      self.params_dict['kind'])
+                print("Switching CRNG kind to 'MINSTD'")
+                self.params_dict['kind'] = 'MINSTD'
 
         IdpySims.__init__(self, *args, **self.kwargs)
 
@@ -668,7 +685,7 @@ def _codify_MINSTD(declared_variables = None, declared_constants = None,
         )
 
     _swap_code += _codify_comment("MINSTD PRNG; 64-bits implementation")        
-    _swap_code += _codify_assignment(root_swap, '(16807LL) * ' + root_seed)
+    _swap_code += _codify_assignment(root_swap, '((UINT64)16807) * ' + root_seed)
     _swap_code += \
         _codify_assignment(
             root_seed,
@@ -744,7 +761,8 @@ def _codify_flat(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_declaration_const_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX_' + str(crng_kind) + '))',
+            '((' + rand_type + ')' + root_seed + ') / ((' +
+            rand_type + ')(ID_RANDMAX_' + str(crng_kind) + '))',
             rand_type,
             declared_variables,
             declared_constants,
@@ -887,7 +905,8 @@ def _codify_flat_mean_var(declared_variables = None, declared_constants = None,
     _swap_code += \
         _codify_assignment_type_check(
             root_flat,
-            '((' + rand_type + ')' + root_seed + ' / (ID_RANDMAX_' + str(crng_kind) +') + (' + str(_shift) + \
+            '(((' + rand_type + ')' + root_seed + ') / ((' +
+            rand_type + ')(ID_RANDMAX_' + str(crng_kind) + ')) + (' + str(_shift) + \
             ')) * ' + str(_delta),
             rand_type,
             declared_variables,
@@ -1360,7 +1379,7 @@ call by using a macro
 class F_RandomIntegerUnbiasedLemire(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': [], 'CRNGType range': []}
+        self.params = {'CRNGType * l_seed': ['thread'], 'CRNGType range': []}
         self.functions[IDPY_T] = """
         CRNGType t = (-range) % range;
         UINT64 m = 0;
@@ -1376,7 +1395,7 @@ class F_RandomIntegerUnbiasedLemire(IdpyFunction):
 class F_RandomIntegerUnbiasedLemireMACRO(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         self.functions[IDPY_T] = """
         CRNGType t = (-CRNG_Integers_range) % CRNG_Integers_range;
         UINT64 m = 0;
@@ -1392,7 +1411,7 @@ class F_RandomIntegerUnbiasedLemireMACRO(IdpyFunction):
 class F_RandomIntegerUnbiasedLemire_BUG(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': [], 'CRNGType range': []}
+        self.params = {'CRNGType * l_seed': ['thread'], 'CRNGType range': []}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
         UINT64 m = ((UINT64) (*l_seed)) * ((UINT64) range);
@@ -1417,7 +1436,7 @@ class F_RandomIntegerUnbiasedLemire_BUG(IdpyFunction):
 class F_RandomIntegerUnbiasedLemireMACRO_BUG(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
         UINT64 m = ((UINT64) (*l_seed)) * ((UINT64) CRNG_Integers_range);
@@ -1442,10 +1461,10 @@ class F_RandomIntegerUnbiasedLemireMACRO_BUG(IdpyFunction):
 class F_Norm(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
-        return ((RANDType) (*l_seed)) / (ID_RANDMAX);
+        return ((RANDType) (*l_seed)) / ((RANDType) (ID_RANDMAX));
         """        
 
 class F_GaussianCos(IdpyFunction):
@@ -1454,7 +1473,7 @@ class F_GaussianCos(IdpyFunction):
     '''
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed_0': [], 'CRNGType * l_seed_1': [],
+        self.params = {'CRNGType * l_seed_0': ['thread'], 'CRNGType * l_seed_1': ['thread'],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         RANDType u0 = F_Norm(l_seed_0), u1 = F_Norm(l_seed_1);
@@ -1467,7 +1486,7 @@ class F_GaussianSin(IdpyFunction):
     '''
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed_0': [], 'CRNGType * l_seed_1': [],
+        self.params = {'CRNGType * l_seed_0': ['thread'], 'CRNGType * l_seed_1': ['thread'],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         RANDType u0 = F_Norm(l_seed_0), u1 = F_Norm(l_seed_1);
@@ -1481,7 +1500,7 @@ class F_GaussianCosSingle(IdpyFunction):
     '''
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': [],
+        self.params = {'CRNGType * l_seed': ['thread'],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         RANDType u0 = F_Norm(l_seed); 
@@ -1496,7 +1515,7 @@ class F_GaussianSinSingle(IdpyFunction):
     '''
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': [],
+        self.params = {'CRNGType * l_seed': ['thread'],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         RANDType u0 = F_Norm(l_seed); 
@@ -1507,7 +1526,7 @@ class F_GaussianSinSingle(IdpyFunction):
 class F_Integers(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': [],
+        self.params = {'CRNGType * l_seed': ['thread'],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
@@ -1523,7 +1542,7 @@ external parameters set through macros, that can be passed to this one
 class F_CustomHITORMISS(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'RANDType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'CRNGType * l_seed': [],
+        self.params = {'CRNGType * l_seed': ['thread'],
                        'RANDType mean': ['const'], 'RANDType var': ['const']}
         self.functions[IDPY_T] = """
         F_CRNG(l_seed);
@@ -1542,10 +1561,10 @@ class F_MINSTD(IdpyFunction):
         at the beginning and at the end of each kernel so that internal loops
         can take advantage of it rather than reapting useless storage operations
         '''
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         
         self.functions[IDPY_T] = """
-        UINT64 swap = (16807LL) * (*l_seed);
+        UINT64 swap = ((UINT64)16807) * (*l_seed);
         *l_seed = (swap & 0x7fffffff) + (swap >> 31);
         if((*l_seed) & 0x80000000) *l_seed = ((*l_seed) & 0x7fffffff) + 1;
         return;
@@ -1560,14 +1579,14 @@ class F_MINSTD32(IdpyFunction):
         at the beginning and at the end of each kernel so that internal loops
         can take advantage of it rather than reapting useless storage operations
         '''
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         
         self.functions[IDPY_T] = """
-        CRNGType lo = 16807*((*lseed)&0xffff);
-        CRNGType hi = 16807*((*lseed)>>16);
+        CRNGType lo = 16807*((*l_seed)&0xffff);
+        CRNGType hi = 16807*((*l_seed)>>16);
         lo += (hi&0x7fff)<<16;
         lo += hi>>15;
-        *lseed = lo - ((-((lo&0x80000000)>>31))&0x7fffffff);
+        *l_seed = lo - ((-((lo&0x80000000)>>31))&0x7fffffff);
         return;
         """
         
@@ -1580,7 +1599,7 @@ class F_NUMREC(IdpyFunction):
         at the beginning and at the end of each kernel so that internal loops
         can take advantage of it rather than reapting useless storage operations
         '''
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         
         self.functions[IDPY_T] = """
         *l_seed = (*l_seed) * 1664525U + 1013904223U;
@@ -1596,10 +1615,10 @@ class F_MMIX(IdpyFunction):
         at the beginning and at the end of each kernel so that internal loops
         can take advantage of it rather than reapting useless storage operations
         '''
-        self.params = {'CRNGType * l_seed': []}
+        self.params = {'CRNGType * l_seed': ['thread']}
         
         self.functions[IDPY_T] = """
-        *l_seed = (*l_seed) * 6364136223846793005LLU + 1442695040888963407LLU;
+        *l_seed = (*l_seed) * ((CRNGType)6364136223846793005UL) + ((CRNGType)1442695040888963407UL);
         return;
         """
 

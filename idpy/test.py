@@ -278,7 +278,36 @@ if IsModuleThere('ctypes'):
             check_type = isinstance(tenet, CTTenet)
             tenet.End()
             del ctp
-            self.assertTrue(check_type)            
+            self.assertTrue(check_type)
+
+'''
+testing module Metal.Metal
+'''
+if IsModuleThere('pymetallic'):
+    from idpy.Metal.Metal import Metal
+    from idpy.Metal.Metal import Tenet as MTTenet
+
+    class TestMetal(unittest.TestCase):
+        def test_Metal_DiscoverGPUs(self):
+            metal = Metal()
+            gpus_list = metal.DiscoverGPUs()
+            print("\n")
+            for gpu_i in gpus_list:
+                print("Metal GPU[" + str(gpu_i) + "]")
+                for key in gpus_list[gpu_i]:
+                    print(key, ": ", gpus_list[gpu_i][key])
+
+            del metal
+            self.assertTrue(True)
+
+        def test_Metal_ManageTenet(self):
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+            check_type = isinstance(tenet, MTTenet)
+            tenet.End()
+            del metal
+            self.assertTrue(check_type)
 
 '''
 testing variables in IdpyCode.__init__.py
@@ -295,7 +324,7 @@ class TestIdpyCodeInit(unittest.TestCase):
         Checking basic types
         '''
         checks += [CUDA_T == 'pycuda', OCL_T == 'pyopencl',
-                   CTYPES_T == 'ctypes', METAL_T == 'metalcompute', 
+                   CTYPES_T == 'ctypes', METAL_T == 'pymetallic', 
                    IDPY_T == 'idpy']
         '''
         idpy_langs_dict
@@ -359,7 +388,7 @@ class TestIdpyConsts(unittest.TestCase):
         dict_check = {CUDA_T: """__global__ void""",
                       OCL_T: """__kernel void""",
                       CTYPES_T: """""", 
-                      METAL_T: """kernel"""}
+                      METAL_T: """kernel void"""}
         
         for lang in idpy_langs_list:
             checks += [kq[lang] == dict_check[lang]]
@@ -391,6 +420,17 @@ class TestIdpyConsts(unittest.TestCase):
                       'shared': '',
                       'device': ''}
         checks += [aq[OCL_T] == dict_check]
+
+        '''
+        METAL_T values
+        '''
+        dict_check = {'global': """device""",
+                      'const': """const""",
+                      'local': """threadgroup""",
+                      'restrict': '',
+                      'shared': """threadgroup""",
+                      'device': """device"""}
+        checks += [aq[METAL_T] == dict_check]
         
         self.assertTrue(AllTrue(checks))
 
@@ -540,7 +580,52 @@ if IsModuleThere('ctypes'):
             checks += [AllTrue(list(const.D2H() == chk_const))]
             
             tenet.End()            
-            self.assertTrue(AllTrue(checks))            
+            self.assertTrue(AllTrue(checks))
+
+if IsModuleThere('pymetallic'):
+    from idpy.Metal.Metal import Metal
+    from idpy.Metal.Metal import Tenet as MTTenet
+
+    class TestIdpyArrayMT(unittest.TestCase):
+        def setUp(self):
+            self.constant = -2
+
+        def test_IdpyArray(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+            rand_mem = IdpyMemory.Array(10, dtype=np.int32, tenet=tenet)
+            on_dev_range = IdpyMemory.OnDevice(
+                np.arange(10, dtype=np.int32), tenet=tenet
+            )
+            zeros = IdpyMemory.Zeros(10, dtype=np.float32, tenet=tenet)
+            i_range = IdpyMemory.Range(10, tenet=tenet)
+            const = IdpyMemory.Const(
+                10, dtype=np.int32, const=self.constant, tenet=tenet
+            )
+            print()
+            print("rand_mem:\t", rand_mem.D2H(), rand_mem.dtype)
+            print("on_dev_range:\t", on_dev_range.D2H(), on_dev_range.dtype)
+            print("zeros:\t", zeros.D2H(), zeros.dtype)
+            print("i_range:\t", i_range.D2H(), i_range.dtype)
+            print("const:\t", const.D2H(), const.dtype)
+            int_buffer = np.zeros(10, dtype=np.int32)
+            const.D2H(int_buffer)
+            print("int_buffer: ", int_buffer, int_buffer.dtype)
+
+            checks = []
+            checks += [AllTrue(list(on_dev_range.D2H() == np.arange(10, dtype=np.int32)))]
+            checks += [AllTrue(list(zeros.D2H() == np.zeros(10, dtype=np.float32)))]
+            checks += [AllTrue(list(i_range.D2H() == np.arange(10, dtype=np.int32)))]
+            chk_const = np.zeros(10, dtype=np.int32)
+            chk_const.fill(self.constant)
+            checks += [AllTrue(list(const.D2H() == chk_const))]
+
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
         
 '''
 testing IdpyCode.IdpyCode
@@ -949,7 +1034,201 @@ class TestIdpyCode(unittest.TestCase):
             checks += [AllTrue(list(mem_dict['zeros'].D2H() == check_ones))]
 
             tenet.End()
-            self.assertTrue(AllTrue(checks))        
+            self.assertTrue(AllTrue(checks))
+
+    if IsModuleThere('pymetallic'):
+        from idpy.Metal.Metal import Metal
+        from idpy.Metal.Metal import Tenet as MTTenet
+
+        def test_IdpyKernelMT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumOne = self.K_SumOne(custom_types=myTypes.Push(),
+                                   constants={'DATA_N': self.n})
+            SumOne_Idea = SumOne(tenet=tenet, grid=grid, block=block)
+
+            A = IdpyMemory.Const(self.n, dtype=np_c.C[myTypes['SpinType']],
+                                 const=0, tenet=tenet)
+            print()
+            print("A: ", A.D2H(), A.dtype)
+            print("SumOne_Idea.Deploy([A])")
+            SumOne_Idea.Deploy([A])
+            print("A: ", A.D2H(), A.dtype)
+
+            check_array = np.zeros(self.n, dtype=np_c.C[myTypes['SpinType']])
+            check_array.fill(1)
+            checks = [AllTrue(A.D2H() == check_array)]
+
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
+
+        def test_IdpyKernelLoopConstMT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumConst = self.K_SumConst(custom_types=myTypes.Push(),
+                                       constants={'DATA_N': self.n})
+
+            A = IdpyMemory.Const(self.n, dtype=np_c.C[myTypes['SpinType']],
+                                 const=0, tenet=tenet)
+            mem_dict = {'A': A, 'const': np_c.C[myTypes['SpinType']](self.in_const)}
+            SumConst_Loop = IdpyLoop(
+                [mem_dict],
+                [[(SumConst(tenet=tenet, grid=grid, block=block), ['A', 'const'])]]
+            )
+            print()
+            print("A: ", A.D2H(), A.dtype)
+            SumConst_Loop.Run(range(2))
+            print("A: ", A.D2H(), A.dtype)
+
+            check_array = np.full(self.n, 2 * self.in_const,
+                                  dtype=np_c.C[myTypes['SpinType']])
+            checks = [AllTrue(A.D2H() == check_array)]
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
+
+        def test_IdpyKernelFuncLoopMultStreamMT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+
+            grid, block = ((self.n + self.block_size - 1)//self.block_size, 1, 1), (self.block_size, 1, 1)
+
+            myTypes = CustomTypes({'SpinType': 'unsigned int'})
+            np_c = NpTypes()
+            SumTwoArrConst = self.K_SumTwoArrays(
+                custom_types=myTypes.Push(),
+                constants={'DATA_N': self.n},
+                f_classes=[self.F_SumTwoArraysPtr,
+                           self.F_SumTwoArraysRet,
+                           self.F_SumTwoArraysVal]
+            )
+            SumConst = self.K_SumConst(custom_types=myTypes.Push(),
+                                       constants={'DATA_N': self.n})
+
+            A = IdpyMemory.Const(self.n, dtype=np_c.C[myTypes['SpinType']],
+                                 const=0, tenet=tenet)
+            B = IdpyMemory.Const(self.n, dtype=np_c.C[myTypes['SpinType']],
+                                 const=1, tenet=tenet)
+            C = IdpyMemory.Const(self.n, dtype=np_c.C[myTypes['SpinType']],
+                                 const=2, tenet=tenet)
+            D = IdpyMemory.Const(self.n, dtype=np_c.C[myTypes['SpinType']],
+                                 const=3, tenet=tenet)
+
+            a, b, c, cc = A.D2H()[0], B.D2H()[0], C.D2H()[0], self.in_const
+            d = D.D2H()[0]
+            for i in range(2):
+                c += cc
+                c += a + b
+                c += a + b
+                c += a + b + cc
+                a, c = c, a
+                d += cc
+
+            mem_dict_0 = {'A': A, 'B': B, 'C': C,
+                          'const': np_c.C[myTypes['SpinType']](self.in_const)}
+            mem_dict_1 = {'D': D, 'const': np_c.C[myTypes['SpinType']](self.in_const)}
+            SumTwoArrConst_Loop = IdpyLoop(
+                [mem_dict_0, mem_dict_1],
+                [
+                    [
+                        (SumTwoArrConst(tenet=tenet, grid=grid, block=block),
+                         ['A', 'B', 'C', 'const']),
+                        (self.M_SwapArrays(tenet), ['A', 'C'])
+                    ],
+                    [
+                        (SumConst(tenet=tenet, grid=grid, block=block),
+                         ['D', 'const']),
+                    ]
+                ]
+            )
+            SumTwoArrConst_Loop.Run(range(2))
+
+            checks = []
+            check_array = np.full(self.n, a, dtype=np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(A.D2H() == check_array)]
+            check_array = np.full(self.n, b, dtype=np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(B.D2H() == check_array)]
+            check_array = np.full(self.n, c, dtype=np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(C.D2H() == check_array)]
+            check_array = np.full(self.n, d, dtype=np_c.C[myTypes['SpinType']])
+            checks += [AllTrue(D.D2H() == check_array)]
+
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
+
+        def test_IdpyMethodMT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+            SwapArrays = self.M_SwapArrays(tenet)
+            zeros = IdpyMemory.Const(self.n, dtype=np.int32, const=0, tenet=tenet)
+            ones = IdpyMemory.Const(self.n, dtype=np.int32, const=1, tenet=tenet)
+            mem_list = [zeros, ones]
+            SwapArrays.Deploy(mem_list)
+
+            check_1 = np.zeros(self.n, dtype=np.int32)
+            check_0 = np.zeros(self.n, dtype=np.int32)
+            check_0.fill(1)
+            checks = []
+            checks += [AllTrue(mem_list[0].D2H() == check_0)]
+            checks += [AllTrue(mem_list[1].D2H() == check_1)]
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
+
+        def test_IdpyMethodLoopMT(self):
+            print()
+            print("---------------------")
+            print(self.__class__.__name__)
+            print(inspect.stack()[0][3])
+            metal = Metal()
+            metal.SetDevice()
+            tenet = metal.GetTenet()
+
+            zeros = IdpyMemory.Const(self.n, dtype=np.int32, const=0, tenet=tenet)
+            ones = IdpyMemory.Const(self.n, dtype=np.int32, const=1, tenet=tenet)
+            mem_dict = {'zeros': zeros, 'ones': ones}
+            SwapArraysLoop = IdpyLoop(
+                [mem_dict],
+                [[(self.M_SwapArrays(tenet), ['zeros', 'ones'])]]
+            )
+            SwapArraysLoop.Run(range(1))
+            SwapArraysLoop.Run(range(4))
+            SwapArraysLoop.Run(range(8))
+            checks = []
+            checks += [AllTrue(list(mem_dict['ones'].D2H() == np.zeros(self.n, dtype=np.int32)))]
+            check_ones = np.zeros(self.n, dtype=np.int32)
+            check_ones.fill(1)
+            checks += [AllTrue(list(mem_dict['zeros'].D2H() == check_ones))]
+            tenet.End()
+            self.assertTrue(AllTrue(checks))
             
     if IsModuleThere('pyopencl'):
         from idpy.OpenCL.OpenCL import OpenCL

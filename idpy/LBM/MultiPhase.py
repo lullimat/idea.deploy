@@ -28,7 +28,7 @@ __status__ = "Development"
 import sympy as sp
 import numpy as np
 
-from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP, SwitchToFP32
+from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP, CheckMetalFP, SwitchToFP32
 
 from idpy.IdpyCode import IDPY_T, OCL_T, CUDA_T
 from idpy.IdpyCode import IdpyMemory
@@ -2060,6 +2060,9 @@ class ShanChenMultiPhase(RootLB):
                               tenet = self.tenet, 
                               **optional_seed)
 
+            # CRNGS may downgrade MMIX → MINSTD (e.g. Apple OpenCL); keep meta kernels in sync
+            self.params_dict['prng_kind'] = self.crng.sims_vars['kind']
+
             self.constants = {**self.constants, **self.crng.constants}
             self.custom_types = \
                 CustomTypes(types_dict = {**self.custom_types.Push(),
@@ -2154,6 +2157,8 @@ class ShanChenMultiPhase(RootLB):
 
         self.custom_types = \
             CheckOCLFP(tenet = self.tenet, custom_types = self.custom_types)
+        self.custom_types = \
+            CheckMetalFP(tenet = self.tenet, custom_types = self.custom_types)
         
         if self.params_dict['fp32_flag']:
             self.custom_types = SwitchToFP32(self.custom_types)

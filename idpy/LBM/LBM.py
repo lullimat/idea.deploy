@@ -43,7 +43,7 @@ from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode import CUDA_T, OCL_T, IDPY_T
 from idpy.IdpyCode import idpy_langs_sys, idpy_langs_list
 
-from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP
+from idpy.IdpyCode import GetTenet, GetParamsClean, CheckOCLFP, CheckMetalFP
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyFunction
 from idpy.IdpyCode.IdpyCode import IdpyMethod, IdpyLoop, IdpyLoopProfile
 
@@ -1265,6 +1265,8 @@ class ShanChenMultiPhase(RootLB):
 
         self.custom_types = \
             CheckOCLFP(tenet = self.tenet, custom_types = self.custom_types)
+        self.custom_types = \
+            CheckMetalFP(tenet = self.tenet, custom_types = self.custom_types)
 
         print(self.custom_types.Push())
             
@@ -1339,7 +1341,7 @@ class F_PopsFromRhoU(IdpyFunction):
 class F_PosFromIndex(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'void'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'SType * pos': [],
+        self.params = {'SType * pos': ['thread'],
                        'SType * dim_sizes': ['global', 'const'],
                        'SType * dim_strides': ['global', 'const'],
                        'unsigned int index': ['const']}
@@ -1355,7 +1357,7 @@ class F_PosFromIndex(IdpyFunction):
 class F_PosFromIndexDIM(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'void'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'SType * pos': [],
+        self.params = {'SType * pos': ['thread'],
                        'SType * dim_sizes': ['global', 'const'],
                        'SType * dim_strides': ['global', 'const'],
                        'unsigned int index': ['const'],
@@ -1375,7 +1377,7 @@ class F_PosFromIndexDIM(IdpyFunction):
 class F_IndexFromPos(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'SType'):
         IdpyFunction.__init__(self, custom_types = custom_types, f_type = f_type)
-        self.params = {'SType * pos': ['const'],
+        self.params = {'SType * pos': ['thread', 'const'],
                        'SType * dim_strides': ['global', 'const']}
 
         self.functions[IDPY_T] = """
@@ -1446,7 +1448,7 @@ class F_PointDistanceCenterFirst(IdpyFunction):
         IdpyFunction.__init__(self, custom_types = custom_types,
                               f_type = f_type)
         self.params = {'SType * a': ['global', 'const'],
-                       'SType * b': ['const']}
+                       'SType * b': ['thread', 'const']}
 
         self.functions[IDPY_T] = """
         LengthType dist = 0;
@@ -1460,8 +1462,8 @@ class F_PointDistance(IdpyFunction):
     def __init__(self, custom_types = None, f_type = 'LengthType'):
         IdpyFunction.__init__(self, custom_types = custom_types,
                               f_type = f_type)
-        self.params = {'SType * a': ['const'],
-                       'SType * b': ['const']}
+        self.params = {'SType * a': ['thread', 'const'],
+                       'SType * b': ['thread', 'const']}
 
         self.functions[IDPY_T] = """
         LengthType dist = 0;
@@ -1476,7 +1478,7 @@ Kernels
 '''
 class K_CenterOfMass(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1498,7 +1500,7 @@ class K_CenterOfMass(IdpyKernel):
 
 class K_CheckU(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1526,7 +1528,7 @@ class K_CheckU(IdpyKernel):
 
 class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1610,7 +1612,7 @@ class K_Collision_ShanChenGuoMultiPhase(IdpyKernel):
 
 class K_ComputePsi(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [], psi_code = None,
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         if psi_code is None:
             raise Exception("Missing argument psi_code")
 
@@ -1664,7 +1666,7 @@ class K_StreamPeriodic(IdpyKernel):
 
 class K_ComputeMoments(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1697,7 +1699,7 @@ class K_ComputeMoments(IdpyKernel):
         
 class K_InitPopulations(IdpyKernel):
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1748,7 +1750,7 @@ class K_InitFlatInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files = ['math.h']):
+                 optimizer_flag = None, headers_files = ('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1789,7 +1791,7 @@ class K_InitRadialInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
@@ -1831,7 +1833,7 @@ class K_InitCylinderInterface(IdpyKernel):
     than a single point
     '''
     def __init__(self, custom_types = None, constants = {}, f_classes = [],
-                 optimizer_flag = None, headers_files=['math.h']):
+                 optimizer_flag = None, headers_files=('math.h',)):
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
                             optimizer_flag = optimizer_flag, headers_files=headers_files)
