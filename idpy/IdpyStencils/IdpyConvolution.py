@@ -59,13 +59,15 @@ from idpy.Utils.NpTypes import NpTypes
 
 _NPT = NpTypes()
 
-# Session Tenet for Deploy (same role as GetTenet usage in sims)
+# Optional session defaults (non-authoritative). Ownership lives on arrays/Ideas.
 _active_tenet = None
 _active_shape = None
+_shapes_by_tenet = {}
 _idea_cache = {}
 
 
 def set_active_tenet(tenet):
+    """Optional soft default when src has no resolvable tenet. Prefer src.tenet."""
     global _active_tenet
     _active_tenet = tenet
     return tenet
@@ -80,20 +82,81 @@ def clear_active_tenet():
     _active_tenet = None
 
 
-def set_convolution_shape(shape):
-    """Logical multi-d shape when device buffers are flat (length V)."""
+def set_convolution_shape(shape, tenet=None):
+    """Logical multi-d shape for flat length-V buffers (LBM axis-0-fastest).
+
+    With ``tenet=``, store per-tenet (LBM-style ownership). Without, update the
+    process-wide fallback for single-device notebooks.
+    """
     global _active_shape
-    _active_shape = tuple(int(s) for s in shape) if shape is not None else None
+    shape_t = tuple(int(s) for s in shape) if shape is not None else None
+    if tenet is not None:
+        if shape_t is None:
+            _shapes_by_tenet.pop(id(tenet), None)
+        else:
+            _shapes_by_tenet[id(tenet)] = shape_t
+        return shape_t
+    _active_shape = shape_t
     return _active_shape
 
 
-def get_convolution_shape():
+def get_convolution_shape(tenet=None):
+    if tenet is not None:
+        found = _shapes_by_tenet.get(id(tenet))
+        if found is not None:
+            return found
     return _active_shape
 
 
-def clear_convolution_shape():
+def clear_convolution_shape(tenet=None):
     global _active_shape
+    if tenet is not None:
+        _shapes_by_tenet.pop(id(tenet), None)
+        return
+    _shapes_by_tenet.clear()
     _active_shape = None
+
+
+def _tenet_of(src):
+    """Owning Tenet of an Idpy array, if any (Metal/CTypes .tenet; OpenCL .queue)."""
+    tenet = getattr(src, 'tenet', None)
+    if tenet is not None:
+        return tenet
+    queue = getattr(src, 'queue', None)
+    if queue is not None and hasattr(queue, 'GetLang'):
+        return queue
+    return None
+
+
+def _resolve_tenet(src, tenet=None):
+    owned = _tenet_of(src)
+    if tenet is not None and owned is not None and tenet is not owned:
+        raise ValueError(
+            "tenet= does not match src owning tenet "
+            "(src.tenet / src.queue); refuse cross-device deploy"
+        )
+    if tenet is not None:
+        return tenet
+    if owned is not None:
+        return owned
+    if _active_tenet is not None:
+        return _active_tenet
+    raise RuntimeError(
+        "convolve_periodic requires a Tenet: stamp src.tenet at allocation, "
+        "pass tenet=..., or set_active_tenet(tenet) as a soft default"
+    )
+
+
+def _resolve_shape(shape, tenet):
+    if shape is not None:
+        return tuple(int(s) for s in shape)
+    found = get_convolution_shape(tenet=tenet)
+    if found is not None:
+        return found
+    raise ValueError(
+        "shape is required for flat src "
+        "(pass shape=... or set_convolution_shape(shape, tenet=...))"
+    )
 
 
 class F_PosFromIndex(IdpyFunction):
@@ -131,7 +194,7 @@ class F_IndexFromPos(IdpyFunction):
 
 
 def _dim_sizes_strides(shape):
-    """LBM-style sizes/strides: first axis varies fastest (numpy order='F')."""
+    """LBM-style sizes/strides: axis 0 varies fastest (same as InitDimSizesStridesVolume)."""
     dim_sizes = [int(s) for s in shape]
     dim = len(dim_sizes)
     if dim < 1:
@@ -145,6 +208,16 @@ def _dim_sizes_strides(shape):
         ]
     V = int(reduce(lambda x, y: x * y, dim_sizes))
     return dim, dim_sizes, dim_strides, V
+
+
+def pack_lattice_flat(field):
+    """Multi-d logical array → C-contiguous 1D with LBM axis-0-fastest layout."""
+    return np.ascontiguousarray(np.ravel(np.asarray(field), order='F'))
+
+
+def unpack_lattice_flat(flat, shape):
+    """Inverse of pack_lattice_flat: flat length-V → multi-d logical array."""
+    return np.asarray(flat).reshape(tuple(shape), order='F')
 
 
 def _taps_fingerprint(offsets, coeffs):
@@ -372,31 +445,21 @@ def convolve_periodic(src, offsets, coeffs, shape=None, tenet=None,
     """
     Apply meta-generated periodic convolution on a device (or CTypes) array.
 
-    Memory layout must be first-axis-fastest (Fortran order), matching Idpy lex macros.
-    `src` may be multi-d (F-contiguous) or flat with explicit `shape`.
+    ``src`` must be a flat length-``V`` Idpy array (C-contiguous 1D), matching LBM
+    population buffers. Tenet is taken from ``src`` ownership (or ``tenet=``);
+    logical lattice shape from ``shape`` or ``set_convolution_shape(..., tenet=)``.
+    Element order is LBM axis-0-fastest (see ``pack_lattice_flat``).
     """
-    if tenet is None:
-        tenet = get_active_tenet()
-    if tenet is None:
-        raise RuntimeError(
-            "convolve_periodic requires an active Tenet "
-            "(call set_active_tenet(tenet) or pass tenet=...)"
+    tenet = _resolve_tenet(src, tenet)
+
+    if getattr(src, 'ndim', 1) != 1:
+        raise TypeError(
+            "convolve_periodic requires a flat length-V src; "
+            "use pack_lattice_flat(field) and set_convolution_shape(shape, tenet=...)"
         )
 
     offsets, coeffs = _normalize_taps(offsets, coeffs)
-
-    if shape is None:
-        if getattr(src, 'ndim', 1) >= 2:
-            shape = tuple(int(s) for s in src.shape)
-        else:
-            shape = get_convolution_shape()
-            if shape is None:
-                raise ValueError(
-                    "shape is required for flat src "
-                    "(pass shape=... or set_convolution_shape)"
-                )
-    else:
-        shape = tuple(int(s) for s in shape)
+    shape = _resolve_shape(shape, tenet)
 
     dim, dim_sizes, dim_strides, V = _dim_sizes_strides(shape)
     if int(np.prod(getattr(src, 'shape', ()))) != V:
@@ -411,7 +474,8 @@ def convolve_periodic(src, offsets, coeffs, shape=None, tenet=None,
 
     lang = tenet.GetLang()
     cache_key = (
-        lang, shape, str(custom_types), _taps_fingerprint(offsets, coeffs),
+        id(tenet), lang, shape, str(custom_types),
+        _taps_fingerprint(offsets, coeffs),
     )
     cached = _idea_cache.get(cache_key)
     if cached is None:
@@ -426,18 +490,7 @@ def convolve_periodic(src, offsets, coeffs, shape=None, tenet=None,
         idea, kern = cached
 
     dst = IdpyMemory.Zeros(shape=(V,), dtype=src.dtype, tenet=tenet)
-    if getattr(src, 'ndim', 1) == 1:
-        src_flat = src
-    else:
-        host = np.asfortranarray(np.asarray(src.D2H() if hasattr(src, 'D2H') else src))
-        src_flat = IdpyMemory.OnDevice(host.ravel(order='F'), tenet=tenet)
-
-    idea.Deploy([dst, src_flat])
-
-    if getattr(src, 'ndim', 1) >= 2:
-        host_out = np.asarray(dst.D2H() if hasattr(dst, 'D2H') else dst)
-        host_out = np.asfortranarray(host_out.reshape(shape, order='F'))
-        return IdpyMemory.OnDevice(host_out, tenet=tenet)
+    idea.Deploy([dst, src])
     return dst
 
 

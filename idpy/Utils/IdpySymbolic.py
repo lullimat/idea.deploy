@@ -1086,15 +1086,6 @@ class JSymmetricTensor:
     def _convolve_step(self, a, b, *, reverse_shift=False, periodic=True):
         if not _is_array_like(a) or not _is_array_like(b):
             raise TypeError("_convolve_step expects array-like inputs")
-        if getattr(a, 'ndim', None) != getattr(b, 'ndim', None):
-            raise ValueError(
-                f"dimensionality mismatch: kernel ndim={getattr(a, 'ndim', None)}, "
-                f"field ndim={getattr(b, 'ndim', None)}"
-            )
-        if not periodic and any(ks > fs for ks, fs in zip(a.shape, b.shape)):
-            raise ValueError(
-                f"kernel shape {a.shape} cannot exceed field shape {b.shape} with open boundaries"
-            )
 
         device_a, device_b = _is_device_array(a), _is_device_array(b)
         if device_a or device_b:
@@ -1106,7 +1097,18 @@ class JSymmetricTensor:
                 raise NotImplementedError(
                     "device open-boundary convolution is not implemented yet"
                 )
+            # Kernel may be multi-d (tap layout); field must be flat length-V
             return self._convolve_step_device(a, b, reverse_shift=reverse_shift)
+
+        if getattr(a, 'ndim', None) != getattr(b, 'ndim', None):
+            raise ValueError(
+                f"dimensionality mismatch: kernel ndim={getattr(a, 'ndim', None)}, "
+                f"field ndim={getattr(b, 'ndim', None)}"
+            )
+        if not periodic and any(ks > fs for ks, fs in zip(a.shape, b.shape)):
+            raise ValueError(
+                f"kernel shape {a.shape} cannot exceed field shape {b.shape} with open boundaries"
+            )
 
         # Cache nonzero taps per kernel layout (numpy path)
         if not hasattr(self, "_conv_taps_cache"):
@@ -1178,38 +1180,27 @@ class JSymmetricTensor:
 
     def _convolve_step_device(self, a, b, *, reverse_shift=False):
         from idpy.IdpyStencils.IdpyConvolution import (
-            convolve_periodic, get_active_tenet, get_convolution_shape,
+            convolve_periodic, _resolve_tenet, get_convolution_shape,
         )
-        from idpy.IdpyCode import IdpyMemory
-        if get_active_tenet() is None:
-            raise RuntimeError(
-                "device convolution requires set_active_tenet(tenet) first"
+        if getattr(b, 'ndim', 1) != 1:
+            raise TypeError(
+                "device convolution requires a flat length-V field; "
+                "use pack_lattice_flat(field) and "
+                "set_convolution_shape(shape, tenet=...)"
             )
+        tenet = _resolve_tenet(b)
         offsets, coeffs, _kshape = self._extract_conv_taps(
             a, reverse_shift=reverse_shift,
         )
-        tenet = get_active_tenet()
-        if getattr(b, 'ndim', 1) >= 2:
-            shape = tuple(int(s) for s in b.shape)
-            host_b = np.asfortranarray(
-                np.asarray(b.D2H() if hasattr(b, 'D2H') else b)
-            )
-            src = IdpyMemory.OnDevice(host_b.ravel(order='F'), tenet=tenet)
-            out_flat = convolve_periodic(
-                src, offsets, coeffs, shape=shape, tenet=tenet,
-            )
-            host_out = np.asarray(
-                out_flat.D2H() if hasattr(out_flat, 'D2H') else out_flat
-            )
-            host_out = np.asfortranarray(host_out.reshape(shape, order='F'))
-            return IdpyMemory.OnDevice(host_out, tenet=tenet)
-
-        shape = get_convolution_shape()
+        shape = get_convolution_shape(tenet=tenet)
         if shape is None:
             raise ValueError(
-                "flat device field requires set_convolution_shape(shape)"
+                "flat device field requires "
+                "set_convolution_shape(shape, tenet=...) or shape on convolve"
             )
-        return convolve_periodic(b, offsets, coeffs, shape=shape, tenet=tenet)
+        return convolve_periodic(
+            b, offsets, coeffs, shape=shape, tenet=tenet,
+        )
 
     def _convolve(self, b, *, reverse_shift=False, periodic=True):
         def _as_tuple_index(index):
@@ -1246,16 +1237,25 @@ class JSymmetricTensor:
                 c_dict_out[tt_0] = term
             elif on_device:
                 from idpy.IdpyCode import IdpyMemory
-                from idpy.IdpyStencils.IdpyConvolution import get_active_tenet
+                from idpy.IdpyStencils.IdpyConvolution import _tenet_of
+                prev = c_dict_out[tt_0]
+                t_prev, t_term = _tenet_of(prev), _tenet_of(term)
+                if t_prev is not None and t_term is not None and t_prev is not t_term:
+                    raise ValueError(
+                        "device convolution accumulate: operands on different tenets"
+                    )
+                tenet = t_prev or t_term
+                if tenet is None:
+                    raise RuntimeError(
+                        "device convolution accumulate: cannot resolve tenet "
+                        "from operands"
+                    )
                 s = np.asarray(
-                    c_dict_out[tt_0].D2H()
-                    if hasattr(c_dict_out[tt_0], 'D2H') else c_dict_out[tt_0]
+                    prev.D2H() if hasattr(prev, 'D2H') else prev
                 )
                 t = np.asarray(term.D2H() if hasattr(term, 'D2H') else term)
-                acc = np.asfortranarray(s + t)
-                c_dict_out[tt_0] = IdpyMemory.OnDevice(
-                    acc, tenet=get_active_tenet(),
-                )
+                acc = np.ascontiguousarray(s + t)
+                c_dict_out[tt_0] = IdpyMemory.OnDevice(acc, tenet=tenet)
             else:
                 c_dict_out[tt_0] = c_dict_out[tt_0] + term
 
