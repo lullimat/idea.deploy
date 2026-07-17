@@ -18,8 +18,13 @@ fi
 # shellcheck source=/dev/null
 source .idpy-env
 
-PATCH_FILE="${REPO_ROOT}/patches/pymetallic/0001-recommended-max-working-set-size.patch"
+PATCH_DIR="${REPO_ROOT}/patches/pymetallic"
 PIP_SERVER_OPTION="${PIP_SERVER_OPTION:-}"
+# Ordered list of patches (must apply cleanly in sequence on PYMETALLIC_PIN)
+PATCH_FILES=(
+    "${PATCH_DIR}/0001-recommended-max-working-set-size.patch"
+    "${PATCH_DIR}/0002-library-compile-options.patch"
+)
 
 soft_fail() {
     echo "WARNING: $*"
@@ -38,10 +43,13 @@ then
     soft_fail "swiftc not found (install Xcode / Swift toolchain for Metal)"
 fi
 
-if [ ! -f "${PATCH_FILE}" ]
-then
-    soft_fail "missing patch file: ${PATCH_FILE}"
-fi
+for PATCH_FILE in "${PATCH_FILES[@]}"
+do
+    if [ ! -f "${PATCH_FILE}" ]
+    then
+        soft_fail "missing patch file: ${PATCH_FILE}"
+    fi
+done
 
 mkdir -p "${SOURCES_ROOT}"
 
@@ -78,20 +86,24 @@ then
     soft_fail "pymetallic sources incomplete at ${PYMETALLIC_SRC}"
 fi
 
-echo "Applying idpy pymetallic patch (if needed)..."
-if git -C "${PYMETALLIC_SRC}" apply --check "${PATCH_FILE}" >/dev/null 2>&1
-then
-    if ! git -C "${PYMETALLIC_SRC}" apply "${PATCH_FILE}"
+echo "Applying idpy pymetallic patches (if needed)..."
+for PATCH_FILE in "${PATCH_FILES[@]}"
+do
+    PATCH_NAME="$(basename "${PATCH_FILE}")"
+    if git -C "${PYMETALLIC_SRC}" apply --check "${PATCH_FILE}" >/dev/null 2>&1
     then
-        soft_fail "failed to apply ${PATCH_FILE}"
+        if ! git -C "${PYMETALLIC_SRC}" apply "${PATCH_FILE}"
+        then
+            soft_fail "failed to apply ${PATCH_NAME}"
+        fi
+        echo "Applied ${PATCH_NAME}."
+    elif git -C "${PYMETALLIC_SRC}" apply --reverse --check "${PATCH_FILE}" >/dev/null 2>&1
+    then
+        echo "${PATCH_NAME} already applied; skipping."
+    else
+        soft_fail "patch neither applies nor appears already applied: ${PATCH_NAME}"
     fi
-    echo "Patch applied."
-elif git -C "${PYMETALLIC_SRC}" apply --reverse --check "${PATCH_FILE}" >/dev/null 2>&1
-then
-    echo "Patch already applied; skipping."
-else
-    soft_fail "patch neither applies nor appears already applied: ${PATCH_FILE}"
-fi
+done
 
 echo "Building local pymetallic Swift bridge (libpymetallic.dylib)..."
 if ! (cd "${PYMETALLIC_SRC}" && make build)

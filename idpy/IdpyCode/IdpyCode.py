@@ -294,7 +294,9 @@ class IdpyKernel:
             return self.macros
 
         if lang == METAL_T:
-            # Metal uses typedef/#define in source (header mode)
+            # Metal uses typedef/#define in source (header mode).
+            # Compile-time optimization is controlled at Library() creation via
+            # optimizer_flag → fast_math (MTLCompileOptions), not -D macros.
             self.macros = None
             return self.macros
 
@@ -697,7 +699,9 @@ class IdpyKernel:
 
         if idpy_langs_sys[METAL_T] and isinstance(tenet, MTTenet):
             _source = self.Code(METAL_T)
-            _library = pymetallic.Library(tenet.device, _source)
+            _library = pymetallic.Library(
+                tenet.device, _source, fast_math=bool(self.optimizer_flag),
+            )
             _function = _library.make_function(self.name)
             _pipeline = tenet.device.compute_pipeline_state(_function) \
                 if hasattr(tenet.device, 'compute_pipeline_state') else \
@@ -710,6 +714,15 @@ class IdpyKernel:
             _block = block if len(block) == 3 else block + (1,) * (3 - len(block))
 
             class Idea:
+                '''
+                Metal Idea: command buffers are single-use after commit.
+                Deploy encodes+commits asynchronously (like OCL enqueue / CUDA launch);
+                sync via returned CommandBuffer.wait_until_completed, DeployProfiling,
+                Tenet.Finish(), or IdpyLoop end-of-sequence wait.
+                Same-queue CBs preserve GPU order without host wait between Deploys.
+                IdpyLoop may Encode many consecutive kernels into one CB (flush before
+                host IdpyMethods); standalone Deploy remains one-kernel-per-CB.
+                '''
                 def __init__(self, k_dict = None):
                     self.k_dict, self.lang = k_dict, METAL_T
                     self.st = SimpleTiming()
@@ -735,31 +748,38 @@ class IdpyKernel:
                             )
                     return _args_data
 
-                def Deploy(self, args_list = None, idpy_stream = None):
-                    if idpy_stream is not None:
-                        print("Metal Deploy: idpy_stream is not available; "
-                              "using synchronous command buffer")
-                    tenet = self.k_dict['tenet']
+                def Encode(self, encoder, args_list = None):
+                    '''Encode one dispatch onto an open compute encoder (no commit).'''
                     _args_data = self._bind_args(args_list)
-                    command_buffer = tenet.queue.make_command_buffer()
-                    encoder = command_buffer.make_compute_command_encoder()
                     encoder.set_compute_pipeline_state(self.k_dict['_pipeline'])
                     for i, buf in enumerate(_args_data):
                         encoder.set_buffer(buf, 0, i)
                     encoder.dispatch_threads(
                         self.k_dict['global'], self.k_dict['block']
                     )
+
+                def Deploy(self, args_list = None, idpy_stream = None):
+                    # idpy_stream unused for ordering on the single Tenet queue
+                    # (GPU serializes same-queue command buffers).
+                    tenet = self.k_dict['tenet']
+                    command_buffer = tenet.queue.make_command_buffer()
+                    encoder = command_buffer.make_compute_command_encoder()
+                    self.Encode(encoder, args_list)
                     encoder.end_encoding()
                     command_buffer.commit()
-                    command_buffer.wait_until_completed()
-                    return None
+                    tenet.last_command_buffer = command_buffer
+                    return command_buffer
 
                 def DeployProfiling(self, args_list = None, idpy_stream = None):
                     self.st.Start()
-                    self.Deploy(args_list, idpy_stream)
+                    command_buffer = self.Deploy(args_list, idpy_stream)
+                    command_buffer.wait_until_completed()
+                    tenet = self.k_dict['tenet']
+                    if tenet.last_command_buffer is command_buffer:
+                        tenet.last_command_buffer = None
                     self.st.End()
                     _time_sec = self.st.GetElapsedTime()['time_s']
-                    return None, _time_sec
+                    return command_buffer, _time_sec
 
             return Idea({'_pipeline': _pipeline, '_kernel_name': self.name,
                          'tenet': tenet, 'grid': grid, 'block': _block,
@@ -874,6 +894,29 @@ def WriteCodeParams(params = None, AddrQ = None,
     _code += """)"""
     return _code
 
+def _metal_idea_is_gpu_kernel(Idea):
+    '''True for Metal GPU Ideas (have a pipeline); False for IdpyMethods.'''
+    k_dict = getattr(Idea, 'k_dict', None)
+    return isinstance(k_dict, dict) and ('_pipeline' in k_dict)
+
+
+def _metal_flush_encode_batch(tenet, encoder, command_buffer):
+    '''End encoding and commit; return (None, None) so callers clear batch state.'''
+    if encoder is not None:
+        encoder.end_encoding()
+        command_buffer.commit()
+        tenet.last_command_buffer = command_buffer
+    return None, None
+
+
+def _metal_wait_last_cb(meta_stream_slots):
+    '''Wait the last non-None command buffer in an IdpyLoop meta_streams slot list.'''
+    for slot in reversed(meta_stream_slots):
+        if slot is not None and slot[0] is not None:
+            slot[0].wait_until_completed()
+            return
+
+
 ## Methods and Loops
 class IdpyMethod:
     def __init__(self, tenet = None):
@@ -950,7 +993,7 @@ class IdpyLoop:
 
         if seq[0][0].lang == METAL_T:
             if idpy_langs_sys[METAL_T]:
-                return None
+                return [None for _ in range(len(seq))]
             else:
                 raise Exception("Metal not present on the system")
 
@@ -1046,16 +1089,30 @@ class IdpyLoop:
                         self.PutArgs(seq_i, _indices, _args)
 
                 '''
-                Metal
+                Metal: batch consecutive GPU kernels into one CB; flush before IdpyMethod
                 '''
                 if self.langs[seq_i] == METAL_T:
+                    _encoder, _cb, _tenet = None, None, None
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
                         Idea, _indices = _item[0], _item[1]
                         _args = self.SetArgs(seq_i, _indices)
-                        _stream = self.meta_streams[seq_i]
-                        Idea.Deploy(_args, idpy_stream = _stream)
+                        if _metal_idea_is_gpu_kernel(Idea):
+                            _tenet = Idea.k_dict['tenet']
+                            if _encoder is None:
+                                _cb = _tenet.queue.make_command_buffer()
+                                _encoder = _cb.make_compute_command_encoder()
+                            Idea.Encode(_encoder, _args)
+                            self.meta_streams[seq_i][item_i] = [_cb]
+                        else:
+                            if _encoder is not None:
+                                _encoder, _cb = _metal_flush_encode_batch(
+                                    _tenet, _encoder, _cb)
+                            self.meta_streams[seq_i][item_i] = \
+                                [Idea.Deploy(_args, idpy_stream = None)]
                         self.PutArgs(seq_i, _indices, _args)
+                    if _encoder is not None:
+                        _metal_flush_encode_batch(_tenet, _encoder, _cb)
 
         self.idloop_k_offset += \
             self.idloop_k_type(loop_range[-1] - loop_range[0] + 1)
@@ -1088,10 +1145,10 @@ class IdpyLoop:
                 _end.synchronize()
 
             '''
-            Metal: Deploy is already synchronous
+            Metal: wait last non-None CB (sequences may end with IdpyMethod)
             '''
             if self.langs[seq_i] == METAL_T:
-                pass
+                _metal_wait_last_cb(self.meta_streams[seq_i])
 
 '''
 most likely to be deleted before merging to master
@@ -1147,10 +1204,11 @@ def IdpyProfile(idea_object = None, args_list = [], idpy_stream = None):
     if _lang == METAL_T:
         _st = SimpleTiming()
         _st.Start()
-        idea_object.Deploy(args_list, idpy_stream)
+        _idpy_stream_out = idea_object.Deploy(args_list, idpy_stream)
+        _idpy_stream_out.wait_until_completed()
         _st.End()
         _time_sec = _st.GetElapsedTime()['time_s']
-        return idpy_stream, _time_sec
+        return _idpy_stream_out, _time_sec
                         
 
 class IdpyLoopProfile:
@@ -1185,7 +1243,7 @@ class IdpyLoopProfile:
 
         if seq[0][0].lang == METAL_T:
             if idpy_langs_sys[METAL_T]:
-                return None
+                return [None for _ in range(len(seq))]
             else:
                 raise Exception("Metal not present on the system")
 
@@ -1293,16 +1351,16 @@ class IdpyLoopProfile:
                         _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
 
                 '''
-                Metal
+                Metal (DeployProfiling waits; store CB handles like OpenCL)
                 '''
                 if self.langs[seq_i] == METAL_T:
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
                         Idea, _indices = _item[0], _item[1]
                         _args = self.SetArgs(seq_i, _indices)
-                        _stream = self.meta_streams[seq_i]
                         _stream_swap, _time_swap = \
-                            Idea.DeployProfiling(_args, idpy_stream = _stream)
+                            Idea.DeployProfiling(_args, idpy_stream = None)
+                        self.meta_streams[seq_i][item_i] = [_stream_swap]
                         self.PutArgs(seq_i, _indices, _args)
                         if hasattr(Idea, 'k_dict'):
                             _timing_dict[seq_i][Idea.k_dict['_kernel_name']] += [_time_swap]
@@ -1358,7 +1416,7 @@ class IdpyLoopList:
                 raise Exception("OpenCL not present on the system")
         if seq[0][0].lang == METAL_T:
             if idpy_langs_sys[METAL_T]:
-                return None
+                return [None for _ in range(len(seq))]
             else:
                 raise Exception("Metal not present on the system")
 
@@ -1420,11 +1478,25 @@ class IdpyLoopList:
                         self.PutArgs(seq_i, _indices, _args)
 
                 if self.langs[seq_i] == METAL_T:
+                    _encoder, _cb, _tenet = None, None, None
                     for item_i in range(seq_len):
                         _item = self.sequences[seq_i][item_i]
                         Idea, _indices = _item[0], _item[1]
                         _args = self.SetArgs(seq_i, _indices)
-                        _stream = self.meta_streams[seq_i]
-                        Idea.Deploy(_args, idpy_stream = _stream)
+                        if _metal_idea_is_gpu_kernel(Idea):
+                            _tenet = Idea.k_dict['tenet']
+                            if _encoder is None:
+                                _cb = _tenet.queue.make_command_buffer()
+                                _encoder = _cb.make_compute_command_encoder()
+                            Idea.Encode(_encoder, _args)
+                            self.meta_streams[seq_i][item_i] = [_cb]
+                        else:
+                            if _encoder is not None:
+                                _encoder, _cb = _metal_flush_encode_batch(
+                                    _tenet, _encoder, _cb)
+                            self.meta_streams[seq_i][item_i] = \
+                                [Idea.Deploy(_args, idpy_stream = None)]
                         self.PutArgs(seq_i, _indices, _args)
+                    if _encoder is not None:
+                        _metal_flush_encode_batch(_tenet, _encoder, _cb)
 

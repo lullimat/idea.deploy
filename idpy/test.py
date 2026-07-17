@@ -406,7 +406,8 @@ class TestIdpyConsts(unittest.TestCase):
                       'restrict': """__restrict__""",
                       'shared': """__shared__""",
                       'device': """__device__""",
-                      'global': ''}
+                      'global': '',
+                      'thread': ''}
         checks += [aq[CUDA_T] == dict_check]
 
         '''
@@ -418,7 +419,8 @@ class TestIdpyConsts(unittest.TestCase):
                       'restrict': '',
                       'restrict': '',
                       'shared': '',
-                      'device': ''}
+                      'device': '',
+                      'thread': ''}
         checks += [aq[OCL_T] == dict_check]
 
         '''
@@ -429,7 +431,8 @@ class TestIdpyConsts(unittest.TestCase):
                       'local': """threadgroup""",
                       'restrict': '',
                       'shared': """threadgroup""",
-                      'device': """device"""}
+                      'device': """device""",
+                      'thread': """thread"""}
         checks += [aq[METAL_T] == dict_check]
         
         self.assertTrue(AllTrue(checks))

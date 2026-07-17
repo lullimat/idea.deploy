@@ -1,0 +1,77 @@
+diff --git a/src/SwiftMetalBridge.swift b/src/SwiftMetalBridge.swift
+index 1111111..2222222 100644
+--- a/src/SwiftMetalBridge.swift
++++ b/src/SwiftMetalBridge.swift
+@@ -119,11 +119,23 @@
+ @_cdecl("metal_device_make_library_with_source")
+ public func metal_device_make_library_with_source(_ devicePtr: UnsafeMutableRawPointer,
+                                                 _ source: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
++    // Apple default: fast math enabled
++    return metal_device_make_library_with_source_options(devicePtr, source, true)
++}
++
++@_cdecl("metal_device_make_library_with_source_options")
++public func metal_device_make_library_with_source_options(
++    _ devicePtr: UnsafeMutableRawPointer,
++    _ source: UnsafePointer<CChar>,
++    _ fastMathEnabled: Bool
++) -> UnsafeMutableRawPointer? {
+     let device = Unmanaged<MTLDevice>.fromOpaque(devicePtr).takeUnretainedValue()
+     let sourceString = String(cString: source)
+-    
++    let options = MTLCompileOptions()
++    options.fastMathEnabled = fastMathEnabled
++
+     do {
+-        let library = try device.makeLibrary(source: sourceString, options: nil)
++        let library = try device.makeLibrary(source: sourceString, options: options)
+         return Unmanaged.passRetained(library).toOpaque()
+     } catch {
+         print("Error compiling Metal library: \(error)")
+diff --git a/src/pymetallic/metallic.py b/src/pymetallic/metallic.py
+index 1111111..2222222 100644
+--- a/src/pymetallic/metallic.py
++++ b/src/pymetallic/metallic.py
+@@ -77,6 +77,12 @@
+     # Library/functions
+     lib.metal_device_make_library_with_source.argtypes = [c_void_p, c_char_p]
+     lib.metal_device_make_library_with_source.restype = c_void_p
++    lib.metal_device_make_library_with_source_options.argtypes = [
++        c_void_p,
++        c_char_p,
++        c_bool,
++    ]
++    lib.metal_device_make_library_with_source_options.restype = c_void_p
+     lib.metal_library_make_function.argtypes = [c_void_p, c_char_p]
+     lib.metal_library_make_function.restype = c_void_p
+ 
+@@ -426,8 +432,8 @@
+         )
+         return self._command_encoder
+ 
+-    def make_library(self, source):
+-        return Library(self, source)
++    def make_library(self, source, fast_math: bool = True):
++        return Library(self, source, fast_math=fast_math)
+ 
+     def make_kernel(self, source: str, func: str):
+         return Kernel(self, source=source, func=func)
+@@ -674,12 +680,15 @@
+ class Library:
+     """Metal shader library wrapper"""
+ 
+-    def __init__(self, device: Device, source: str):
++    def __init__(self, device: Device, source: str, fast_math: bool = True):
+         self.device = device
++        self.fast_math = bool(fast_math)
+         lib = _get_metal_lib()
+         self._library_ptr = c_void_p(
+-            lib.metal_device_make_library_with_source(
+-                device._device_ptr, source.encode("utf-8")
++            lib.metal_device_make_library_with_source_options(
++                device._device_ptr,
++                source.encode("utf-8"),
++                c_bool(self.fast_math),
+             )
+         )
+         if not self._library_ptr:

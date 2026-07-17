@@ -36,6 +36,7 @@ __status__ = "Development"
 import platform
 from collections import defaultdict
 
+import numpy as np
 import pymetallic
 
 from . import METAL_T
@@ -46,6 +47,63 @@ needed to make the Tenet class work homogenously
 throughout different classes
 '''
 
+
+class MetalMemoryPool:
+    """
+    Free-list of pymetallic.Buffer objects keyed by (nbytes, dtype.str).
+
+    Recycled buffers keep their Metal allocation; callers must zero/fill as needed.
+    """
+
+    def __init__(self, device):
+        self.device = device
+        self._free = {}
+        self._active_bytes = 0
+        self._held_bytes = 0
+        self._closed = False
+
+    @staticmethod
+    def _key(shape, dtype):
+        dtype = np.dtype(dtype)
+        shape = shape if isinstance(shape, tuple) else (shape,)
+        nbytes = int(np.prod(shape)) * int(dtype.itemsize)
+        return (nbytes, dtype.str), shape, dtype, nbytes
+
+    def allocate_buffer(self, shape, dtype):
+        if self._closed:
+            raise RuntimeError("MetalMemoryPool is closed")
+        key, shape, dtype, nbytes = self._key(shape, dtype)
+        free = self._free.setdefault(key, [])
+        if free:
+            buf = free.pop()
+            self._held_bytes -= nbytes
+        else:
+            zeros = np.zeros(shape, dtype=dtype)
+            buf = pymetallic.Buffer.from_numpy(self.device, zeros)
+        self._active_bytes += nbytes
+        return buf, shape, dtype, nbytes
+
+    def free_buffer(self, buf, nbytes, dtype_str):
+        if self._closed or buf is None:
+            return
+        key = (int(nbytes), str(dtype_str))
+        self._free.setdefault(key, []).append(buf)
+        self._active_bytes = max(0, self._active_bytes - int(nbytes))
+        self._held_bytes += int(nbytes)
+
+    def active_bytes(self):
+        return int(self._active_bytes)
+
+    def held_bytes(self):
+        return int(self._held_bytes)
+
+    def clear(self):
+        """Drop free-list references so Metal buffers can be released."""
+        self._free.clear()
+        self._held_bytes = 0
+        self._closed = True
+
+
 class Tenet:
     GPU_T = "gpu"
 
@@ -55,13 +113,23 @@ class Tenet:
         self.device_name = device_name
         self.mem_pool = None
         self.allocator = None
+        # Last committed command buffer (same-queue order ⇒ waiting this drains priors)
+        self.last_command_buffer = None
 
     def FreeMemoryDict(self, memory_dict=None):
         pass
 
+    def Finish(self):
+        """Host-sync: wait until the last submitted command buffer completes."""
+        cb = self.last_command_buffer
+        if cb is not None:
+            cb.wait_until_completed()
+            self.last_command_buffer = None
+
     def AllocatedBytes(self):
-        print("Metal Tenet.AllocatedBytes: functionality is not available")
-        return 0
+        if self.mem_pool is None:
+            return 0
+        return self.mem_pool.active_bytes()
 
     def GetKind(self):
         return self.GPU_T
@@ -82,14 +150,19 @@ class Tenet:
         return METAL_T
 
     def End(self, memory_dict=None):
+        self.Finish()
+        if self.mem_pool is not None:
+            self.mem_pool.clear()
+            self.mem_pool = None
+        self.allocator = None
         self.queue = None
         self.device = None
         return None
 
     def SetMemoryPool(self):
-        print("Metal Tenet.SetMemoryPool: functionality is not available")
-        self.mem_pool = None
-        self.allocator = None
+        self.mem_pool = MetalMemoryPool(self.device)
+        self.allocator = self.mem_pool
+        return self.mem_pool
 
 
 class Metal:

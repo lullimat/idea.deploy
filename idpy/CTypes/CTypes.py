@@ -213,7 +213,8 @@ class CTypes:
         _tenet.SetDeviceName(self.GetDeviceName())
         return _tenet
             
-    def GetDeviceName(self):            
-        return ("Device: CPU " +
-                str(cpuinfo.get_cpu_info()['brand_raw']) +
-                " Memory:" +  str(psutil.virtual_memory()[0]))
+    def GetDeviceName(self):
+        info = cpuinfo.get_cpu_info()
+        brand = info.get('brand_raw') or info.get('brand') or info.get('hardware') or 'CPU'
+        return ("Device: CPU " + str(brand) +
+                " Memory:" + str(psutil.virtual_memory()[0]))
