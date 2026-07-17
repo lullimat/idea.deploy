@@ -7,7 +7,7 @@ import numpy as np
 
 from idpy.Utils.IdpySymbolic import SymmetricTensor, JSymmetricTensor
 from idpy.IdpyCode import idpy_langs_sys
-from idpy.IdpyCode import CTYPES_T, OCL_T, METAL_T
+from idpy.IdpyCode import CTYPES_T, OCL_T, METAL_T, CUDA_T
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyStencils.IdpyConvolution import (
     K_ConvolvePeriodic,
@@ -293,6 +293,32 @@ class TestConvolutionMetal(_DeviceConvolutionMixin, unittest.TestCase):
         self.assertLessEqual(err2, self.tol, msg=f"matmul device max|Δ|={err2}")
 
 
+@unittest.skipUnless(idpy_langs_sys.get(CUDA_T, False), "CUDA not available")
+class TestConvolutionCUDA(_DeviceConvolutionMixin, unittest.TestCase):
+    def setUp(self):
+        clear_idea_cache()
+        clear_convolution_shape()
+        clear_active_tenet()
+        from idpy.CUDA.CUDA import CUDA
+        try:
+            cu = CUDA()
+            if not cu.devices:
+                self.skipTest("no CUDA devices")
+            cu.SetDevice(0)
+            self.tenet = cu.GetTenet()
+        except Exception as exc:
+            self.skipTest(f"CUDA tenet unavailable: {exc}")
+
+    def tearDown(self):
+        clear_active_tenet()
+        clear_convolution_shape()
+        clear_idea_cache()
+        try:
+            self.tenet.End()
+        except Exception:
+            pass
+
+
 @unittest.skipUnless(idpy_langs_sys.get(CTYPES_T, False), "ctypes not available")
 class TestConvolutionOwnership(unittest.TestCase):
     """LBM-style tenet ownership / cache isolation (ctypes)."""
@@ -315,6 +341,89 @@ class TestConvolutionOwnership(unittest.TestCase):
                 t.End()
             except Exception:
                 pass
+
+    def test_mismatch_tenet_raises(self):
+        shape = (16,)
+        field = np.ones(shape, dtype=np.float64)
+        f0 = IdpyMemory.OnDevice(pack_lattice_flat(field), tenet=self.t0)
+        with self.assertRaises(ValueError):
+            convolve_periodic(
+                f0, *_taps(_centered_dx_kernel_1d()), shape=shape, tenet=self.t1,
+            )
+
+    def test_cache_keyed_by_tenet(self):
+        shape = (16,)
+        kernel = _centered_dx_kernel_1d()
+        field = np.ones(shape, dtype=np.float64)
+        taps = _taps(kernel)
+        f0 = IdpyMemory.OnDevice(pack_lattice_flat(field), tenet=self.t0)
+        f1 = IdpyMemory.OnDevice(pack_lattice_flat(field), tenet=self.t1)
+        clear_idea_cache()
+        convolve_periodic(f0, *taps, shape=shape)
+        n_after_0 = len(_idea_cache)
+        convolve_periodic(f1, *taps, shape=shape)
+        self.assertEqual(len(_idea_cache), n_after_0 + 1)
+        keys = list(_idea_cache.keys())
+        self.assertNotEqual(keys[0][0], keys[1][0])
+
+    def test_symbolic_without_active_tenet(self):
+        shape = (32, 32)
+        kernel = _centered_dx_kernel_2d()
+        rng = np.random.default_rng(4)
+        field = np.ascontiguousarray(rng.standard_normal(shape))
+        set_convolution_shape(shape, tenet=self.t0)
+        clear_active_tenet()
+        k_dev = IdpyMemory.OnDevice(np.ascontiguousarray(kernel), tenet=self.t0)
+        f_flat = IdpyMemory.OnDevice(pack_lattice_flat(field), tenet=self.t0)
+        st = JSymmetricTensor(
+            d=2, rank=0, ranks=[0, 0], c_dict={0: k_dev}, dtype=kernel.dtype,
+        )
+        fld = SymmetricTensor(
+            d=2, rank=0, c_dict={0: f_flat}, dtype=field.dtype,
+        )
+        out = unpack_lattice_flat(np.asarray((st @ fld)[0].D2H()), shape)
+        ref = _numpy_convolve(kernel, field)
+        self.assertLessEqual(np.max(np.abs(out - ref)), 1e-12)
+
+
+@unittest.skipUnless(idpy_langs_sys.get(CUDA_T, False), "CUDA not available")
+class TestConvolutionOwnershipCUDA(unittest.TestCase):
+    """LBM-style tenet ownership / cache isolation (CUDA)."""
+
+    def setUp(self):
+        clear_idea_cache()
+        clear_convolution_shape()
+        clear_active_tenet()
+        from idpy.CUDA.CUDA import CUDA
+        try:
+            cu0, cu1 = CUDA(), CUDA()
+            if not cu0.devices:
+                self.skipTest("no CUDA devices")
+            cu0.SetDevice(0)
+            cu1.SetDevice(0)
+            self.t0 = cu0.GetTenet()
+            self.t1 = cu1.GetTenet()
+        except Exception as exc:
+            self.skipTest(f"CUDA tenet unavailable: {exc}")
+        self.assertIsNot(self.t0, self.t1)
+
+    def tearDown(self):
+        clear_active_tenet()
+        clear_convolution_shape()
+        clear_idea_cache()
+        for t in (getattr(self, 't0', None), getattr(self, 't1', None)):
+            if t is None:
+                continue
+            try:
+                t.End()
+            except Exception:
+                pass
+
+    def test_ownership_stamp(self):
+        field = np.ones(16, dtype=np.float64)
+        arr = IdpyMemory.OnDevice(pack_lattice_flat(field), tenet=self.t0)
+        self.assertIs(arr.tenet, self.t0)
+        self.assertIs(_tenet_of(arr), self.t0)
 
     def test_mismatch_tenet_raises(self):
         shape = (16,)

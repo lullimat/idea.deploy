@@ -45,16 +45,19 @@ if idpy_langs_sys[CUDA_T]:
     class IdpyArrayCUDA(cu_array.GPUArray):
         def __init__(self, shape, dtype,
                      allocator = None, base = None,
-                     gpudata = None, strides = None, order = 'C'):
+                     gpudata = None, strides = None, order = 'C',
+                     tenet = None):
             
             if allocator is None:
-                allocator = cu_driver.mem_alloc
+                allocator = (tenet.allocator if tenet is not None
+                             else cu_driver.mem_alloc)
                 
             super().__init__(shape = shape, dtype = dtype,
                              allocator = allocator, base = base,
                              gpudata = gpudata, strides = strides,
                              order = order)
             self.lang = CUDA_T
+            self.tenet = tenet
 
         def H2D(self, ary, async_=None):
             return super().set(ary = ary)
@@ -65,30 +68,33 @@ if idpy_langs_sys[CUDA_T]:
         def SetConst(self, const = 0., stream = None):
             super().fill(value = const, stream = stream)
 
-    def _on_device_CUDA(ary, allocator = None):
+    def _on_device_CUDA(ary, tenet):
         _swap_array = IdpyArrayCUDA(shape = ary.shape,
                                     dtype = ary.dtype,
-                                    allocator = allocator)
+                                    tenet = tenet,
+                                    allocator = tenet.allocator)
         _swap_array.H2D(ary)
         return _swap_array
 
-    def _zeros_CUDA(shape, dtype, allocator = None):
+    def _zeros_CUDA(shape, dtype, tenet):
         _swap_array = IdpyArrayCUDA(shape = shape,
                                     dtype = dtype,
-                                    allocator = allocator)
+                                    tenet = tenet,
+                                    allocator = tenet.allocator)
         _swap_array.SetConst(0)
         return _swap_array
 
-    def _range_CUDA(n, allocator = None, dtype = np.int32):
+    def _range_CUDA(n, tenet, dtype = np.int32):
         _tmp_range = np.arange(n, dtype = dtype)
-        _swap_array = _on_device_CUDA(_tmp_range, allocator = allocator)
+        _swap_array = _on_device_CUDA(_tmp_range, tenet = tenet)
         del _tmp_range
         return _swap_array
 
-    def _const_CUDA(shape, dtype, const = 0., allocator = None):
+    def _const_CUDA(shape, dtype, const = 0., tenet = None):
         _swap_array = IdpyArrayCUDA(shape = shape,
                                     dtype = dtype,
-                                    allocator = allocator)
+                                    tenet = tenet,
+                                    allocator = tenet.allocator)
         _swap_array.SetConst(const)
         return _swap_array
 
@@ -393,16 +399,19 @@ if idpy_langs_sys[CUDA_T]:
     class IdpyArrayCUDA(cu_array.GPUArray):
         def __init__(self, shape, dtype,
                      allocator = None, base = None,
-                     gpudata = None, strides = None, order = 'C'):
+                     gpudata = None, strides = None, order = 'C',
+                     tenet = None):
             
             if allocator is None:
-                allocator = cu_driver.mem_alloc
+                allocator = (tenet.allocator if tenet is not None
+                             else cu_driver.mem_alloc)
                 
             super().__init__(shape = shape, dtype = dtype,
                              allocator = allocator, base = base,
                              gpudata = gpudata, strides = strides,
                              order = order)
             self.lang = CUDA_T
+            self.tenet = tenet
 
         def H2D(self, ary, async_=None):
             return super().set(ary = ary)
@@ -413,30 +422,33 @@ if idpy_langs_sys[CUDA_T]:
         def SetConst(self, const = 0., stream = None):
             super().fill(value = const, stream = stream)
 
-    def _on_device_CUDA(ary, allocator = None):
+    def _on_device_CUDA(ary, tenet):
         _swap_array = IdpyArrayCUDA(shape = ary.shape,
                                     dtype = ary.dtype,
-                                    allocator = allocator)
+                                    tenet = tenet,
+                                    allocator = tenet.allocator)
         _swap_array.H2D(ary)
         return _swap_array
 
-    def _zeros_CUDA(shape, dtype, allocator = None):
+    def _zeros_CUDA(shape, dtype, tenet):
         _swap_array = IdpyArrayCUDA(shape = shape,
                                     dtype = dtype,
-                                    allocator = allocator)
+                                    tenet = tenet,
+                                    allocator = tenet.allocator)
         _swap_array.SetConst(0)
         return _swap_array
 
-    def _range_CUDA(n, allocator = None, dtype = np.int32):
+    def _range_CUDA(n, tenet, dtype = np.int32):
         _tmp_range = np.arange(n, dtype = dtype)
-        _swap_array = _on_device_CUDA(_tmp_range, allocator = allocator)
+        _swap_array = _on_device_CUDA(_tmp_range, tenet = tenet)
         del _tmp_range
         return _swap_array
 
-    def _const_CUDA(shape, dtype, const = 0., allocator = None):
+    def _const_CUDA(shape, dtype, const = 0., tenet = None):
         _swap_array = IdpyArrayCUDA(shape = shape,
                                     dtype = dtype,
-                                    allocator = allocator)
+                                    tenet = tenet,
+                                    allocator = tenet.allocator)
         _swap_array.SetConst(const)
         return _swap_array
 
@@ -615,7 +627,8 @@ def Array(*args, **kwargs):
     del kwargs['tenet']
     
     if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
-        return IdpyArrayCUDA(*args, **kwargs, allocator = tenet.allocator)
+        return IdpyArrayCUDA(*args, **kwargs, tenet = tenet,
+                             allocator = tenet.allocator)
 
     if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
         return IdpyArrayOCL(*args, **kwargs, queue = tenet,
@@ -635,7 +648,7 @@ def OnDevice(*args, **kwargs):
     del kwargs['tenet']
     
     if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
-        return _on_device_CUDA(*args, **kwargs, allocator = tenet.allocator)
+        return _on_device_CUDA(*args, **kwargs, tenet = tenet)
 
     if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
         return _on_device_OCL(*args, **kwargs, tenet = tenet)
@@ -654,7 +667,7 @@ def Zeros(*args, **kwargs):
     del kwargs['tenet']
     
     if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
-        return _zeros_CUDA(*args, **kwargs, allocator = tenet.allocator)
+        return _zeros_CUDA(*args, **kwargs, tenet = tenet)
 
     if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
         return _zeros_OCL(*args, **kwargs, tenet = tenet)
@@ -673,7 +686,7 @@ def Range(*args, **kwargs):
     del kwargs['tenet']
     
     if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
-        return _range_CUDA(*args, **kwargs, allocator = tenet.allocator)
+        return _range_CUDA(*args, **kwargs, tenet = tenet)
 
     if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
         return _range_OCL(*args, **kwargs, tenet = tenet)
@@ -692,7 +705,7 @@ def Const(*args, **kwargs):
     del kwargs['tenet']
     
     if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
-        return _const_CUDA(*args, **kwargs, allocator = tenet.allocator)
+        return _const_CUDA(*args, **kwargs, tenet = tenet)
 
     if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
         return _const_OCL(*args, **kwargs, tenet = tenet)
