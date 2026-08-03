@@ -418,7 +418,7 @@ class TestIdpyConsts(unittest.TestCase):
                       'local': """__local""",
                       'restrict': '',
                       'restrict': '',
-                      'shared': '',
+                      'shared': """__local""",
                       'device': '',
                       'thread': ''}
         checks += [aq[OCL_T] == dict_check]
