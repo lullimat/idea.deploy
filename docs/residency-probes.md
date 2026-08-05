@@ -83,6 +83,72 @@ second form. Worth fixing with a `__main__` guard in a stray-cleanup PR.
 
 ---
 
+## 2b. Findings from starting the work
+
+### pymetallic exposes enough — no Swift shim needed for synchronization
+
+The Swift bridge has 39 `@_cdecl` exports and **no `MTLEvent`, no `MTLFence`, no
+completion handlers**. It does have, per command buffer:
+
+- `metal_command_buffer_get_status` (`1=completed, 0=in-progress, -1=error`)
+- `metal_command_buffer_wait_until_completed`
+- `metal_blit_command_encoder_copy_buffer(src, src_off, dst, dst_off, size)` —
+  offset-based sub-range GPU copies
+- `metal_buffer_get_contents` — direct pointer into unified storage
+
+That is sufficient to replace `_sync_tenet()`: track in-flight command buffers
+with the ranges they touched, and wait only on those overlapping the target
+sub-range. The obstacle is in idpy, not the binding — `Tenet` keeps a single
+`last_command_buffer` (`idpy/Metal/Metal.py:117`), discarding exactly the
+history per-region waiting needs.
+
+**Ordering consequence:** Phase 1 is *not* a prerequisite of Phase 2b. Phase 2b
+is self-contained, so it goes first and alone. (The I/O-queue half of Phase 3 —
+`MTLIOCommandQueue` for storage→device — is a separate question and still
+likely needs the shim.)
+
+### Two latent defects found while implementing
+
+**Duplicate class definitions.** `IdpyMemory.py` defined `IdpyArrayCUDA`,
+`IdpyArrayOCL` and `IdpyArrayCTYPES` twice (lines 39-266 and 393-620,
+byte-identical). The second block silently shadowed the first, so ~230 lines
+were unreachable while reading as live — editing the first copy is a no-op.
+Removed in its own commit, verified behaviour-neutral against the baseline.
+`IdpyArrayMETAL` was never duplicated.
+
+**`IdpyArrayOCL` could not be sliced.** pyopencl constructs derived arrays via
+`self.__class__(..., _fast=True, ...)`; the idpy subclass's `__init__` did not
+accept unknown kwargs, so `arr[a:b]` raised
+`TypeError: unexpected keyword argument '_fast'`. Fixed by forwarding `**kwargs`
+to `super().__init__`.
+
+### Phase 2b status
+
+| backend | primitives | verified |
+|---------|-----------|----------|
+| OpenCL | `SubView`, `H2DSub`, `D2HSub`, `Sync`, real `async_` on `H2D` | **yes** — T1/T2/T3 exact on M1 Max |
+| CUDA | same surface, plus `_pinned_host_CUDA` | **no — needs the `id` machine** |
+| Metal | not yet; needs the `_sync_tenet()` rework first | — |
+| CTypes | not yet (trivially unified) | — |
+
+Test: `python -m idpy.IdpyCode.test_residency`.
+
+**CUDA-specific caveat now encoded in the API:** an async H2D only overlaps with
+compute when the host buffer is page-locked. `H2DSub(async_=True)` accepts a
+pageable array and stays correct, but will not overlap — `_pinned_host_CUDA()`
+exists for that. An API that claims async and behaves synchronously is the same
+failure mode as F2, so it is documented in the method rather than left to be
+discovered.
+
+**What T3 does and does not establish:** on a single in-order queue the runtime
+may order the copy after the kernel, so T3 shows the async partial write is
+*correct when issued against in-flight work* — not that the two overlapped.
+Proving overlap needs a second queue (OpenCL) or a non-default stream plus
+pinned memory (CUDA). That is P1's measurement; the two-queue variant is
+follow-up work.
+
+---
+
 ## 3. Standing constraints
 
 - **No CUDA on the development machine.** The CUDA path of the merged

@@ -59,14 +59,103 @@ if idpy_langs_sys[CUDA_T]:
             self.lang = CUDA_T
             self.tenet = tenet
 
-        def H2D(self, ary, async_=None):
+        def H2D(self, ary, async_=None, idpy_stream=None):
+            if async_:
+                return super().set_async(ary = ary, stream = idpy_stream)
             return super().set(ary = ary)
 
-        def D2H(self, ary = None, pagelocked = False, async_=None):
+        def D2H(self, ary = None, pagelocked = False, async_=None,
+                idpy_stream=None):
+            if async_:
+                return super().get_async(stream = idpy_stream, ary = ary)
             return super().get(ary = ary, pagelocked = pagelocked)
 
         def SetConst(self, const = 0., stream = None):
             super().fill(value = const, stream = stream)
+
+        '''
+        Residency primitives (Phase 2b). See docs/residency-probes.md, F2.
+
+        These exist to express the one operation the residency policy needs and
+        H2D/D2H cannot:
+
+            write bytes into slot k of a device buffer, asynchronously,
+            while the GPU reads slots j != k
+
+        H2D/D2H are whole-array and, before this change, silently discarded
+        'async_'. Their default behaviour is unchanged: async_ is opt-in.
+        '''
+        def _ByteOffset(self, start):
+            return int(start) * int(self.dtype.itemsize)
+
+        def _CheckRange(self, start, stop):
+            start, stop = int(start), int(stop)
+            if start < 0 or stop > int(self.size) or start >= stop:
+                raise ValueError(
+                    "Sub-range [%d, %d) out of bounds for array of size %d"
+                    % (start, stop, int(self.size))
+                )
+            return start, stop
+
+        def SubView(self, start, stop):
+            '''
+            Contiguous element sub-range sharing this array's storage. No copy:
+            writing the view writes the parent. 'base' keeps the parent alive so
+            the borrowed device pointer cannot outlive its allocation.
+            '''
+            start, stop = self._CheckRange(start, stop)
+            _sub = super().__getitem__(slice(start, stop))
+            return IdpyArrayCUDA(
+                shape = _sub.shape, dtype = _sub.dtype, tenet = self.tenet,
+                gpudata = _sub.gpudata, base = _sub,
+            )
+
+        def H2DSub(self, ary, start = 0, async_ = False, idpy_stream = None):
+            '''
+            Write 'ary' into this array starting at element 'start'.
+
+            NOTE on real overlap: CUDA only overlaps an async H2D with compute
+            when the host buffer is page-locked. A pageable numpy array is
+            accepted and correct here, but the copy will not actually overlap --
+            use PinnedHost() for that. An API that claims async and behaves
+            synchronously is precisely the failure mode F2 documents, so this is
+            stated rather than left to be discovered.
+            '''
+            ary = np.ascontiguousarray(ary, dtype = self.dtype)
+            start, _ = self._CheckRange(start, start + ary.size)
+            _dest = int(self.gpudata) + self._ByteOffset(start)
+            if async_:
+                cu_driver.memcpy_htod_async(_dest, ary, stream = idpy_stream)
+            else:
+                cu_driver.memcpy_htod(_dest, ary)
+            return ary
+
+        def D2HSub(self, start, stop, ary = None, async_ = False,
+                   idpy_stream = None):
+            '''Read elements [start, stop) into 'ary' (allocated when None).'''
+            start, stop = self._CheckRange(start, stop)
+            if ary is None:
+                ary = np.empty((stop - start,), dtype = self.dtype)
+            _src = int(self.gpudata) + self._ByteOffset(start)
+            if async_:
+                cu_driver.memcpy_dtoh_async(ary, _src, stream = idpy_stream)
+            else:
+                cu_driver.memcpy_dtoh(ary, _src)
+            return ary
+
+        def Sync(self, idpy_stream = None):
+            '''Wait on outstanding async work: one stream, or the whole context.'''
+            if idpy_stream is not None:
+                idpy_stream.synchronize()
+            else:
+                cu_driver.Context.synchronize()
+
+    def _pinned_host_CUDA(shape, dtype):
+        '''
+        Page-locked host buffer. Required for H2DSub(async_=True) to genuinely
+        overlap with compute instead of degrading to a synchronous copy.
+        '''
+        return cu_driver.pagelocked_empty(shape, dtype)
 
     def _on_device_CUDA(ary, tenet):
         _swap_array = IdpyArrayCUDA(shape = ary.shape,
@@ -118,28 +207,95 @@ if idpy_langs_sys[OCL_T]:
                      order = 'C',
                      allocator = None, data = None,
                      offset = 0, strides = None,
-                     events = None):
+                     events = None, **kwargs):
             # pyopencl ReductionKernel: Array(cq, shape, dtype, ...)
             if isinstance(shape, (cl.CommandQueue, cl.Context)):
                 queue, shape = shape, queue
+            # pyopencl builds derived arrays (slices, reshapes) via
+            # self.__class__(..., _fast=True, ...). Without forwarding those
+            # private kwargs, slicing an IdpyArrayOCL raises TypeError.
             super().__init__(cq = queue, shape = shape,
                              dtype = dtype, order = order,
                              allocator = allocator, data = data,
                              offset = offset, strides = strides,
-                             events = events)
+                             events = events, **kwargs)
 
             self.lang, self.queue = OCL_T, queue
             # LBM-style ownership: queue is the OpenCL Tenet
             self.tenet = queue
 
-        def H2D(self, ary, async_=None):
-            return super().set(ary = ary, queue = self.queue)
+        def H2D(self, ary, async_=None, idpy_stream=None):
+            _queue = self.queue if idpy_stream is None else idpy_stream
+            return super().set(ary = ary, queue = _queue,
+                               async_ = bool(async_))
 
-        def D2H(self, ary = None, async_=None):
-            return super().get(queue = self.queue, ary = ary)
+        def D2H(self, ary = None, async_=None, idpy_stream=None):
+            _queue = self.queue if idpy_stream is None else idpy_stream
+            return super().get(queue = _queue, ary = ary)
 
         def SetConst(self, const = 0., wait_for = None):
             super().fill(value = const, queue = self.queue, wait_for = wait_for)
+
+        '''
+        Residency primitives (Phase 2b) -- mirror of the CUDA surface above.
+        See docs/residency-probes.md, F2. pyopencl's own Array.set already
+        accepts 'async_'; H2D discarded it until now.
+        '''
+        def _ByteOffset(self, start):
+            return int(start) * int(self.dtype.itemsize)
+
+        def _CheckRange(self, start, stop):
+            start, stop = int(start), int(stop)
+            if start < 0 or stop > int(self.size) or start >= stop:
+                raise ValueError(
+                    "Sub-range [%d, %d) out of bounds for array of size %d"
+                    % (start, stop, int(self.size))
+                )
+            return start, stop
+
+        def SubView(self, start, stop):
+            '''
+            Contiguous element sub-range sharing this array's storage.
+
+            Built directly from base_data + byte offset rather than by slicing,
+            so it does not depend on pyopencl's internal derived-array protocol.
+            '''
+            start, stop = self._CheckRange(start, stop)
+            return IdpyArrayOCL(
+                shape = (stop - start,), dtype = self.dtype, queue = self.queue,
+                data = self.base_data,
+                offset = int(self.offset) + self._ByteOffset(start),
+            )
+
+        def H2DSub(self, ary, start = 0, async_ = False, idpy_stream = None):
+            '''Write 'ary' into this array starting at element 'start'.'''
+            ary = np.ascontiguousarray(ary, dtype = self.dtype)
+            start, _ = self._CheckRange(start, start + ary.size)
+            _queue = self.queue if idpy_stream is None else idpy_stream
+            return cl.enqueue_copy(
+                _queue, self.base_data, ary,
+                dst_offset = int(self.offset) + self._ByteOffset(start),
+                is_blocking = not async_,
+            )
+
+        def D2HSub(self, start, stop, ary = None, async_ = False,
+                   idpy_stream = None):
+            '''Read elements [start, stop) into 'ary' (allocated when None).'''
+            start, stop = self._CheckRange(start, stop)
+            if ary is None:
+                ary = np.empty((stop - start,), dtype = self.dtype)
+            _queue = self.queue if idpy_stream is None else idpy_stream
+            _evt = cl.enqueue_copy(
+                _queue, ary, self.base_data,
+                src_offset = int(self.offset) + self._ByteOffset(start),
+                is_blocking = not async_,
+            )
+            return ary if not async_ else (ary, _evt)
+
+        def Sync(self, idpy_stream = None):
+            '''Wait on outstanding async work on this array's queue.'''
+            _queue = self.queue if idpy_stream is None else idpy_stream
+            _queue.finish()
 
     def _on_device_OCL(ary, tenet):
         _swap_array = IdpyArrayOCL(shape = ary.shape,
