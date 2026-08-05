@@ -390,8 +390,28 @@ ratio alone would not.
 | P4 write-back | 32 blocks reached the file (read back from the file, not the cache) |
 | P5 LRU vs FIFO | `max|lru-fifo| = 0` |
 
-Identical on CTypes, OpenCL and Metal — including the hit/miss counts, which is
-itself the evidence that the policy is backend-independent.
+**Identical on all four backends across both machines** — including the hit/miss
+counts, which is itself the evidence that the policy is backend-independent:
+
+| backend | host | P1 | P2 counts |
+|---|---|---|---|
+| CTypes | M1 Max, `id` | exact | 62 / 34 |
+| CUDA | `id` | exact | 62 / 34 |
+| OpenCL | M1 Max, `id` | exact | 62 / 34 |
+| Metal | M1 Max | exact | 62 / 34 |
+
+The counts are a property of the policy rather than the hardware, so agreement
+to the integer across four backends is a stronger statement than P1 alone: a
+backend whose primitives diverged could still produce correct output by
+reloading blocks it should have retained, and the count would give it away.
+
+Two CUDA-specific risks were carried into that run and both cleared. `SubView`
+had only ever been exercised transiently; `ResidentCache` holds four views of one
+buffer for an entire sweep, relying on `base=` to keep the owning allocation
+alive — pycuda's base chain holds. And `_WriteBack` calls `D2HSub` on a slot that
+is itself a `SubView`, so byte offsets have to compose through two levels; the
+sweep also reads a single element from the end of a view. Both compound paths are
+correct.
 
 Two honest notes:
 
