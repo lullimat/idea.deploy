@@ -7,4 +7,11 @@
 *.err
 *.out
 *.vscode/
+
+# docs/planning is a separate git repository (idea.deploy-planning.git) and
+# docs/planning-safe is a working copy of it. Never track either from here:
+# committing them would embed a gitlink pointing at a repo this one cannot resolve.
+docs/planning/
+docs/planning-safe/
+
 !.gitignore
