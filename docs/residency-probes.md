@@ -346,6 +346,75 @@ module, and are invisible on a host without Metal.
 
 ---
 
+## 2f. Phase 2: the residency policy, and the reuse question answered
+
+`idpy/IdpyCode/IdpyResidency.py` is the policy layer over the Phase 2b
+primitives: `BackingStore` (`MemMapStore` via `numpy.memmap` — mmap plus the OS
+page cache — and `ArrayStore`), and `ResidentCache`, a fixed set of device slots
+with LRU or FIFO eviction, dirty tracking, write-back and pinning.
+
+**The file contains no per-backend branches.** It is written entirely against
+`SubView` / `H2DSub` / `D2HSub` / `Sync`. That is the asymmetry the design is
+built around, now demonstrated rather than asserted: the primitives underneath
+are genuinely different per backend — staged async copy on CUDA, a second queue
+on OpenCL, range-scoped waiting against in-flight command buffers on Metal,
+plain numpy on CTypes — while the policy above them is one program.
+
+### The open question about reuse is answered: halos
+
+§7 asked whether the lattice case has any *eviction* story or only a streaming
+one — if every block is touched once, no policy beats any other and the eviction
+logic is never exercised. **It has reuse, and halos are where it comes from.**
+Computing block *b* of a 3-point stencil needs *b-1*, *b*, *b+1*; the next step
+needs *b*, *b+1*, *b+2*. Two of every three acquires are already resident.
+
+That makes the traffic exactly predictable, which turns the reuse check into a
+real test rather than an observation:
+
+    misses = 3 + (n_blocks - 1) = n_blocks + 2      (3 cold, then one new block per step)
+    hits   = 2 * (n_blocks - 1)
+
+A cache that evicted the wrong block would still return correct numbers — the
+data simply gets reloaded — so only the exact count catches a policy bug. The
+ratio alone would not.
+
+### Result
+
+32 MiB lattice over a 4 MiB resident set (**8x**), 32 blocks of 1 MiB, 4 slots:
+
+| check | result |
+|---|---|
+| P1 sweep vs whole-lattice numpy reference | `max|out-ref| = 0` |
+| P2 reuse | **62 hits / 34 misses, exactly as predicted**; hit rate 0.646, 30 evictions |
+| P3 pinning guard | raises rather than evicting a block still in use |
+| P4 write-back | 32 blocks reached the file (read back from the file, not the cache) |
+| P5 LRU vs FIFO | `max|lru-fifo| = 0` |
+
+Identical on CTypes, OpenCL and Metal — including the hit/miss counts, which is
+itself the evidence that the policy is backend-independent.
+
+Two honest notes:
+
+- **"Larger than RAM" was substituted with "larger than the resident set".** A
+  test suite cannot honestly arrange the former, and it is not the property that
+  matters: what matters is that the dataset exceeds the device-resident working
+  set, forcing eviction and write-back. On CTypes device memory *is* RAM, so the
+  cache is exactly the binding constraint.
+- **Compute runs host-side through the primitives**, which is what keeps the test
+  free of per-backend branches. Handing slot views to a kernel is possible — they
+  are ordinary Idpy arrays — but a halo spanning three separate slots is a layout
+  problem belonging to the real lattice work, not to the policy layer.
+
+### Placement deviation
+
+The design sketch put this interface *on* `Tenet`. It is a free module taking
+`tenet=` instead, matching `IdpyMemory.Array` / `Zeros` / `OnDevice` and keeping
+`Tenet` — which every backend must implement — free of a dependency on policy
+code. The capability is still per-tenet; only the spelling differs. Recorded
+because it is a deliberate departure from §3.
+
+---
+
 ## 3. Standing constraints
 
 - ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`
