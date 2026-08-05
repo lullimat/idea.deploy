@@ -358,8 +358,16 @@ if idpy_langs_sys[CTYPES_T]:
             if obj is None: return
             self.lang = getattr(obj, 'lang', None)
             self.tenet = getattr(obj, 'tenet', None)
-            self.H2D = getattr(obj, 'H2D', None)
-            self.D2H = getattr(obj, 'D2H', None)
+            '''
+            H2D/D2H are deliberately NOT copied from 'obj'.
+
+            They are class methods; copying them installed the *parent's bound
+            method* as an instance attribute on every derived array, so a slice's
+            .D2H() returned the whole parent rather than the slice. Harmless
+            while arrays were only ever used whole, which is why it survived --
+            it surfaces the moment sub-ranges exist. Leaving them off lets normal
+            attribute lookup bind each method to the array it is called on.
+            '''
 
         def H2D(self, ary, async_=None):
             return super().put(indices=np.arange(len(ary.ravel())), values=ary)
@@ -371,7 +379,50 @@ if idpy_langs_sys[CTYPES_T]:
                 ary = super().copy()
 
         def SetConst(self, const=0.):
-            super().fill(const)            
+            super().fill(const)
+
+        '''
+        Residency primitives (Phase 2b), CTypes lowering.
+
+        Host memory is the device here, so these are numpy operations and every
+        synchronization concept is vacuous. They exist so that code written
+        against the residency interface runs unchanged on the CPU -- which is
+        what makes CTypes usable as the reference implementation for the
+        policy layer, where the eviction logic can be validated with no vendor
+        machinery in the way.
+        '''
+        def _CheckRange(self, start, stop):
+            start, stop = int(start), int(stop)
+            if start < 0 or stop > int(self.size) or start >= stop:
+                raise ValueError(
+                    "Sub-range [%d, %d) out of bounds for array of size %d"
+                    % (start, stop, int(self.size))
+                )
+            return start, stop
+
+        def SubView(self, start, stop):
+            '''Aliasing sub-range: numpy slicing already shares storage.'''
+            start, stop = self._CheckRange(start, stop)
+            return self[start:stop]
+
+        def H2DSub(self, ary, start = 0, async_ = False, idpy_stream = None):
+            ary = np.ascontiguousarray(ary, dtype = self.dtype)
+            start, stop = self._CheckRange(start, start + ary.size)
+            np.copyto(np.asarray(self)[start:stop], ary)
+            return ary
+
+        def D2HSub(self, start, stop, ary = None, async_ = False,
+                   idpy_stream = None):
+            start, stop = self._CheckRange(start, stop)
+            _src = np.asarray(self)[start:stop]
+            if ary is None:
+                return _src.copy()
+            np.copyto(ary, _src)
+            return ary
+
+        def Sync(self, idpy_stream = None):
+            '''Nothing executes asynchronously on this backend.'''
+            return None
 
 
     def _on_device_CTYPES(ary, tenet=None):

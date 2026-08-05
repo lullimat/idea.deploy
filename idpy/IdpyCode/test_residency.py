@@ -76,7 +76,7 @@ from idpy.Utils.CustomTypes import CustomTypes
 # Backends carrying the Phase 2b primitives. Metal joined once its
 # drain-on-every-host-touch was replaced by range-scoped waiting (finding F2).
 # CTypes is the remaining lowering and is trivially unified.
-_RESIDENCY_LANGS = (CUDA_T, OCL_T, METAL_T)
+_RESIDENCY_LANGS = (CUDA_T, OCL_T, METAL_T, CTYPES_T)
 
 
 class K_ScaleLowerHalf(IdpyKernel):
