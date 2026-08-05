@@ -126,8 +126,8 @@ to `super().__init__`.
 
 | backend | primitives | verified |
 |---------|-----------|----------|
-| OpenCL | `SubView`, `H2DSub`, `D2HSub`, `Sync`, real `async_` on `H2D` | **yes** — T1/T2/T3 exact on M1 Max |
-| CUDA | same surface, plus `_pinned_host_CUDA` | **no — needs the `id` machine** |
+| OpenCL | `SubView`, `H2DSub`, `D2HSub`, `Sync`, real `async_` on `H2D` | **yes** — T1/T2/T3 exact on M1 Max *and* on RTX 5060 |
+| CUDA | same surface, plus `_pinned_host_CUDA` | **yes** — T1/T2/T3 exact on RTX 5060 |
 | Metal | not yet; needs the `_sync_tenet()` rework first | — |
 | CTypes | not yet (trivially unified) | — |
 
@@ -149,16 +149,61 @@ follow-up work.
 
 ---
 
+## 2c. CUDA validation run — both debts cleared
+
+**Date:** 2026-08-05 **Host:** `id` (ssh alias), Linux, AMD Ryzen 5 3600
+**GPUs:** 2x NVIDIA GeForce RTX 5060, ~8 GB each, driver 580.159.03 / CUDA (13,1,0)
+**Backends live there:** pycuda, pyopencl, ctypes (no Metal)
+
+| suite | result |
+|-------|--------|
+| `test_shared` (static **and** dynamic) | **CUDA exact**, `max|out-ref| = 0`; OpenCL exact; Metal skipped |
+| `test_residency` T1/T2/T3 | **CUDA exact** on all three; OpenCL exact on all three |
+| `idpy.test` | **41 tests, OK** (41 not 40 — one more backend class runs with CUDA present) |
+| `idpy.test_convolution` | **21 tests, OK**, 3 skipped (Metal); Mac skips 7 (CUDA) |
+| `idpy.LBM.test` | 5 tests, same single pre-existing `Missing 'tau'` error |
+
+Three things this settles:
+
+1. **The `idpy_shared`/`idpy_sync` CUDA codegen from PR #4 is now runtime-verified**,
+   both the static `__shared__` and the dynamic `extern __shared__` + launch-bytes
+   paths. It was codegen-only since it merged.
+2. **The Phase 2b CUDA primitives are verified.** `SubView` was the flagged risk —
+   whether `IdpyArrayCUDA(gpudata=..., base=...)` would borrow the pointer or
+   allocate a new one. pycuda honours `gpudata`, so the view aliases correctly
+   (T2 exact). `memcpy_htod_async` with an integer destination also works.
+3. **The `IdpyMemory.py` de-duplication is validated on the CUDA path**, which the
+   Mac cannot exercise (`TestIdpyArrayCU` passed).
+
+Two facts worth carrying forward:
+
+- **FP64 is available on the RTX 5060** (`Double: 63`); the LBM suite kept
+  `double` throughout rather than downcasting. The Mac downcasts everything to
+  fp32 (no fp64 on Apple GPUs). So `id` is the only host where fp64 physics runs
+  natively — relevant to any cross-backend numerical-agreement claim, which must
+  either fix precision or state the asymmetry.
+- **`id` has a working OpenCL CPU device** (POCL, `pthread-AMD Ryzen 5 3600`),
+  which the Mac does not ("There is some issue for pyopencl to list cpu's"). That
+  is a fourth execution target available for cross-backend verification.
+
+**T3 caveat is unchanged on CUDA:** on the default stream the runtime may order
+the copy after the kernel, so this remains correctness-under-concurrent-issue,
+not demonstrated overlap. With two GPUs and real streams available, the stronger
+two-stream + pinned-memory variant is now buildable — see §4.
+
+---
+
 ## 3. Standing constraints
 
-- **No CUDA on the development machine.** The CUDA path of the merged
-  shared-memory layer (`e49f997`) is codegen-only and still unvalidated at
-  runtime; Phase 2b's acceptance criterion ("verified correct on CUDA and
-  Metal") inherits the same gap. Two CUDA-shaped debts now outstanding —
-  settle via borrowed hardware or a cloud instance, or record the deferral
-  explicitly.
+- ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`
+  (§2c). The constraint that remains is workflow, not capability: CUDA code is
+  still *written* on a machine that cannot run it, so anything CUDA-only stays
+  unverified until an `id` round-trip. Say so explicitly rather than implying it
+  works.
+- **8 GB VRAM per GPU on `id`.** Residency tests must not assume more; that
+  ceiling is also what makes it a genuine larger-than-device-memory testbed.
 - **No CI.** The four suites above are the entire safety net for Phase 1's
-  refactor, and they must be run by hand.
+  refactor, and they must be run by hand — on two machines to cover all backends.
 - **`docs/planning/` is a separate git repository** with its own remote
   (`idea.deploy-planning.git`); it is deliberately not tracked by this repo.
 
@@ -173,3 +218,9 @@ follow-up work.
 - **P3** — determine whether the target kernels need more than one dynamic
   shared buffer. Evaluate against the **lattice** kernels (tiled stencil/halo)
   first; the MoE answer only matters if F4 is reopened.
+- **T3-overlap** (new, unblocked by §2c) — the two-stream variant that measures
+  *demonstrated* overlap rather than correctness under concurrent issue: a
+  non-default CUDA stream plus `_pinned_host_CUDA()`, or a second OpenCL queue.
+  This is the honest version of the Phase 2b acceptance criterion and it feeds
+  directly into P1's bandwidth measurement. `id` has two GPUs and real streams,
+  so it can now be built and run.

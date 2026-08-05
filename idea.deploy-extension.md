@@ -76,6 +76,14 @@ On Metal the obstacle is not a missing feature but an actively conflicting desig
 
 is **structurally excluded** on the Metal path, because the write path's first action is to serialize against all outstanding GPU work. Zero-copy was bought at the price of concurrency. Enabling residency streaming means replacing drain-on-touch with fence/event-scoped synchronization — a change to the Metal memory model, not an addition to it. Budget for it accordingly; it is a prerequisite of Phase 3's Metal row, not a detail of it.
 
+### CUDA runtime validation
+
+As of 2026-08-05 the CUDA paths of both the merged shared-memory layer and the
+Phase 2b residency primitives are **runtime-verified** on a dual RTX 5060 host,
+not codegen-only. See `docs/residency-probes.md` §2c. Note the precision
+asymmetry that run exposed: fp64 is native there and absent on Apple GPUs, so
+any cross-backend numerical-agreement claim must fix precision or state it.
+
 ### Known constraint
 
 `IdpyKernel.SetDynamicSharedMemory` docstring: portability follows "the lowest common denominator (CUDA's single `extern __shared__` region), so at most one buffer is allowed." See probe **P3**.
