@@ -36,6 +36,8 @@ as long as the different meta-declarations are consistent
 '''
 
 import numpy as np
+import re
+import warnings
 from collections import defaultdict
 from pathlib import Path
 import sys
@@ -57,21 +59,162 @@ from idpy.Utils.SimpleTiming import SimpleTiming
 _C_INT64_MAX = 0x7fffffffffffffff
 
 
-def _format_c_macro_value(value, lang=None):
+class IdpyConstantPrecisionWarning(UserWarning):
+    '''
+    A floating-point constant was emitted with no stated precision.
+
+    A bare Python float reaches the generated source as a bare literal, which is
+    a *double* in C. Surrounding fp32 arithmetic then promotes: measured at ~208x
+    slower on a GeForce part (1/64-rate fp64 plus a float<->double conversion per
+    operation), and -- worse -- it makes the same kernel compute fp64
+    intermediates on CUDA and fp32 on Apple, where there is no fp64 to promote
+    to. That is a silent cross-backend numerical divergence.
+
+    Silence it by saying what you mean, either way:
+        constants_types={'X': 'FType'}   follows custom_types, including the
+                                         runtime double->float downcast that
+                                         CheckOCLFP/CheckMetalFP apply on
+                                         devices without fp64
+        constants['X'] = np.float32(v)   pinned to fp32 on every device
+    '''
+
+
+_UNTYPED_FLOAT_WARNED = set()
+
+
+def _warn_untyped_float(name, value):
+    _key = (str(name), str(value))
+    if _key in _UNTYPED_FLOAT_WARNED:
+        return
+    _UNTYPED_FLOAT_WARNED.add(_key)
+    warnings.warn(
+        "constant %s = %s has no stated precision and will be emitted as a C "
+        "double literal; fp32 arithmetic touching it will promote. Declare it "
+        "with constants_types={'%s': '<type alias>'} or pass np.float32(...)."
+        % (name, value, name),
+        IdpyConstantPrecisionWarning, stacklevel=3,
+    )
+
+
+def _float_suffix_for(ctype):
+    '''
+    C literal suffix for a resolved type name, or None when it says nothing.
+
+    Only 'float' changes the literal; double is C's default for an unsuffixed
+    one. An unrecognised type returns None rather than guessing -- a custom
+    alias resolving to something exotic must not silently acquire an 'f'.
+    '''
+    if ctype is None:
+        return None
+    _c = str(ctype).strip()
+    if _c == 'float':
+        return 'f'
+    if _c in ('double', 'long double'):
+        return ''
+    return None
+
+
+'''
+An unsuffixed C floating literal, for the homogenization pass.
+
+Matches anything C would read as a floating constant -- 0.5, 1., .5, 1e-5,
+1.5E+3 -- and nothing else:
+
+  (?<![\\w.])   not preceded by an identifier character or a dot, so 'v1_0',
+                'a.b' and the '1e5' inside a hex literal like 0x1e5 are safe
+  (?![\\w.])    not followed by one either, so an already-suffixed 0.5f / 1.0L
+                is skipped and cannot be double-suffixed
+
+An integer with neither dot nor exponent is deliberately not matched: it is an
+int in C and must stay one, since array indices and loop bounds are written the
+same way.
+'''
+_C_FLOAT_LITERAL_RE = re.compile(
+    r'(?<![\w.])((?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)(?![\w.])'
+)
+
+
+def _homogenize_float_literals(code, suffix, declared_names=()):
+    '''
+    Give every unsuffixed floating literal in 'code' the same precision.
+
+    '#define' lines are included, because leaving them out would not actually
+    homogenize anything: an LBM collision body multiplies by CM2 and OMEGA far
+    more often than it writes a bare 0.5, and a double-valued macro promotes the
+    expression just as effectively as a double-valued literal.
+
+    'declared_names' are exempt -- a constant given an explicit type through
+    constants_types keeps it, so an intentional double survives a homogenized
+    kernel. Every other preprocessor line (#include, the collective-memory
+    macros, typedef-style defines) carries no numeric literal and is left alone
+    by the pattern regardless.
+
+    Not reachable this way: constants emitted as '-D' compiler flags under
+    declare_macros='macro'. They never appear in the source, so constants_types
+    is the only lever there.
+    '''
+    if not suffix:
+        return code
+    _out = []
+    for _line in code.split('\n'):
+        _stripped = _line.lstrip()
+        if _stripped.startswith('#define'):
+            _parts = _stripped.split()
+            if len(_parts) > 1 and _parts[1] in declared_names:
+                _out.append(_line)
+                continue
+        elif _stripped.startswith('#'):
+            _out.append(_line)
+            continue
+        _out.append(
+            _C_FLOAT_LITERAL_RE.sub(lambda _m: _m.group(0) + suffix, _line)
+        )
+    return '\n'.join(_out)
+
+
+def _format_c_macro_value(value, lang=None, ctype=None, name=None):
     '''
     Format a Python constant for #define / -D emission.
+
     Values above signed int64 max (e.g. ID_RANDMAX_MMIX = 2^64-1) need an
     explicit unsigned suffix or compilers warn / mis-parse the literal.
+
+    Floating-point values take their precision from, in order:
+      1. 'ctype' -- the constant's declared type, already resolved through
+         custom_types by IdpyKernel.ConstantCType. This is the form that tracks
+         a runtime double->float downcast.
+      2. the value's own numpy dtype, so np.float32(x) pins fp32 with no
+         further ceremony.
+      3. nothing, in which case C's default (double) applies and a warning
+         fires -- see IdpyConstantPrecisionWarning.
+
+    A str value is passed through verbatim, which is the escape hatch for a
+    literal that has to be spelled exactly ('0.5f', '1e-5L', a macro call).
     '''
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         return '1' if value else '0'
-    if isinstance(value, int):
-        if value > _C_INT64_MAX:
+    # np.integer is not a subclass of int, so it must be named explicitly or
+    # large numpy integers would miss the unsigned suffix below.
+    if isinstance(value, (int, np.integer)):
+        _v = int(value)
+        if _v > _C_INT64_MAX:
             # Metal has no long long; unsigned long is 64-bit.
             if lang == METAL_T:
-                return str(value) + 'UL'
-            return str(value) + 'ULL'
-        return str(value)
+                return str(_v) + 'UL'
+            return str(_v) + 'ULL'
+        return str(_v)
+    if isinstance(value, (float, np.floating)):
+        _suffix = _float_suffix_for(ctype)
+        if _suffix is None:
+            if isinstance(value, np.float32):
+                _suffix = 'f'
+            else:
+                _suffix = ''
+                # np.float64 states 'double' as explicitly as np.float32 states
+                # 'float'; only a bare Python float leaves it unsaid.
+                if not isinstance(value, np.floating):
+                    _warn_untyped_float(name, value)
+        return str(value) + _suffix
     return str(value)
 
 if idpy_langs_sys[CUDA_T]:
@@ -122,7 +265,8 @@ class IdpyKernel:
     kernel
     - Need to discuss somewhere the difference between CUDA grid and OpenCL
     '''
-    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+    def __init__(self, custom_types = {}, constants = {}, constants_types = {},
+                 float_literals = None, f_classes = [],
                  gthread_id_code = 'g_tid', lthread_id_code = 'l_tid',
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
                  optimizer_flag = None, declare_types = None, declare_macros = None,
@@ -146,6 +290,45 @@ class IdpyKernel:
         
         self.custom_types, self.constants = custom_types, constants
         '''
+        Declared precision for constants: {constant_name: type_alias}.
+
+        The alias is resolved through custom_types at EMISSION time, not here,
+        which is the whole point: CheckOCLFP/CheckMetalFP rewrite custom_types
+        double->float on devices without fp64, and a constant declared 'FType'
+        follows that downcast. Pinning a constant instead -- np.float32(x) in
+        'constants' -- is the other valid choice, and says something different.
+        '''
+        self.constants_types = (
+            dict(constants_types) if constants_types else {}
+        )
+        '''
+        Homogenize every floating literal in the generated body to one
+        precision. A type alias ('FType') or a concrete C type ('float'), or
+        None to leave the source exactly as generated.
+
+        Why a post-generation pass rather than a scope around emission: kernel
+        bodies are built in __init__ -- LBM's sympy collision and equilibrium
+        expressions are already strings by the time Code() runs -- so there is
+        no live sympy expression left to print differently. Rewriting the
+        emitted text is the only chokepoint that reaches all of it, and it also
+        catches hand-written metalanguage literals like '0.5 * F[d]', which a
+        sympy-aware printer never would.
+
+        What this is for: _codify_sympy is str(expr) after .evalf(), so sympy
+        Rationals reach the source as bare decimals -- 0.333333333333333 for
+        1/3. Those are DOUBLE literals in C. In a kernel whose arrays are float
+        they promote every expression touching them, and the result differs by
+        backend: a device with fp64 evaluates in double, while Apple, having
+        none, demotes to float. Same source, different arithmetic.
+
+        Default None keeps existing output byte-identical, so published results
+        stay reproducible until a kernel opts in. Note that opting in DOES
+        change numerics on fp64 devices: double intermediates are more accurate,
+        merely unavailable on Apple, so consistency and accuracy genuinely
+        trade against each other here. Enabling it buys consistency and speed.
+        '''
+        self.float_literals = float_literals
+        '''
         Need to check the type of optimizer_flag
         '''
         self.optimizer_flag = True if optimizer_flag is None else optimizer_flag
@@ -162,6 +345,41 @@ class IdpyKernel:
         # defaults so the shared default object cannot be mutated.
         self.headers_files = (
             list(headers_files) if headers_files is not None else None
+        )
+        '''
+        Insertion point (2): static code linked into the kernel compile unit.
+
+        These three were validated and then dropped on the floor -- a caller who
+        passed objects_files got a type check and silence. They are stored and
+        used now (Phase 4). Each maps to a different mechanism, and each has a
+        different reach across backends:
+
+          definitions_files  source text injected into the compile unit. Works
+                             everywhere, since every backend compiles from a
+                             source string. Entries may be paths, or objects
+                             exposing Code(lang) -- which is how an IdpyKernel
+                             or IdpyFunction gets pulled into another kernel's
+                             compile unit.
+          include_dirs       compiler search paths. CUDA (SourceModule's own
+                             include_dirs), OpenCL and CTypes ('-I'). Not
+                             expressible on Metal.
+          objects_files      pre-compiled native objects to link. Only CTypes
+                             has a native link step; CUDA compiles to cubin
+                             through nvcc, and OpenCL and Metal build from
+                             source with no object linking at all.
+
+        Where a mechanism has no meaning on a backend it now raises rather than
+        being ignored -- see CheckLinkage. Silently accepting an argument that
+        cannot work is what this phase exists to remove.
+        '''
+        self.include_dirs = (
+            list(include_dirs) if include_dirs is not None else None
+        )
+        self.definitions_files = (
+            list(definitions_files) if definitions_files is not None else None
+        )
+        self.objects_files = (
+            list(objects_files) if objects_files is not None else None
         )
         self.declarations = {}
 
@@ -299,7 +517,9 @@ class IdpyKernel:
                 for const in self.constants:
                     self.macros.append(
                         "-D " + const + "=" +
-                        _format_c_macro_value(self.constants[const], lang)
+                        _format_c_macro_value(self.constants[const], lang,
+                                              ctype=self.ConstantCType(const),
+                                              name=const)
                     )
                 
             # Types
@@ -320,7 +540,9 @@ class IdpyKernel:
                 for const in self.constants:
                     self.macros += (
                         " -D " + const + "=" +
-                        _format_c_macro_value(self.constants[const], lang)
+                        _format_c_macro_value(self.constants[const], lang,
+                                              ctype=self.ConstantCType(const),
+                                              name=const)
                     )
                 
             # Types
@@ -331,10 +553,15 @@ class IdpyKernel:
 
             if self.optimizer_flag is False:
                 self.macros += " -cl-opt-disable"
-                
+
+            # Insertion point (2): header search paths for '#include'
+            if self.include_dirs:
+                for _inc in self.include_dirs:
+                    self.macros += " -I " + str(_inc)
+
             ##if self.macros == '':
             ##    self.macros = None
-                
+
             return self.macros
 
         if lang == CTYPES_T:
@@ -344,7 +571,9 @@ class IdpyKernel:
                 for const in self.constants:
                     self.macros += (
                         " -D " + const + "=" +
-                        _format_c_macro_value(self.constants[const], lang)
+                        _format_c_macro_value(self.constants[const], lang,
+                                              ctype=self.ConstantCType(const),
+                                              name=const)
                     )
                 
             # Types
@@ -361,10 +590,24 @@ class IdpyKernel:
             '''
             if self.headers_files is not None and 'math.h' in self.headers_files:
                 self.macros += " -lm"
-                
+
+            '''
+            Insertion point (2). CTypes is the only backend with a native link
+            step, so it is the only one where objects_files means anything.
+            Both are appended to the compile string, which HostModule splits on
+            spaces and hands to the compiler -- object files may appear anywhere
+            in a gcc/clang argument vector, so position ahead of '-o' is fine.
+            '''
+            if self.include_dirs:
+                for _inc in self.include_dirs:
+                    self.macros += " -I " + str(_inc)
+            if self.objects_files:
+                for _obj in self.objects_files:
+                    self.macros += " " + str(_obj)
+
             if self.macros == '':
                 self.macros = None
-                
+
             return self.macros
 
         if lang == METAL_T:
@@ -529,11 +772,44 @@ class IdpyKernel:
         for c_macro in self.constants:
             _swap += (
                 '#define ' + c_macro + ' ' +
-                _format_c_macro_value(self.constants[c_macro], lang) + '\n'
+                _format_c_macro_value(self.constants[c_macro], lang,
+                                      ctype=self.ConstantCType(c_macro),
+                                      name=c_macro) + '\n'
             )
         _swap += '\n'
         
         return _swap    
+
+    def FloatLiteralSuffix(self):
+        '''
+        The literal suffix implied by float_literals, resolved through
+        custom_types at emission time so it follows the double->float downcast
+        applied on devices without fp64 -- exactly like ConstantCType.
+
+        Returns '' for a double target (a bare literal is already double, so
+        the pass is a no-op) and None when nothing was requested.
+        '''
+        if self.float_literals is None:
+            return None
+        _ctype = self.custom_types.get(self.float_literals, self.float_literals)
+        return _float_suffix_for(_ctype)
+
+    def ConstantCType(self, name):
+        '''
+        Resolve a constant's declared type alias to a concrete C type, or None
+        when it was not declared.
+
+        Resolution happens here rather than at construction so that a runtime
+        rewrite of custom_types -- the double->float downcast applied on devices
+        without fp64 -- is picked up. A constant declared 'FType' is emitted as
+        a float literal on Apple and a double literal on a card with fp64, which
+        is the behaviour that keeps one kernel numerically consistent with its
+        own arrays across backends.
+        '''
+        _alias = self.constants_types.get(name)
+        if _alias is None:
+            return None
+        return self.custom_types.get(_alias, _alias)
 
     def IncludeHeaders(self):
         _swap = ''
@@ -541,6 +817,64 @@ class IdpyKernel:
             _swap += '#include <' + _h_file + '>\n'
         _swap += '\n'
         return _swap
+
+    def CheckLinkage(self, lang = None):
+        '''
+        Refuse a linkage mechanism the target cannot express.
+
+        The point of Phase 4 is that these parameters stop being silently
+        discarded, so an unusable combination has to say so. Raising here rather
+        than at the compile site means the failure arrives on Code(), before any
+        backend has been asked to build something that could not have worked.
+        '''
+        if self.objects_files and lang != CTYPES_T:
+            raise NotImplementedError(
+                "objects_files is only supported on CTYPES_T: it needs a native "
+                "link step. CUDA compiles to cubin through nvcc, and OpenCL and "
+                "Metal build from source with no object linking. Use "
+                "definitions_files to inject source into the compile unit "
+                "instead."
+            )
+        if self.include_dirs and lang == METAL_T:
+            raise NotImplementedError(
+                "include_dirs cannot be expressed on Metal: the library is built "
+                "from a source string with no search-path option. Use "
+                "definitions_files to inject the contents directly."
+            )
+
+    def IncludeDefinitions(self, lang = None):
+        '''
+        Inject source into this kernel's compile unit.
+
+        An entry is either a path, whose text is read verbatim, or an object
+        exposing Code(lang) -- an IdpyFunction, or another IdpyKernel. A kernel
+        is injected WITHOUT its preamble, so its headers, macros and typedefs do
+        not collide with this one's; duplicate typedefs are an error in C99 and
+        would otherwise make the mechanism unusable for exactly the case it
+        exists to serve.
+
+        Consequence worth knowing: the compile unit belongs to the top-level
+        kernel. An injected kernel's own definitions_files are NOT pulled in
+        transitively -- declare everything the unit needs on the kernel that
+        owns it. Nesting would otherwise duplicate injections with no way to
+        deduplicate them across independently-built sources.
+        '''
+        if not self.definitions_files:
+            return ''
+        _swap = ''
+        for _d_file in self.definitions_files:
+            _code_fn = getattr(_d_file, 'Code', None)
+            if callable(_code_fn):
+                try:
+                    _swap += _code_fn(lang = lang, preamble = False)
+                except TypeError:
+                    # IdpyFunction emits a bare function: no preamble to skip
+                    _swap += _code_fn(lang = lang)
+            else:
+                with open(str(_d_file), 'r') as _fh:
+                    _swap += _fh.read()
+            _swap += '\n'
+        return _swap + '\n'
 
     def CollectiveMacros(self, lang = None):
         '''
@@ -603,14 +937,24 @@ class IdpyKernel:
         return ("extern " + self.AddrQ[CUDA_T]['shared'] + " " +
                 _buf['type'] + " " + _buf['name'] + "[];\n")
 
-    def Code(self, lang = None):
+    def Code(self, lang = None, preamble = True):
+        '''
+        Generate this kernel's source for 'lang'.
+
+        preamble=False emits only the functions, the kernel signature and the
+        body -- no headers, macros or typedefs. That is the form used when this
+        kernel is injected into another one's compile unit via
+        definitions_files, where the enclosing kernel already supplies the
+        preamble and a second copy of the typedefs would not compile.
+        '''
         # Argument Qualifiers
         AddrQ = self.AddrQ[lang]
+        self.CheckLinkage(lang = lang)
         self.ResetCode()
         # Inserting headers
         ## Checking for 'math.h'
 
-        if lang == METAL_T:
+        if lang == METAL_T and preamble:
             self.code += "#include <metal_stdlib>\n"
             self.code += "using namespace metal;\n"
             # Default Metal tanh/exp/log overflow to NaN for large |x| on Apple
@@ -621,7 +965,7 @@ class IdpyKernel:
             self.code += "#define log2(X) precise::log2(X)\n"
             self.code += "#define log10(X) precise::log10(X)\n\n"
 
-        if self.headers_files is not None:
+        if self.headers_files is not None and preamble:
             # Work on a local copy — never mutate self.headers_files in place
             # (shared default lists like ['math.h'] must stay intact for CTYPES).
             _headers_for_code = list(self.headers_files)
@@ -633,18 +977,23 @@ class IdpyKernel:
             self.code += self.IncludeHeaders()
             self.headers_files = _saved_headers
 
-        # Inserting portable collective-memory metalanguage macros
-        # (idpy_shared / idpy_sync / idpy_sync_global). Emitted after any
-        # 'using namespace metal;' so Metal's mem_flags/threadgroup_barrier
-        # resolve, and before functions/kernel body so both can use them.
-        self.code += self.CollectiveMacros(lang=lang)
+        if preamble:
+            # Inserting portable collective-memory metalanguage macros
+            # (idpy_shared / idpy_sync / idpy_sync_global). Emitted after any
+            # 'using namespace metal;' so Metal's mem_flags/threadgroup_barrier
+            # resolve, and before functions/kernel body so both can use them.
+            self.code += self.CollectiveMacros(lang=lang)
 
-        # Inserting macros
-        if self.declare_macros == 'header':
-            self.code += self.DeclareMacros(lang=lang)
-        # Inserting types
-        if self.declare_types == 'typedef':
-            self.code += self.DeclareTypes()
+            # Inserting macros
+            if self.declare_macros == 'header':
+                self.code += self.DeclareMacros(lang=lang)
+            # Inserting types
+            if self.declare_types == 'typedef':
+                self.code += self.DeclareTypes()
+            # Insertion point (2): source injected into this compile unit.
+            # After the typedefs, so injected code can use the kernel's types;
+            # before the functions and body, which may call into it.
+            self.code += self.IncludeDefinitions(lang=lang)
         # Inserting Functions
         self.InitFunctions()
         for function in self.functions:
@@ -733,6 +1082,14 @@ class IdpyKernel:
             self.code += """return 0;\n}\n"""
         elif lang == CTYPES_T and CTYPES_T in self.kernels:
             self.code += """\n}\n"""
+
+        # Homogenize floating literals last, over the assembled source, so it
+        # reaches sympy-generated expressions and hand-written body text alike.
+        # No-op unless the kernel opted in via float_literals.
+        self.code = _homogenize_float_literals(
+            self.code, self.FloatLiteralSuffix(),
+            declared_names=set(self.constants_types),
+        )
 
         return self.code
 
@@ -839,8 +1196,24 @@ class IdpyKernel:
                          'dyn_shared_bytes': _dyn_shared_bytes})
 
         if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
+            # include_dirs goes through SourceModule's own parameter rather than
+            # as '-I' in options: pycuda passes it to nvcc for us, and keeps the
+            # paths out of the space-split options string.
+            #
+            # CAVEAT: pycuda wraps the source in 'extern "C" { ... }' unless
+            # no_extern_c is set, so any '#include' emitted by IncludeHeaders
+            # lands INSIDE that wrapper. Harmless for a macro-only header, which
+            # is all test_linkage L4 exercises and all this path is verified for.
+            # A header carrying declarations may not survive being given C
+            # linkage -- notably anything with templates or overloads. If that
+            # case is needed, the fix is to pass no_extern_c=True and mark the
+            # kernel entry point 'extern "C"' explicitly.
             _kernel_module = cu_SourceModule(self.Code(CUDA_T), options = self.SetMacros(CUDA_T),
-                                             nvcc = idpy_nvcc_path)
+                                             nvcc = idpy_nvcc_path,
+                                             include_dirs = (
+                                                 [str(_d) for _d in self.include_dirs]
+                                                 if self.include_dirs else []
+                                             ))
             _kernel_function = _kernel_module.get_function(self.name)
 
             class Idea:
@@ -984,16 +1357,28 @@ class IdpyKernel:
                         self.k_dict['global'], self.k_dict['block']
                     )
 
-                def Deploy(self, args_list = None, idpy_stream = None):
+                def Deploy(self, args_list = None, idpy_stream = None,
+                           touched = None):
                     # idpy_stream unused for ordering on the single Tenet queue
                     # (GPU serializes same-queue command buffers).
+                    #
+                    # 'touched' optionally narrows what this dispatch is declared
+                    # to write, as {IdpyArrayMETAL: (start_elem, stop_elem)}. It
+                    # lets a host write to a disjoint slot proceed without
+                    # waiting. Omit it and every argument buffer is assumed
+                    # touched in full, which is always safe.
                     tenet = self.k_dict['tenet']
                     command_buffer = tenet.queue.make_command_buffer()
                     encoder = command_buffer.make_compute_command_encoder()
                     self.Encode(encoder, args_list)
                     encoder.end_encoding()
                     command_buffer.commit()
-                    tenet.last_command_buffer = command_buffer
+                    _metal_submit(
+                        tenet, command_buffer,
+                        _metal_touched_spec(touched)
+                        if touched is not None
+                        else _metal_touched_from_args(args_list),
+                    )
                     return command_buffer
 
                 def DeployProfiling(self, args_list = None, idpy_stream = None):
@@ -1160,12 +1545,66 @@ def _metal_idea_is_gpu_kernel(Idea):
     return isinstance(k_dict, dict) and ('_pipeline' in k_dict)
 
 
-def _metal_flush_encode_batch(tenet, encoder, command_buffer):
+def _metal_touched_from_args(args_list):
+    '''
+    Which host-visible buffers may a dispatch over 'args_list' have touched?
+
+    Whole-buffer spans for every IdpyArrayMETAL argument. Whole-buffer because a
+    kernel is free to write anywhere in a buffer it was handed -- the launch
+    grid does not bound that in general. Callers who know better can pass an
+    explicit, narrower 'touched' to Deploy.
+
+    Temporaries built by _bind_args from numpy arrays and scalars are not
+    included: they are created per-dispatch and never observed by the host, so
+    they cannot be the subject of a host/GPU conflict.
+    '''
+    if not idpy_langs_sys[METAL_T]:
+        # IdpyArrayMETAL is only imported when the Metal backend is present, so
+        # the isinstance below would NameError on a machine without it. Reaching
+        # here without Metal should be impossible, but 'unknown' is the safe
+        # answer rather than a crash.
+        return None
+    _touched = {}
+    for arg in (args_list or []):
+        if isinstance(arg, IdpyArrayMETAL):
+            _touched[arg.BufferKey()] = arg.BufferSpanBytes()
+    return _touched
+
+
+def _metal_touched_spec(spec):
+    '''
+    Normalise a caller-declared touch-set {IdpyArrayMETAL: (start_elem, stop_elem)}
+    into the {buffer_key: (start_byte, stop_byte)} form the Tenet records.
+
+    A declaration is a promise: anything the kernel writes outside the declared
+    span will not be waited for. Passing None means "unknown", the safe default.
+    '''
+    if spec is None:
+        return None
+    _touched = {}
+    for _ary, _range in spec.items():
+        _start, _stop = (0, _ary.size) if _range is None else _range
+        _touched[_ary.BufferKey()] = _ary.SpanBytes(_start, _stop)
+    return _touched
+
+
+def _metal_submit(tenet, command_buffer, touched=None):
+    '''Record a committed CB on the tenet, tolerating tenets without tracking.'''
+    _submit = getattr(tenet, 'Submit', None)
+    if callable(_submit):
+        return _submit(command_buffer, touched)
+    tenet.last_command_buffer = command_buffer
+    return command_buffer
+
+
+def _metal_flush_encode_batch(tenet, encoder, command_buffer, touched=None):
     '''End encoding and commit; return (None, None) so callers clear batch state.'''
     if encoder is not None:
         encoder.end_encoding()
         command_buffer.commit()
-        tenet.last_command_buffer = command_buffer
+        # A batch aggregates several kernels' arguments; unless the caller
+        # accumulated their touch-sets, 'None' keeps this conservative.
+        _metal_submit(tenet, command_buffer, touched)
     return None, None
 
 
