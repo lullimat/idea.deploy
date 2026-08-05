@@ -36,6 +36,7 @@ as long as the different meta-declarations are consistent
 '''
 
 import numpy as np
+import re
 import warnings
 from collections import defaultdict
 from pathlib import Path
@@ -111,6 +112,64 @@ def _float_suffix_for(ctype):
     if _c in ('double', 'long double'):
         return ''
     return None
+
+
+'''
+An unsuffixed C floating literal, for the homogenization pass.
+
+Matches anything C would read as a floating constant -- 0.5, 1., .5, 1e-5,
+1.5E+3 -- and nothing else:
+
+  (?<![\\w.])   not preceded by an identifier character or a dot, so 'v1_0',
+                'a.b' and the '1e5' inside a hex literal like 0x1e5 are safe
+  (?![\\w.])    not followed by one either, so an already-suffixed 0.5f / 1.0L
+                is skipped and cannot be double-suffixed
+
+An integer with neither dot nor exponent is deliberately not matched: it is an
+int in C and must stay one, since array indices and loop bounds are written the
+same way.
+'''
+_C_FLOAT_LITERAL_RE = re.compile(
+    r'(?<![\w.])((?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)(?![\w.])'
+)
+
+
+def _homogenize_float_literals(code, suffix, declared_names=()):
+    '''
+    Give every unsuffixed floating literal in 'code' the same precision.
+
+    '#define' lines are included, because leaving them out would not actually
+    homogenize anything: an LBM collision body multiplies by CM2 and OMEGA far
+    more often than it writes a bare 0.5, and a double-valued macro promotes the
+    expression just as effectively as a double-valued literal.
+
+    'declared_names' are exempt -- a constant given an explicit type through
+    constants_types keeps it, so an intentional double survives a homogenized
+    kernel. Every other preprocessor line (#include, the collective-memory
+    macros, typedef-style defines) carries no numeric literal and is left alone
+    by the pattern regardless.
+
+    Not reachable this way: constants emitted as '-D' compiler flags under
+    declare_macros='macro'. They never appear in the source, so constants_types
+    is the only lever there.
+    '''
+    if not suffix:
+        return code
+    _out = []
+    for _line in code.split('\n'):
+        _stripped = _line.lstrip()
+        if _stripped.startswith('#define'):
+            _parts = _stripped.split()
+            if len(_parts) > 1 and _parts[1] in declared_names:
+                _out.append(_line)
+                continue
+        elif _stripped.startswith('#'):
+            _out.append(_line)
+            continue
+        _out.append(
+            _C_FLOAT_LITERAL_RE.sub(lambda _m: _m.group(0) + suffix, _line)
+        )
+    return '\n'.join(_out)
 
 
 def _format_c_macro_value(value, lang=None, ctype=None, name=None):
@@ -207,7 +266,7 @@ class IdpyKernel:
     - Need to discuss somewhere the difference between CUDA grid and OpenCL
     '''
     def __init__(self, custom_types = {}, constants = {}, constants_types = {},
-                 f_classes = [],
+                 float_literals = None, f_classes = [],
                  gthread_id_code = 'g_tid', lthread_id_code = 'l_tid',
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
                  optimizer_flag = None, declare_types = None, declare_macros = None,
@@ -242,6 +301,33 @@ class IdpyKernel:
         self.constants_types = (
             dict(constants_types) if constants_types else {}
         )
+        '''
+        Homogenize every floating literal in the generated body to one
+        precision. A type alias ('FType') or a concrete C type ('float'), or
+        None to leave the source exactly as generated.
+
+        Why a post-generation pass rather than a scope around emission: kernel
+        bodies are built in __init__ -- LBM's sympy collision and equilibrium
+        expressions are already strings by the time Code() runs -- so there is
+        no live sympy expression left to print differently. Rewriting the
+        emitted text is the only chokepoint that reaches all of it, and it also
+        catches hand-written metalanguage literals like '0.5 * F[d]', which a
+        sympy-aware printer never would.
+
+        What this is for: _codify_sympy is str(expr) after .evalf(), so sympy
+        Rationals reach the source as bare decimals -- 0.333333333333333 for
+        1/3. Those are DOUBLE literals in C. In a kernel whose arrays are float
+        they promote every expression touching them, and the result differs by
+        backend: a device with fp64 evaluates in double, while Apple, having
+        none, demotes to float. Same source, different arithmetic.
+
+        Default None keeps existing output byte-identical, so published results
+        stay reproducible until a kernel opts in. Note that opting in DOES
+        change numerics on fp64 devices: double intermediates are more accurate,
+        merely unavailable on Apple, so consistency and accuracy genuinely
+        trade against each other here. Enabling it buys consistency and speed.
+        '''
+        self.float_literals = float_literals
         '''
         Need to check the type of optimizer_flag
         '''
@@ -694,6 +780,20 @@ class IdpyKernel:
         
         return _swap    
 
+    def FloatLiteralSuffix(self):
+        '''
+        The literal suffix implied by float_literals, resolved through
+        custom_types at emission time so it follows the double->float downcast
+        applied on devices without fp64 -- exactly like ConstantCType.
+
+        Returns '' for a double target (a bare literal is already double, so
+        the pass is a no-op) and None when nothing was requested.
+        '''
+        if self.float_literals is None:
+            return None
+        _ctype = self.custom_types.get(self.float_literals, self.float_literals)
+        return _float_suffix_for(_ctype)
+
     def ConstantCType(self, name):
         '''
         Resolve a constant's declared type alias to a concrete C type, or None
@@ -982,6 +1082,14 @@ class IdpyKernel:
             self.code += """return 0;\n}\n"""
         elif lang == CTYPES_T and CTYPES_T in self.kernels:
             self.code += """\n}\n"""
+
+        # Homogenize floating literals last, over the assembled source, so it
+        # reaches sympy-generated expressions and hand-written body text alike.
+        # No-op unless the kernel opted in via float_literals.
+        self.code = _homogenize_float_literals(
+            self.code, self.FloatLiteralSuffix(),
+            declared_names=set(self.constants_types),
+        )
 
         return self.code
 

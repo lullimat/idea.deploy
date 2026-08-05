@@ -154,6 +154,61 @@ def warning_behaviour():
     return _out
 
 
+def _body_kernel(float_literals=None, constants_types=None, ftype='float'):
+    '''A kernel whose body carries literals written by hand, as LBM's do.'''
+    class K_Body(IdpyKernel):
+        def __init__(self):
+            IdpyKernel.__init__(
+                self, custom_types=CustomTypes({'FType': ftype}).Push(),
+                constants={'CM2': 3.0, 'NPTS': 12},
+                constants_types=constants_types or {},
+                float_literals=float_literals,
+            )
+            self.SetCodeFlags('g_tid')
+            self.params = {'FType * a': ['global']}
+            self.kernels[IDPY_T] = (
+                "\nFType v = 0.5 * a[g_tid] + 1. - 1e-5;\n"
+                "for(int i = 0; i < 12; i++){ v += 0.25f * CM2; }\n"
+                "a[g_tid] = v;\n"
+            )
+    return K_Body()
+
+
+def homogenization():
+    '''
+    float_literals rewrites the assembled source, which is the only chokepoint
+    that reaches LBM's sympy expressions: those are turned into strings inside
+    __init__, long before Code() runs, so there is no live expression left to
+    print differently by then.
+    '''
+    _out = OrderedDict()
+
+    _off = _body_kernel().Code(CUDA_T)
+    _on = _body_kernel(float_literals='FType').Code(CUDA_T)
+
+    _out['off: body literal untouched'] = ('0.5 * a[g_tid]' in _off)
+    _out['off: macro untouched'] = ('#define CM2 3.0' in _off)
+    _out['on: body literal suffixed'] = ('0.5f * a[g_tid]' in _on)
+    _out['on: trailing-dot suffixed'] = ('1.f' in _on)
+    _out['on: exponent suffixed'] = ('1e-5f' in _on)
+    _out['on: macro suffixed'] = ('#define CM2 3.0f' in _on)
+    _out['on: int macro untouched'] = ('#define NPTS 12' in _on)
+    _out['on: loop bounds untouched'] = ('i < 12;' in _on)
+    _out['on: no double suffix'] = ('0.25ff' not in _on and '0.25f' in _on)
+
+    # an explicitly declared constant keeps its type through homogenization
+    _decl = _body_kernel(float_literals='FType',
+                         constants_types={'CM2': 'double'}).Code(CUDA_T)
+    _out['declared constant exempt'] = ('#define CM2 3.0\n' in _decl)
+
+    # a double-typed kernel needs no suffix at all: the pass is a no-op
+    _dbl_off = _body_kernel(ftype='double').Code(CUDA_T)
+    _dbl_on = _body_kernel(float_literals='FType', ftype='double').Code(CUDA_T)
+    _out['double target is a no-op'] = (_dbl_off == _dbl_on)
+
+    return _out
+
+
 def main():
     print("=== Type-aware constant emission ===\n")
     _ok = True
@@ -175,6 +230,11 @@ def main():
         _ok = _ok and _pass
         print(f"  [{'OK  ' if _pass else 'FAIL'}] {_name:28} -> "
               f"warned={_warned}")
+
+    print()
+    for _name, _passed in homogenization().items():
+        _ok = _ok and _passed
+        print(f"  [{'OK  ' if _passed else 'FAIL'}] {_name:28} -> {_passed}")
 
     print(f"\n  -> {'OK' if _ok else 'FAIL'}")
     print(

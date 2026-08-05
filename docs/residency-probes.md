@@ -566,6 +566,79 @@ on `include_dirs` for anything beyond macros there.
 
 ---
 
+## 2i. Float precision: constants, sympy expressions, and a corrected claim
+
+### Correction
+
+An earlier entry recorded the double-literal trap as "latent, not live",
+on the basis that instrumenting the LBM suite found no kernel built with a float
+constant. **That measurement was invalid.** The LBM test errored at construction
+(`Missing 'tau'`, cascading to `SC_G`, `psi_sym`, `psi_code`) and never reached
+the kernel-building path at all — it measured a suite that was not running the
+thing being measured.
+
+Building a real `ShanChenMultiPhase`, the new warning fires immediately on five
+live constants: `CM2 = 3.0`, `CM4 = 9.0`, `PI`, `SC_G = -3.6`, `OMEGA = 1.0`,
+all emitted as double literals into kernels whose types are `float`. The trap was
+live. The warning's first act was to catch a case previously cleared in error.
+
+The stale test is now fixed, and the LBM suite passes for the first time.
+
+### The sympy path is a second, larger instance
+
+`_codify_sympy` is `str(expr)` after `.evalf()`, so sympy Rationals reach the
+source as bare decimals — `0.333333333333333` for 1/3 — bypassing
+`_format_c_macro_value` entirely. Four distinct double literals appear in **one**
+population of D2Q9; with nine populations that is roughly forty per collision
+kernel, in both the SRT and MRT rolled forms.
+
+Not a problem: `**`. `str(sympy)` does emit `u_0**2`, but the live kernels
+contain none — `LBMKernelsMeta.py:1033` substitutes powers away before emission.
+The raw `CodifySingle*` output does contain it, so those functions depend on the
+caller supplying substitution tuples.
+
+### The real defect is inconsistency, and the fix is a trade-off
+
+On a device with fp64 those literals make intermediates evaluate in double before
+storing to float. On Apple there is no fp64, so the compiler demotes and
+intermediates are fp32. **The same source computes differently per backend.**
+
+Double intermediates with fp32 storage is a legitimate numerical choice — often a
+desirable one. So homogenizing is not a pure win: it buys consistency and speed
+at some accuracy on fp64 devices. The argument for it is that the alternative,
+double intermediates everywhere, is *unachievable* on Apple and therefore cannot
+be the consistent choice even in principle.
+
+### `float_literals`: opt-in homogenization
+
+`IdpyKernel(float_literals='FType')` rewrites every unsuffixed floating literal
+in the assembled source to that type's precision, resolved through
+`custom_types` at emission time so it follows the fp64 downcast.
+
+A post-generation pass rather than a scope around emission, for a structural
+reason: **kernel bodies are built in `__init__`** — LBM's sympy collision and
+equilibrium expressions are already strings by the time `Code()` runs, so there
+is no live expression left to print differently. Rewriting the assembled text is
+the only chokepoint reaching all of it, and it also catches hand-written
+metalanguage literals like `0.5 * F[d]`, which a sympy-aware printer never would.
+
+`#define` lines are included — an LBM body multiplies by `CM2` far more often
+than it writes a bare `0.5`, so excluding macros would not homogenize anything.
+Constants with an explicit `constants_types` entry are exempt, so an intentional
+double survives. Constants emitted as `-D` flags under `declare_macros='macro'`
+are unreachable this way; `constants_types` is the only lever there.
+
+Verified on the real `K_Collision_ShanChenGuoMultiPhase`: 4 bare doubles in the
+body before, 0 after, with `CM2 3.0f`, `SC_G -3.6f`, `OMEGA 1.0f` in the macros
+and `V 1088`, `Q 9`, `DIM 2` untouched.
+
+**Default is None — output stays byte-identical and published results stay
+reproducible until a kernel opts in.** Enabling it does change numerics on fp64
+devices, which is why it is a per-kernel choice rather than a global switch.
+Making the mixed case explicit per-literal is deferred to a second sweep.
+
+---
+
 ## 3. Standing constraints
 
 - ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`

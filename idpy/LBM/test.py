@@ -32,6 +32,7 @@ Provides unit tests for the idpy.LBM module
 import unittest
 
 import numpy as np
+import sympy as sp
 import sys, os, filecmp, inspect
 from functools import reduce
 from collections import defaultdict
@@ -66,10 +67,24 @@ if idpy_langs_sys[CUDA_T]:
 class TestShanChenMultiPhase(unittest.TestCase):
     def setUp(self):
         self.dim_sizes_2d, self.dim_sizes_3d = (32, 34), (32, 34, 36)
-        self.hdf5_name_2d, self.hdf5_name_3d = 'test_hdf5_2d', 'test_hdf5_3d'        
+        self.hdf5_name_2d, self.hdf5_name_3d = 'test_hdf5_2d', 'test_hdf5_3d'
+        '''
+        SetupRoot requires these; the test predates that and had been erroring
+        at construction with "Missing 'tau'", which masked everything past it.
+        The parameters cascade -- tau, then SC_G, then psi_sym -- so fixing only
+        the reported one just moves the error along.
+
+        psi_sym is the pseudo-potential as a sympy expression over the density
+        symbol, and psi_code below is the same thing as device source; both are
+        required and must agree.
+        '''
+        self.tau, self.SC_G = 1.0, -3.6
+        self.psi_sym = sp.exp(-1 / sp.Symbol('n'))
 
     def test_ShanChenMultiPhase(self):
         sc_multi_phase = ShanChenMultiPhase(lang = OCL_T,
+                                            tau = self.tau, SC_G = self.SC_G,
+                                            psi_sym = self.psi_sym,
                                             dim_sizes = self.dim_sizes_2d,
                                             xi_stencil = XIStencils['D2Q9'],
                                             f_stencil = FStencils['D2E4'],
