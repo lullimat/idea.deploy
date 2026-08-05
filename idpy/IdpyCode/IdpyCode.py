@@ -984,16 +984,28 @@ class IdpyKernel:
                         self.k_dict['global'], self.k_dict['block']
                     )
 
-                def Deploy(self, args_list = None, idpy_stream = None):
+                def Deploy(self, args_list = None, idpy_stream = None,
+                           touched = None):
                     # idpy_stream unused for ordering on the single Tenet queue
                     # (GPU serializes same-queue command buffers).
+                    #
+                    # 'touched' optionally narrows what this dispatch is declared
+                    # to write, as {IdpyArrayMETAL: (start_elem, stop_elem)}. It
+                    # lets a host write to a disjoint slot proceed without
+                    # waiting. Omit it and every argument buffer is assumed
+                    # touched in full, which is always safe.
                     tenet = self.k_dict['tenet']
                     command_buffer = tenet.queue.make_command_buffer()
                     encoder = command_buffer.make_compute_command_encoder()
                     self.Encode(encoder, args_list)
                     encoder.end_encoding()
                     command_buffer.commit()
-                    tenet.last_command_buffer = command_buffer
+                    _metal_submit(
+                        tenet, command_buffer,
+                        _metal_touched_spec(touched)
+                        if touched is not None
+                        else _metal_touched_from_args(args_list),
+                    )
                     return command_buffer
 
                 def DeployProfiling(self, args_list = None, idpy_stream = None):
@@ -1160,12 +1172,60 @@ def _metal_idea_is_gpu_kernel(Idea):
     return isinstance(k_dict, dict) and ('_pipeline' in k_dict)
 
 
-def _metal_flush_encode_batch(tenet, encoder, command_buffer):
+def _metal_touched_from_args(args_list):
+    '''
+    Which host-visible buffers may a dispatch over 'args_list' have touched?
+
+    Whole-buffer spans for every IdpyArrayMETAL argument. Whole-buffer because a
+    kernel is free to write anywhere in a buffer it was handed -- the launch
+    grid does not bound that in general. Callers who know better can pass an
+    explicit, narrower 'touched' to Deploy.
+
+    Temporaries built by _bind_args from numpy arrays and scalars are not
+    included: they are created per-dispatch and never observed by the host, so
+    they cannot be the subject of a host/GPU conflict.
+    '''
+    _touched = {}
+    for arg in (args_list or []):
+        if isinstance(arg, IdpyArrayMETAL):
+            _touched[arg.BufferKey()] = arg.BufferSpanBytes()
+    return _touched
+
+
+def _metal_touched_spec(spec):
+    '''
+    Normalise a caller-declared touch-set {IdpyArrayMETAL: (start_elem, stop_elem)}
+    into the {buffer_key: (start_byte, stop_byte)} form the Tenet records.
+
+    A declaration is a promise: anything the kernel writes outside the declared
+    span will not be waited for. Passing None means "unknown", the safe default.
+    '''
+    if spec is None:
+        return None
+    _touched = {}
+    for _ary, _range in spec.items():
+        _start, _stop = (0, _ary.size) if _range is None else _range
+        _touched[_ary.BufferKey()] = _ary.SpanBytes(_start, _stop)
+    return _touched
+
+
+def _metal_submit(tenet, command_buffer, touched=None):
+    '''Record a committed CB on the tenet, tolerating tenets without tracking.'''
+    _submit = getattr(tenet, 'Submit', None)
+    if callable(_submit):
+        return _submit(command_buffer, touched)
+    tenet.last_command_buffer = command_buffer
+    return command_buffer
+
+
+def _metal_flush_encode_batch(tenet, encoder, command_buffer, touched=None):
     '''End encoding and commit; return (None, None) so callers clear batch state.'''
     if encoder is not None:
         encoder.end_encoding()
         command_buffer.commit()
-        tenet.last_command_buffer = command_buffer
+        # A batch aggregates several kernels' arguments; unless the caller
+        # accumulated their touch-sets, 'None' keeps this conservative.
+        _metal_submit(tenet, command_buffer, touched)
     return None, None
 
 

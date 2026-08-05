@@ -73,10 +73,10 @@ from idpy.IdpyCode.IdpyUnroll import (
 )
 from idpy.Utils.CustomTypes import CustomTypes
 
-# Backends carrying the Phase 2b primitives so far. Metal and CTypes are the
-# next lowerings; Metal additionally needs the _sync_tenet() drain replaced
-# (F2), which is tracked as its own piece of work.
-_RESIDENCY_LANGS = (CUDA_T, OCL_T)
+# Backends carrying the Phase 2b primitives. Metal joined once its
+# drain-on-every-host-touch was replaced by range-scoped waiting (finding F2).
+# CTypes is the remaining lowering and is trivially unified.
+_RESIDENCY_LANGS = (CUDA_T, OCL_T, METAL_T)
 
 
 class K_ScaleLowerHalf(IdpyKernel):
@@ -227,10 +227,11 @@ def main():
         print()
 
     print(
-        "Metal and CTypes do not carry these primitives yet. Metal needs the\n"
-        "IdpyArrayMETAL._sync_tenet() drain replaced by per-command-buffer\n"
-        "waiting first (finding F2); pymetallic exposes get_status() and\n"
-        "wait_until_completed() per command buffer, which is sufficient."
+        "CTypes does not carry these primitives yet (trivially unified). On\n"
+        "Metal the primitives are host stores into unified memory, so 'async_'\n"
+        "is inert there; what used to make the pattern impossible was the\n"
+        "drain on every host touch, now replaced by range-scoped waiting.\n"
+        "Whether that wait is actually skipped is measured in test_overlap."
     )
 
 

@@ -104,6 +104,24 @@ class MetalMemoryPool:
         self._closed = True
 
 
+def _TouchOverlaps(touched, buffer_key, start_byte, stop_byte):
+    '''
+    Does a command buffer's recorded touch-set intersect [start_byte, stop_byte)
+    of 'buffer_key'?
+
+    touched is None  -> unknown, so assume yes. Every path that cannot describe
+                        what it touched must land here, keeping the fallback at
+                        "wait" rather than "race".
+    key absent       -> that command buffer never bound this buffer at all.
+    '''
+    if touched is None:
+        return True
+    _span = touched.get(buffer_key)
+    if _span is None:
+        return False
+    return start_byte < _span[1] and _span[0] < stop_byte
+
+
 class Tenet:
     GPU_T = "gpu"
 
@@ -115,9 +133,71 @@ class Tenet:
         self.allocator = None
         # Last committed command buffer (same-queue order ⇒ waiting this drains priors)
         self.last_command_buffer = None
+        '''
+        Ordered record of submitted, possibly-incomplete command buffers, for
+        range-scoped host waiting (finding F2). Each entry is
+
+            {'cb': CommandBuffer, 'touched': {buffer_key: (start_byte, stop_byte)}}
+
+        with 'touched' None meaning "unknown -- assume it touched everything".
+        Unknown is the safe default: it degrades to the old drain-everything
+        behaviour rather than to a race.
+
+        The whole scheme rests on one property: a single queue completes command
+        buffers IN ORDER. So waiting on entry i also completes 0..i-1, which is
+        why WaitForRange can drop a whole prefix at once and why finding the
+        LATEST overlapping entry is sufficient.
+        '''
+        self._in_flight = []
 
     def FreeMemoryDict(self, memory_dict=None):
         pass
+
+    def Submit(self, command_buffer, touched=None):
+        '''Record a committed command buffer and what it may have touched.'''
+        self._in_flight.append({'cb': command_buffer, 'touched': touched})
+        self.last_command_buffer = command_buffer
+        return command_buffer
+
+    def _DropThrough(self, index):
+        '''In-order completion: everything up to and including index is done.'''
+        del self._in_flight[:index + 1]
+        if not self._in_flight:
+            self.last_command_buffer = None
+
+    def PruneCompleted(self):
+        '''
+        Drop entries the GPU has already finished, without blocking. Scans
+        newest-first and drops the whole prefix at the first completed entry.
+        '''
+        for i in range(len(self._in_flight) - 1, -1, -1):
+            _get_status = getattr(self._in_flight[i]['cb'], 'get_status', None)
+            if _get_status is None:
+                continue
+            try:
+                if _get_status() == 1:      # 1 == completed
+                    self._DropThrough(i)
+                    return
+            except Exception:
+                # status unavailable ⇒ leave the entry in flight (conservative)
+                return
+
+    def WaitForRange(self, buffer_key, start_byte, stop_byte):
+        '''
+        Block only for in-flight work that may touch [start_byte, stop_byte) of
+        the buffer identified by 'buffer_key'. Returns True if it waited.
+
+        This is the replacement for draining the queue on every host touch: a
+        host write to a slot no in-flight kernel is reading costs nothing.
+        '''
+        self.PruneCompleted()
+        for i in range(len(self._in_flight) - 1, -1, -1):
+            if _TouchOverlaps(self._in_flight[i]['touched'],
+                              buffer_key, start_byte, stop_byte):
+                self._in_flight[i]['cb'].wait_until_completed()
+                self._DropThrough(i)
+                return True
+        return False
 
     def Finish(self):
         """Host-sync: wait until the last submitted command buffer completes."""
@@ -125,6 +205,8 @@ class Tenet:
         if cb is not None:
             cb.wait_until_completed()
             self.last_command_buffer = None
+        # In-order completion: waiting the newest CB completes every earlier one.
+        self._in_flight.clear()
 
     def AllocatedBytes(self):
         if self.mem_pool is None:

@@ -95,7 +95,7 @@ from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode.IdpyUnroll import _codify_comment
 from idpy.Utils.CustomTypes import CustomTypes
 
-_OVERLAP_LANGS = (CUDA_T, OCL_T)
+_OVERLAP_LANGS = (CUDA_T, OCL_T, METAL_T)
 
 # Reported verdict bands. Judgement calls, stated rather than hidden.
 _OVERLAP_GOOD = 0.50
@@ -199,7 +199,7 @@ class _Harness:
 
         self.stream_k = IdpyMemory.SiblingStream(tenet)
         self.stream_c = IdpyMemory.SiblingStream(tenet)
-        if self.stream_k is None or self.stream_c is None:
+        if lang != METAL_T and (self.stream_k is None or self.stream_c is None):
             raise RuntimeError(
                 "backend exposes no sibling streams; overlap cannot be measured"
             )
@@ -230,41 +230,67 @@ class _Harness:
         block = (self.block_size, 1, 1)
         self.idea = kern(tenet=self.kernel_tenet, grid=grid, block=block)
 
+    def deploy(self):
+        '''
+        Metal has no sibling streams: concurrency there is host-vs-GPU, not
+        stream-vs-stream. The declared 'touched' span is what lets the host
+        write to the upper half without waiting on this kernel -- omit it and
+        the whole buffer is assumed touched, which is safe but serializes.
+        '''
+        if self.lang == METAL_T:
+            return self.idea.Deploy(
+                [self.buf], touched={self.buf: (0, self.half)},
+            )
+        return self.idea.Deploy([self.buf], idpy_stream=self.deploy_stream)
+
+    def sync_kernel(self):
+        if self.lang == METAL_T:
+            self.tenet.Finish()
+        else:
+            _sync(self.stream_k)
+
+    def sync_copy(self):
+        # On Metal the write is a completed host store; nothing to wait for.
+        if self.lang != METAL_T:
+            _sync(self.stream_c)
+
+    def write_slot(self):
+        return self.buf.H2DSub(self.payload, start=self.half,
+                               async_=True, idpy_stream=self.stream_c)
+
     def reset(self):
         self.buf.H2D(self.host0)
-        _sync(self.stream_k)
-        _sync(self.stream_c)
+        self.sync_kernel()
+        self.sync_copy()
 
     def time_kernel(self):
         self.reset()
         t0 = perf_counter()
-        self.idea.Deploy([self.buf], idpy_stream=self.deploy_stream)
-        _sync(self.stream_k)
+        self.deploy()
+        self.sync_kernel()
         return perf_counter() - t0
 
     def time_copy(self):
         self.reset()
         t0 = perf_counter()
-        self.buf.H2DSub(self.payload, start=self.half,
-                        async_=True, idpy_stream=self.stream_c)
-        _sync(self.stream_c)
+        self.write_slot()
+        self.sync_copy()
         return perf_counter() - t0
 
     def time_both(self):
         self.reset()
         t0 = perf_counter()
-        self.idea.Deploy([self.buf], idpy_stream=self.deploy_stream)
-        self.buf.H2DSub(self.payload, start=self.half,
-                        async_=True, idpy_stream=self.stream_c)
-        _sync(self.stream_k)
-        _sync(self.stream_c)
+        self.deploy()
+        self.write_slot()
+        self.sync_kernel()
+        self.sync_copy()
         return perf_counter() - t0
 
     def kernel_reference(self):
         '''Lower half after the kernel alone -- the deterministic device oracle.'''
         self.reset()
-        self.idea.Deploy([self.buf], idpy_stream=self.deploy_stream)
-        _sync(self.stream_k)
+        self.deploy()
+        self.sync_kernel()
         return self.buf.D2H()[:self.half].copy()
 
     def close(self):
@@ -300,11 +326,10 @@ def measure(lang, copy_mb=128, repeats=3, target_ms=40.0, iters0=256):
         # --- correctness of the overlapped run, against a device oracle
         ref_lower = h.kernel_reference()
         h.reset()
-        h.idea.Deploy([h.buf], idpy_stream=h.deploy_stream)
-        h.buf.H2DSub(h.payload, start=h.half, async_=True,
-                     idpy_stream=h.stream_c)
-        _sync(h.stream_k)
-        _sync(h.stream_c)
+        h.deploy()
+        h.write_slot()
+        h.sync_kernel()
+        h.sync_copy()
         got = h.buf.D2H()
         err_upper = float(np.max(np.abs(got[h.half:] - h.payload)))
         err_lower = float(np.max(np.abs(got[:h.half] - ref_lower)))

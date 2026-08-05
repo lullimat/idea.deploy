@@ -437,7 +437,7 @@ if idpy_langs_sys[METAL_T]:
         to the free-list on teardown instead of being released immediately.
         '''
         def __init__(self, shape, dtype, tenet=None, data=None,
-                     pooled=False, nbytes=None):
+                     pooled=False, nbytes=None, host=None, offset=0):
             if tenet is None:
                 raise Exception("Need to pass tenet = tenetObject")
             self.shape = shape if isinstance(shape, tuple) else (shape,)
@@ -451,22 +451,70 @@ if idpy_langs_sys[METAL_T]:
                 else self.size * int(self.dtype.itemsize)
             )
             self._returned = False
+            # Element offset of this array inside its Metal Buffer. Non-zero
+            # only for SubView results; keeps byte spans comparable with the
+            # parent for range-scoped waiting.
+            self.offset = int(offset)
             if data is None:
                 zeros = np.zeros(self.shape, dtype=self.dtype)
                 self.data = pymetallic.Buffer.from_numpy(tenet.device, zeros)
             else:
                 self.data = data
-            self.host = self.data.to_numpy(self.dtype, self.shape)
+            # 'host' lets a caller supply a numpy view that is narrower than the
+            # whole Buffer (SubView). to_numpy() validates shape against the
+            # full allocation, so a sub-range cannot go through it.
+            self.host = (
+                host if host is not None
+                else self.data.to_numpy(self.dtype, self.shape)
+            )
 
         @property
         def ndim(self):
             return len(self.shape)
 
-        def _sync_tenet(self):
-            # Async Metal Deploy: drain GPU before host touches unified memory
-            finish = getattr(self.tenet, 'Finish', None)
-            if callable(finish):
-                finish()
+        '''
+        Buffer identity and byte spans.
+
+        Identity is the underlying pymetallic Buffer, not this wrapper, so a
+        SubView and its parent resolve to the same key and their spans are
+        directly comparable. Spans are byte offsets from the start of that
+        Buffer, which is what makes overlap testing meaningful across views.
+        '''
+        def BufferKey(self):
+            return id(self.data)
+
+        def SpanBytes(self, start, stop):
+            _item = int(self.dtype.itemsize)
+            return ((self.offset + int(start)) * _item,
+                    (self.offset + int(stop)) * _item)
+
+        def BufferSpanBytes(self):
+            return self.SpanBytes(0, self.size)
+
+        def _sync_tenet(self, start=None, stop=None):
+            '''
+            Wait for GPU work that may touch [start, stop) of this array -- and
+            only that work.
+
+            Replaces the previous unconditional tenet.Finish() drain (finding
+            F2), which serialized the host against every outstanding kernel and
+            made "write slot k while the GPU reads slot j" impossible to express.
+
+            Falls back to a full drain on any tenet that predates range
+            tracking, so the conservative behaviour is what happens when
+            anything is unknown.
+            '''
+            _wait = getattr(self.tenet, 'WaitForRange', None)
+            if callable(_wait):
+                _start, _stop = self.SpanBytes(
+                    0 if start is None else start,
+                    self.size if stop is None else stop,
+                )
+                return _wait(self.BufferKey(), _start, _stop)
+            _finish = getattr(self.tenet, 'Finish', None)
+            if callable(_finish):
+                _finish()
+            return True
 
         def H2D(self, ary, async_=None):
             self._sync_tenet()
@@ -484,6 +532,64 @@ if idpy_langs_sys[METAL_T]:
         def SetConst(self, const=0., stream=None):
             self._sync_tenet()
             self.host.fill(const)
+
+        '''
+        Residency primitives (Phase 2b), Metal lowering.
+
+        Unified memory makes these simpler than on CUDA/OpenCL: there is no
+        staging copy, so a "partial write" is a host store straight into the
+        shared buffer. What used to make it impossible was not the copy but the
+        synchronization -- see _sync_tenet above.
+
+        Consequence worth stating: 'async_' is accepted for signature parity and
+        has no meaning here. There is no DMA to overlap with; the write IS the
+        store, and once the range-scoped wait returns it is safe and immediate.
+        '''
+        def _CheckRange(self, start, stop):
+            start, stop = int(start), int(stop)
+            if start < 0 or stop > int(self.size) or start >= stop:
+                raise ValueError(
+                    "Sub-range [%d, %d) out of bounds for array of size %d"
+                    % (start, stop, int(self.size))
+                )
+            return start, stop
+
+        def SubView(self, start, stop):
+            '''
+            Contiguous element sub-range aliasing this array's storage: the same
+            Metal Buffer, a numpy view of the same memory, and an offset so its
+            spans stay expressed against the parent Buffer.
+            '''
+            start, stop = self._CheckRange(start, stop)
+            return IdpyArrayMETAL(
+                shape=(stop - start,), dtype=self.dtype, tenet=self.tenet,
+                data=self.data, pooled=False,
+                nbytes=(stop - start) * int(self.dtype.itemsize),
+                host=self.host[start:stop], offset=self.offset + start,
+            )
+
+        def H2DSub(self, ary, start=0, async_=False, idpy_stream=None):
+            '''Write 'ary' into this array starting at element 'start'.'''
+            ary = np.ascontiguousarray(ary, dtype=self.dtype)
+            start, stop = self._CheckRange(start, start + ary.size)
+            self._sync_tenet(start, stop)
+            np.copyto(self.host[start:stop], ary)
+            return ary
+
+        def D2HSub(self, start, stop, ary=None, async_=False, idpy_stream=None):
+            '''Read elements [start, stop) into 'ary' (allocated when None).'''
+            start, stop = self._CheckRange(start, stop)
+            self._sync_tenet(start, stop)
+            if ary is None:
+                return self.host[start:stop].copy()
+            np.copyto(ary, self.host[start:stop])
+            return ary
+
+        def Sync(self, idpy_stream=None):
+            '''Wait for all outstanding GPU work on this tenet.'''
+            _finish = getattr(self.tenet, 'Finish', None)
+            if callable(_finish):
+                _finish()
 
         def release_to_pool(self):
             if (

@@ -128,7 +128,7 @@ to `super().__init__`.
 |---------|-----------|----------|
 | OpenCL | `SubView`, `H2DSub`, `D2HSub`, `Sync`, real `async_` on `H2D` | **yes** — T1/T2/T3 exact on M1 Max *and* on RTX 5060 |
 | CUDA | same surface, plus `_pinned_host_CUDA` | **yes** — T1/T2/T3 exact on RTX 5060 |
-| Metal | not yet; needs the `_sync_tenet()` rework first | — |
+| Metal | same surface, on range-scoped waiting (§2e) | **yes** — T1/T2/T3 exact on M1 Max |
 | CTypes | not yet (trivially unified) | — |
 
 Test: `python -m idpy.IdpyCode.test_residency`.
@@ -252,6 +252,57 @@ Two reasons to record it rather than let it sit:
    design decision (a kernel using `double` types legitimately wants double
    literals), not a one-line patch. Flagged for a decision rather than fixed
    unilaterally.
+
+---
+
+## 2e. Metal: drain-on-touch replaced by range-scoped waiting
+
+This closes the last part of F2. `IdpyArrayMETAL.H2D/D2H/SetConst` used to open
+with `_sync_tenet()` → `tenet.Finish()`, a full GPU drain, which made "write slot
+k while the GPU reads slot j" impossible to express regardless of what the
+hardware could do.
+
+**The mechanism.** A Metal `Tenet` now keeps an ordered `_in_flight` list of
+submitted command buffers, each with the byte spans it may have touched. A host
+access to `[a, b)` scans newest-first for the latest entry that *overlaps*, waits
+only on that one, and drops the prefix. Everything rests on a single property: a
+single queue completes command buffers **in order**, so waiting on entry *i* also
+completes `0..i-1`. That is why finding the latest overlapping entry suffices and
+why no `MTLEvent` is needed — `wait_until_completed()` and `get_status()` per
+command buffer are enough, exactly as §2b predicted.
+
+**Safety is the default.** `touched = None` means "unknown, assume everything",
+and every path that cannot describe what it touched lands there — batched
+encodes, tenets predating the tracking, unrecognised arguments. The fallback is
+the old drain, never a race. `Deploy` records whole-buffer spans for each
+`IdpyArrayMETAL` argument by default, since a kernel may write anywhere in a
+buffer it was handed; callers who know better pass an explicit
+`touched={array: (start, stop)}`.
+
+**Control experiment.** The overlap is genuinely caused by the range scoping,
+not by something incidental — same measurement, only the declaration removed:
+
+| declared touch span | tK | tC | tB | overlap |
+|---|---|---|---|---|
+| `{buf: (0, half)}` | 38.42 ms | 2.88 ms | 38.50 ms | **0.97** |
+| omitted (whole buffer) | 38.62 ms | 2.91 ms | 41.16 ms | **0.13** |
+
+Both rows are correct behaviour: the second is the conservative path doing
+exactly what it should. The first is the capability that did not exist before.
+
+Full Metal run in the standard harness: kernel 38.48 ms, copy 2.80 ms
+(48.0 GB/s), both 38.54 ms against 41.28 ms serial → **overlap 0.98**, both
+halves exact.
+
+Note what "overlap" means here, since it differs from the discrete-GPU case:
+there is no DMA engine involved. The host store into unified memory runs on the
+CPU while the GPU runs the kernel — concurrency between processors, not between
+a copy engine and compute. `async_` is accepted on the Metal primitives for
+signature parity and is inert; once the range-scoped wait returns, the write is
+an immediate host store.
+
+**Phase 2b is now complete on CUDA, OpenCL and Metal.** CTypes remains, and is
+trivially unified.
 
 ---
 
