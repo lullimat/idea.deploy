@@ -15,7 +15,7 @@ unchanged") is measured against.
 |----|----------|--------|--------|
 | F2 | can `IdpyMemory` express the residency op? | inspection | **no — settled** |
 | F4 | can `IDPY_T` express sub-byte packed types? | inspection | **no — settled** |
-| P1 | sustained streaming bandwidth under overlap | measurement | **not yet run** |
+| P1 | sustained storage->device bandwidth under overlap | measurement | **measured (§2k)**; CUDA pending |
 | P3 | is one dynamic shared buffer enough? | inspection + kernel design | **not yet run** |
 
 Two of the four original probes were answerable by reading the tree rather than
@@ -756,6 +756,80 @@ It also surfaced two invalid escape sequences (`'\ '`) in
 `idpy/IdpyCode/__init__.py` — accepted today with a `SyntaxWarning`, a
 `SyntaxError` in some future Python. Replaced with the identical two-character
 value spelled legally.
+
+---
+
+## 2k. P1 measured: the direct paths are correct, not faster (here)
+
+`test_storage_bandwidth.py`. 256 MiB file through a 32 MiB cache, 8 MiB blocks,
+min-of-3.
+
+| backend | B1 staged | B2 direct | B2/B1 | overlap staged | overlap direct |
+|---|---|---|---|---|---|
+| OpenCL | 6.17 GB/s | 5.79 (no direct path) | 0.94× | 0.37 | 0.16 |
+| **Metal** | 7.72 GB/s | **7.87** (MTLIOCommandQueue) | **1.02×** | 1.02 | 0.96 |
+| CTypes | 6.94 GB/s | 7.37 (no direct path) | 1.06× | — serial | — |
+
+### The OpenCL row is the noise floor, and it should be read first
+
+OpenCL has no direct lowering, so **both** its columns are the same staged path
+measured twice. They differ by **6% in bandwidth** and by **more than 2× in the
+overlap ratio** (0.16 vs 0.37). That is run-to-run variation on an identical
+quantity, and it calibrates everything else: bandwidth differences under ~10%
+are noise, and overlap differences under ~0.2 are not resolvable at three
+repeats.
+
+Recorded because without it, Metal's 1.02× would read as a small win and
+OpenCL's 0.16-vs-0.37 as a real effect. Neither is.
+
+### What that leaves
+
+**On this machine the direct path is correct and not faster.** Metal's
+`MTLIOCommandQueue` delivers the same bandwidth as the staged route (1.02×,
+inside the floor) and the same overlap (0.96 vs 1.02, both ≈ 1). That is the
+expected result and it is worth saying plainly rather than hunting for a win:
+Apple's unified memory means the staged path is *already* a host store into
+shared storage with no bus to cross, and Phase 2b's range-scoped waiting already
+lets it overlap with compute. There is nothing left for a DMA engine to remove
+when the source is a warm page cache and the destination is host-visible.
+
+Its value would appear where the staged path costs something real — a cold cache
+to bypass, or a discrete GPU where staging means a genuine PCIe crossing. Neither
+is true here.
+
+**One effect does clear the floor: OpenCL overlaps badly.** ~0.2–0.4 against
+Metal's ~1.0. `enqueue_copy` goes on a queue and partially serializes against
+the kernel, while Metal's host store runs on the CPU concurrently with the GPU.
+That is architectural, not noise.
+
+### The number that matters for streamed CFD
+
+**~7–8 GB/s through the cache machinery** — and this is a *warm page cache*, so
+it is not the drive. A memcpy from RAM on an M1 Max should run at tens of GB/s,
+so 7.7 GB/s is **the machinery, not the memory**: per-block Python bookkeeping
+and memmap page faults at 8 MiB granularity.
+
+Two consequences:
+
+1. The earlier streamed-CFD estimate assumed ~7 GB/s and happens to land right —
+   but for the wrong reason. That figure is a software ceiling, not a disk one.
+2. **On a fast drive you would be software-limited before you were disk-limited.**
+   Larger blocks would amortise the per-block overhead; that is the first thing
+   to try if the streaming case is ever pursued seriously.
+
+### The SWIFT_T gate this probe was built to guard has evaporated
+
+P1 existed to decide whether Python could schedule fast enough, because failing
+would have promoted Swift from a compiler choice to a language target. That
+decision can no longer be reached: **H5** demonstrated Swift-as-compiler end to
+end and the Metal storage row then used it in anger, and **F4** gated off the
+workload whose scheduling was in question. Closing P1 is therefore not the same
+as answering the question it was written for, and the record should not read as
+though it were.
+
+**Still unverified:** CUDA. `id` is where cuFile could plausibly differ, since a
+discrete GPU makes staging a real PCIe crossing — the one configuration in which
+the direct path has something to remove.
 
 ---
 
