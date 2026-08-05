@@ -582,7 +582,12 @@ live constants: `CM2 = 3.0`, `CM4 = 9.0`, `PI`, `SC_G = -3.6`, `OMEGA = 1.0`,
 all emitted as double literals into kernels whose types are `float`. The trap was
 live. The warning's first act was to catch a case previously cleared in error.
 
-The stale test is now fixed, and the LBM suite passes for the first time.
+The stale test is now fixed, and the LBM suite passes for the first time — on
+both machines. Verified on `id` (2026-08-06): constants OK, `idpy.test` 41 OK,
+**LBM 5 OK**, convolution 21 OK, linkage 3 backends OK. That run matters more
+than a routine re-check: with the test fixed, LBM now actually executes across
+CUDA, OpenCL and CTypes there, where before it died at construction. Nothing
+CUDA-specific was hiding behind the error.
 
 ### The sympy path is a second, larger instance
 
