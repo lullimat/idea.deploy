@@ -1,0 +1,119 @@
+name: CI
+
+# What this covers, and what it cannot.
+#
+# GitHub's hosted runners have no GPU, so CUDA and Metal stay on the two
+# development machines and are verified by hand. What runs here is the CTypes
+# backend and everything above it -- imports, code generation, HostModule,
+# type-aware constants, compile-unit linkage, the residency primitives and the
+# whole residency policy layer -- plus OpenCL on the Linux runner via POCL,
+# which provides a CPU OpenCL device.
+#
+# That is a real limit rather than a token one, but the CTypes path is unusually
+# representative: the metalanguage already survives the SIMT -> non-SIMT
+# transition, since IdpyKernel.Code() rewrites the thread index into a serial
+# loop and CTypes carries its own Tenet, KernelModule and array type. A
+# regression in the generator shows up on this path first.
+#
+# The two runners also differ in C compiler -- gcc on Linux, clang on macOS --
+# which is the axis HostModule's Toolchain abstraction exists to cover, and
+# macOS may additionally have swiftc for the @_cdecl shim check.
+#
+# Left out deliberately: test_shared and test_overlap verify nothing without a
+# GPU. They would report "nothing ran" and exit 0, and a green tick for an empty
+# run is the exact confusion this repository has already been bitten by.
+
+on:
+  push:
+    branches: [master, devel, 'feature/**']
+  pull_request:
+    branches: [master, devel]
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc-opencl
+            os: ubuntu-latest
+            opencl: true
+          - name: macos-clang
+            os: macos-latest
+            opencl: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: py-env/requirements-ci.txt
+
+      - name: Install POCL (CPU OpenCL device)
+        if: matrix.opencl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pocl-opencl-icd ocl-icd-opencl-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r py-env/requirements-ci.txt
+
+      - name: Install pyopencl
+        if: matrix.opencl
+        run: pip install pyopencl
+
+      - name: Bootstrap the idpy environment scaffolding
+        # idpy/IdpyCode/__init__.py reads VENV_ROOT out of .idpy-env (tracked)
+        # then opens <root>/py-env/cuda_path_found. That file is produced by
+        # idpy-init.sh, is not tracked, and is empty on a machine without CUDA --
+        # the reader appends "/bin/nvcc" to whatever it finds. Creating it empty
+        # is the entire bootstrap. Running idpy-init.sh would compile pycuda and
+        # pyopencl from source, which is neither wanted nor possible here.
+        run: |
+          mkdir -p py-env
+          : > py-env/cuda_path_found
+
+      - name: Report available backends
+        run: |
+          python -c "
+          from idpy.IdpyCode import idpy_langs_sys, idpy_langs_human_dict
+          print({idpy_langs_human_dict[k]: v for k, v in idpy_langs_sys.items()})
+          "
+
+      - name: Core unit tests
+        run: python -m idpy.test
+
+      - name: Convolution
+        run: python -m idpy.test_convolution
+
+      - name: LBM
+        # OpenCL only: idpy/LBM/test.py constructs ShanChenMultiPhase with
+        # lang=OCL_T, so it cannot run without an OpenCL device.
+        #
+        # unittest, not "python -m idpy.LBM.test": that module defines TestCase
+        # classes but has no unittest.main() and no __main__ guard, so running it
+        # as a module executes zero tests and exits 0 -- it looked green for
+        # years while erroring at construction.
+        if: matrix.opencl
+        run: python -m unittest idpy.LBM.test
+
+      - name: Type-aware constants and literal homogenization
+        run: python -m idpy.IdpyCode.test_constants
+
+      - name: HostModule
+        run: python -m idpy.Utils.test_hostmodule
+
+      - name: Compile-unit linkage
+        run: python -m idpy.IdpyCode.test_linkage
+
+      - name: Residency primitives
+        run: python -m idpy.IdpyCode.test_residency
+
+      - name: Residency policy
+        run: python -m idpy.IdpyCode.test_residency_policy

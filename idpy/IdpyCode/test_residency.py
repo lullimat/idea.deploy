@@ -72,6 +72,7 @@ from idpy.IdpyCode.IdpyUnroll import (
     _codify_assignment, _codify_comment, _array_value,
 )
 from idpy.Utils.CustomTypes import CustomTypes
+from idpy.Utils.TestExit import report_exit as _report_exit
 
 # Backends carrying the Phase 2b primitives. Metal joined once its
 # drain-on-every-host-touch was replaced by range-scoped waiting (finding F2).
@@ -213,6 +214,7 @@ def run_on(lang, n=1024):
 
 def main():
     print("=== Phase 2b: sub-range views and the async path ===\n")
+    _ok, _ran = True, False
     for lang in _RESIDENCY_LANGS:
         human = idpy_langs_human_dict[lang]
         if not idpy_langs_sys[lang]:
@@ -220,9 +222,12 @@ def main():
             continue
         try:
             for name, err in run_on(lang).items():
+                _ran = True
+                _ok = _ok and (err == 0.0)
                 status = "OK  " if err == 0.0 else "FAIL"
                 print(f"  [{status}] {human}: {name}: max|out-ref| = {err:g}")
         except Exception as exc:
+            _ok = False
             print(f"  [err ] {human}: {type(exc).__name__}: {exc}")
         print()
 
@@ -233,6 +238,7 @@ def main():
         "drain on every host touch, now replaced by range-scoped waiting.\n"
         "Whether that wait is actually skipped is measured in test_overlap."
     )
+    _report_exit(_ok, checks_run=_ran, what='backends')
 
 
 if __name__ == '__main__':

@@ -72,6 +72,7 @@ from idpy.IdpyCode.IdpyUnroll import (
     _array_value,
 )
 from idpy.Utils.CustomTypes import CustomTypes
+from idpy.Utils.TestExit import report_exit as _report_exit
 
 
 class K_SharedNeighborSum(IdpyKernel):
@@ -243,6 +244,7 @@ def dump_sources(kernel_cls, block_size=8, n=32):
 
 
 def _check_backends(kernel_cls, block_size, n):
+    _ok, _ran = True, False
     # Shared memory is a block-parallel GPU concept: CUDA / OpenCL / Metal only.
     for lang in (CUDA_T, OCL_T, METAL_T):
         human = idpy_langs_human_dict[lang]
@@ -256,10 +258,14 @@ def _check_backends(kernel_cls, block_size, n):
             ok, max_abs, _, _ = run_on(
                 lang, block_size, n, tenet_params=params, kernel_cls=kernel_cls
             )
+            _ran = True
+            _ok = _ok and ok
             status = "OK  " if ok else "FAIL"
             print(f"  [{status}] {human}: max|out-ref| = {max_abs:g}")
         except Exception as exc:
+            _ok = False
             print(f"  [err ] {human}: {type(exc).__name__}: {exc}")
+    return _ok, _ran
 
 
 def main():
@@ -268,19 +274,21 @@ def main():
     dump_sources(K_SharedNeighborSum)
     print("Deploying and checking against the host reference:\n")
     block_size, n = 64, 1024
-    _check_backends(K_SharedNeighborSum, block_size, n)
+    _ok_a, _ran_a = _check_backends(K_SharedNeighborSum, block_size, n)
 
     print("\n\n=== DYNAMIC shared memory (runtime-sized tile) ===\n")
     print("Generated sources (small sizes):\n")
     dump_sources(K_SharedNeighborSumDynamic)
     print("Deploying and checking against the host reference:\n")
-    _check_backends(K_SharedNeighborSumDynamic, block_size, n)
+    _ok_b, _ran_b = _check_backends(K_SharedNeighborSumDynamic, block_size, n)
 
     print(
         "\nNote: the CTYPES backend runs kernels as a serial loop over the "
         "global\nthread id and has no block-local id / shared memory; such "
         "kernels raise\nNotImplementedError there by design."
     )
+    _report_exit(_ok_a and _ok_b, checks_run=(_ran_a or _ran_b),
+                 what='GPU backends')
 
 
 if __name__ == '__main__':

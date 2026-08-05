@@ -59,6 +59,7 @@ from collections import OrderedDict
 import numpy as np
 
 from idpy import idpy_os_found
+from idpy.Utils.TestExit import report_exit as _report_exit
 from idpy.Utils.HostModule import (
     HostModule, Toolchain, CToolchain, SwiftToolchain,
 )
@@ -208,12 +209,15 @@ def main():
         print(f"  H5 Swift shim         @_cdecl library built by swiftc, "
               f"loaded and called: {ok5}   -> {'OK' if ok5 else 'FAIL'}")
 
+    _ok = (err == 0.0 and ok2 and ok_types and ok_call and ok4
+           and (ok5 is None or ok5))
     print(
         "\nH3 and H5 together are the claim that Swift is a compiler choice and\n"
         "not a language target: one facility builds both CTYPES_T's C kernels\n"
         "and a Swift shim exposing C entry points, so binding MTLIOCommandQueue\n"
         "needs no new entry in idpy_langs_dict."
     )
+    _report_exit(_ok, checks_run=True)
 
 
 if __name__ == '__main__':

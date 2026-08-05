@@ -69,6 +69,7 @@ import numpy as np
 from idpy.IdpyCode import IDPY_T, CUDA_T, METAL_T
 from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyConstantPrecisionWarning
 from idpy.Utils.CustomTypes import CustomTypes
+from idpy.Utils.TestExit import report_exit as _report_exit
 
 
 def _kernel(constants, constants_types=None, ftype='float'):
@@ -237,6 +238,7 @@ def main():
         print(f"  [{'OK  ' if _passed else 'FAIL'}] {_name:28} -> {_passed}")
 
     print(f"\n  -> {'OK' if _ok else 'FAIL'}")
+    _report_exit(_ok, checks_run=True)
     print(
         "\nThe two declarations are not interchangeable: an alias tracks the\n"
         "kernel's working precision through the double->float downcast applied\n"
