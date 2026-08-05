@@ -131,7 +131,17 @@ def sweep(tenet, lattice, n_slots=_N_SLOTS, policy='lru', tmpdir=None):
     _in_path = os.path.join(tmpdir, 'lattice_in_%s.bin' % policy)
     _out_path = os.path.join(tmpdir, 'lattice_out_%s.bin' % policy)
 
-    in_store = IdpyResidency.MemMapStore.Create(_in_path, lattice, _BLOCK_ELEMS)
+    '''
+    CreateFileStore picks the storage->device lowering for this backend --
+    KvikIO/cuFile on CUDA, MTLIOCommandQueue on Metal, plain memmap elsewhere.
+    Every option subclasses MemMapStore, so a backend with no direct path (or a
+    missing binding, or a failed open) declines and the cache falls back. The
+    decline path is therefore exercised wherever it applies rather than merely
+    reasoned about.
+    '''
+    in_store = IdpyResidency.CreateFileStore(
+        _in_path, lattice, _BLOCK_ELEMS, tenet=tenet,
+    )
     out_store = IdpyResidency.MemMapStore.Create(
         _out_path, np.zeros_like(lattice), _BLOCK_ELEMS
     )
@@ -198,6 +208,16 @@ def run_on(lang, tmpdir):
         )
         out['P2 expected'] = (_exp_hits, _exp_misses)
         out['P4 writebacks'] = out_cache.stats['writebacks']
+        # P6: every miss resolved through exactly one read path, and the run
+        # can say which. A direct path that silently degraded to the host
+        # bounce would pass every other check unchanged.
+        out['P6 direct'] = in_cache.stats['direct_reads']
+        out['P6 staged'] = in_cache.stats['staged_reads']
+        out['P6 path'] = in_cache.store.DirectPathName() or 'staged (host bounce)'
+        out['P6 accounted'] = (
+            in_cache.stats['direct_reads'] + in_cache.stats['staged_reads']
+            == in_cache.stats['misses']
+        )
         out['resident_MB'] = (
             in_cache.buffer.size * np.dtype(_DTYPE).itemsize / (1 << 20)
         )
@@ -248,6 +268,7 @@ def main():
                 and r['P3 pinning'] == 'raised'
                 and r['P4 writebacks'] > 0
                 and r['P2 exact']
+                and r['P6 accounted']
             )
             print(f"  {human}: lattice {r['lattice_MB']:.0f} MiB over a "
                   f"{r['resident_MB']:.0f} MiB resident set "
@@ -263,6 +284,9 @@ def main():
                   f"reached the file")
             print(f"    P5 LRU vs FIFO          max|lru-fifo| = "
                   f"{r['P5 lru_vs_fifo']:g}")
+            print(f"    P6 read path            {r['P6 path']}: "
+                  f"{r['P6 direct']} direct / {r['P6 staged']} staged"
+                  f"   -> {'accounted' if r['P6 accounted'] else 'MISMATCH'}")
             print(f"    -> {'OK' if ok else 'FAIL'}\n")
             _ok = _ok and ok
 

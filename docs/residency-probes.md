@@ -644,6 +644,121 @@ Making the mixed case explicit per-literal is deferred to a second sweep.
 
 ---
 
+## 2j. Phase 3: storage → device, CUDA lowering verified
+
+`BackingStore.ReadBlockInto(block_id, view)` fills a device slot directly and
+returns `False` to **decline**. Declining is not an error — it is how a store
+says it has no direct path on this configuration, and the cache falls back to
+the host route without caring why. The capability is therefore optional per
+*store* rather than per backend, and the fallback stays the default.
+
+`KvikIOStore` subclasses `MemMapStore` and reads through KvikIO (NVIDIA cuFile /
+GPUDirect Storage). It is the right first row not for speed but because
+**KvikIO degrades to a POSIX read when GPUDirect is absent**, so the path is
+exercised and stays correct without GDS hardware, a compatible filesystem or the
+nvidia-fs driver. Inheriting `MemMapStore` means the fallback is the same store
+answering differently, not a second implementation that could drift.
+
+### Verified on `id` (2026-08-06), kvikio-cu13 26.6.0
+
+| backend | P1 | P2 | P6 read path |
+|---|---|---|---|
+| **CUDA** | exact | 62/34 exact | **34 direct / 0 staged** — cuFile |
+| OpenCL | exact | 62/34 exact | 0 direct / 34 staged |
+| CTypes | exact | 62/34 exact | 0 direct / 34 staged |
+
+The direct storage→device path works: 34 of 34 block loads bypassed host memory
+entirely, with the sweep still exact against the whole-lattice reference. The
+risk carried into that run — whether KvikIO would accept an `IdpyArrayCUDA`
+**SubView**, whose `gpudata` is borrowed with a `base` rather than freshly
+allocated — resolved in favour of it working through
+`__cuda_array_interface__`.
+
+### The counters earned their place immediately
+
+`direct_reads` / `staged_reads` exist because a direct path that silently
+degraded to the host bounce would pass every correctness check unchanged — the
+same failure mode as an `async` copy that is secretly synchronous, of which this
+work has already produced two. P6 asserts `direct + staged == misses`.
+
+They also caught a reporting bug on their first real run. `DirectPathName()`
+returned `'kvikio/cuFile'` whenever kvikio was merely *importable*, so on a host
+with it installed the CTypes and OpenCL rows read
+
+    kvikio/cuFile: 0 direct / 34 staged
+
+naming a path that was never taken. The counters were right; the label lied.
+`DirectPathName()` is now keyed on a read having actually **succeeded**, so a
+store that has only ever taken the staged route says so. Exactly the class of
+label that would let a degraded fast path look engaged.
+
+### Metal row: MTLIOCommandQueue via a Swift shim
+
+The row that makes the storage claim **portable rather than merely present**.
+Metal's storage API has no Python binding, pymetallic does not wrap it, and
+Swift is the only language that can see it — so this is the case the whole
+`HostModule` design was aimed at. Nothing is generated per kernel: it is fixed
+host code, written once, which is why Swift stays a *compiler choice* and there
+is still no `SWIFT_T` in `idpy_langs_dict`.
+
+Three things had to be verified rather than assumed, and were, by probing before
+building:
+
+1. **Pointer bridging.** pymetallic exposes `_device_ptr` / `_buffer_ptr` as raw
+   pointers; Swift reconstitutes them with
+   `Unmanaged.fromOpaque(...).takeUnretainedValue()`. The probe created an
+   `MTLIOCommandQueue` from pymetallic's own device.
+2. **Sub-range targeting.** The load writes at a byte offset inside an existing
+   buffer, so it fills a `SubView` of the cache rather than a whole allocation.
+   This works *because* Phase 2b gave `IdpyArrayMETAL` an element offset against
+   its parent Buffer — without that bookkeeping there is nothing to aim at.
+   Verified in isolation first: reading the second block of a file into the
+   middle of a buffer left the head untouched and matched exactly.
+3. **The Swift spelling.** It is
+   `load(_:offset:size:sourceHandle:sourceHandleOffset:)`. `loadBuffer(...)` is
+   the Objective-C name and was obsoleted in Swift 3; the compiler says so
+   plainly.
+
+`CreateFileStore(path, array, block_elems, tenet=)` picks the lowering —
+KvikIO/cuFile on CUDA, `MTLIOCommandQueue` on Metal, plain memmap elsewhere.
+Every option subclasses `MemMapStore`, so an unmatched backend, a missing
+binding or a failed open all land on the same staged path.
+
+### Phase 3 status
+
+| backend | mechanism | verified |
+|---|---|---|
+| **CUDA** | KvikIO / cuFile | **34 direct / 0 staged**, P1 exact (`id`) |
+| **Metal** | `MTLIOCommandQueue` | **34 direct / 0 staged**, P1 exact (M1 Max) |
+| OpenCL | — declines, stages | 0 direct / 34 staged |
+| CTypes | — declines, stages | 0 direct / 34 staged |
+| AMD | rocm-xio | not started; needs hardware |
+
+Two backends now stream storage→device through **the same policy code** with
+entirely different mechanisms underneath — cuFile on one, a Swift-compiled
+Metal IO queue on the other. That is the design's central asymmetry carried all
+the way to storage: the policy is one program, the lowerings are not.
+
+### Layering lint
+
+`scripts/check_layering.py` enforces `STRATEGY.md`'s "core never imports
+physics" against the current layout via the §3 migration mapping. Static
+analysis over import statements — no environment, no packages, no GPU — so it
+runs as CI's first step in seconds, before dependencies install.
+
+Two violations are grandfathered in a `KNOWN` allowlist, both function-local in
+`idpy/Utils/IdpySymbolic.py`, so `idpy.Utils` still loads cleanly without
+physics. Unpicking them is Phase 0b refactoring; the point is that nothing *new*
+can be added. Verified by injection: a fresh core→physics import exits 1 naming
+file and line.
+
+It also surfaced two invalid escape sequences (`'\ '`) in
+`idpy/IdpyCode/__init__.py` — accepted today with a `SyntaxWarning`, a
+`SyntaxError` in some future Python. Replaced with the identical two-character
+value spelled legally.
+
+---
+
 ## 3. Standing constraints
 
 - ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`
