@@ -62,7 +62,7 @@ class AddrQualif:
                                   'const': """__const""",
                                   'local': """__local""",
                                   'restrict': '',
-                                  'shared': '',
+                                  'shared': """__local""",
                                   'device': '',
                                   'thread': ''}
 
@@ -70,7 +70,7 @@ class AddrQualif:
                                      'const': """const""",
                                      'local': '',
                                      'restrict': """__restrict__""",
-                                     'shared': '',
+                                     'shared': """static""",
                                      'device': '',
                                      'thread': ''}
 
@@ -117,8 +117,60 @@ class FuncQualif:
         self.qualifiers = defaultdict(dict)
         self.qualifiers = {CUDA_T: """__device__""",
                            OCL_T: """ """,
-                           CTYPES_T: """ """, 
+                           CTYPES_T: """ """,
                            METAL_T: """ """}
+
+    def __getitem__(self, lang):
+        return self.qualifiers[lang]
+
+
+class SyncQualif:
+    '''
+    class SyncQualif:
+    class containing the collective thread-synchronization primitives (barriers)
+    for the different languages. These are the counterparts of CUDA's
+    '__syncthreads()' and back the portable 'idpy_sync'/'idpy_sync_global'
+    metalanguage tokens (see idpy.IdpyCode.IdpyCode.IdpyKernel.Code).
+
+    Second-entry keys:
+    - 'sync':        barrier + block/threadgroup(local) memory visibility.
+                     Use after collectively writing an 'idpy_shared' tile so
+                     every thread sees the others' stores.
+    - 'sync_global': barrier + global/device memory visibility. Use when the
+                     collective access is to 'global' buffers rather than to a
+                     shared tile.
+
+    Notes:
+    - CUDA: '__syncthreads()' already fences shared+global memory, so both keys
+      map to the same intrinsic.
+    - CTYPES: the kernel body runs as a serial loop over the global thread id,
+      so there is no block-level parallelism to synchronize; both barriers are
+      empty. Shared-memory kernels are therefore *not* semantically portable to
+      CTYPES (documented limitation) even though 'idpy_shared' -> 'static'
+      keeps the generated C compilable.
+    '''
+    def __init__(self):
+        self.qualifiers = defaultdict(dict)
+
+        self.qualifiers[CUDA_T] = {
+            'sync': """__syncthreads()""",
+            'sync_global': """__syncthreads()""",
+        }
+
+        self.qualifiers[OCL_T] = {
+            'sync': """barrier(CLK_LOCAL_MEM_FENCE)""",
+            'sync_global': """barrier(CLK_GLOBAL_MEM_FENCE)""",
+        }
+
+        self.qualifiers[CTYPES_T] = {
+            'sync': '',
+            'sync_global': '',
+        }
+
+        self.qualifiers[METAL_T] = {
+            'sync': """threadgroup_barrier(mem_flags::mem_threadgroup)""",
+            'sync_global': """threadgroup_barrier(mem_flags::mem_device)""",
+        }
 
     def __getitem__(self, lang):
         return self.qualifiers[lang]

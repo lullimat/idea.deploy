@@ -95,6 +95,50 @@ def _codify_div_assignment(_var_str, _expr):
     _macro += _var_str + " /= " + _codify(_expr) + ";\n"
     return _macro
 
+'''
+Shared (block/threadgroup) memory metalanguage tokens.
+
+These emit the portable 'idpy_*' tokens defined per-language at the top of the
+generated kernel source (see idpy.IdpyCode.IdpyCode.IdpyKernel.Code). They let a
+single IDPY_T kernel body harness CUDA shared memory / OpenCL __local /
+Metal threadgroup memory together with the matching '__syncthreads()'-style
+barrier, without hard-coding any backend intrinsic in the meta-code.
+
+Token mapping (filled in by SyncQualif / AddrQualif['shared']):
+    idpy_shared      -> __shared__ | __local | threadgroup | static
+    idpy_sync        -> __syncthreads() | barrier(CLK_LOCAL_MEM_FENCE) | ...
+    idpy_sync_global -> __syncthreads() | barrier(CLK_GLOBAL_MEM_FENCE) | ...
+'''
+_idpy_shared_token = 'idpy_shared'
+_idpy_sync_token = 'idpy_sync'
+_idpy_sync_global_token = 'idpy_sync_global'
+
+def _codify_sync():
+    '''Collective barrier + shared(local)-memory fence. CUDA '__syncthreads()'.'''
+    return _idpy_sync_token + ";" + _codify_newl
+
+def _codify_sync_global():
+    '''Collective barrier + global(device)-memory fence.'''
+    return _idpy_sync_global_token + ";" + _codify_newl
+
+def _codify_shared_declaration(_var_str, _type, _size,
+                               declared_variables = None):
+    '''
+    Declare a block/threadgroup-shared array:
+        idpy_shared <type> <name>[<size>];
+    '_size' should be a compile-time constant or macro (e.g. a kernel constant
+    such as the block size) so the same declaration is valid for CUDA static
+    '__shared__', OpenCL '__local' and Metal 'threadgroup' arrays.
+    When 'declared_variables' is provided the name is registered (mirroring the
+    other _codify_* checks) so later assignments do not re-declare it.
+    '''
+    _macro = (_idpy_shared_token + " " + str(_type) + " " +
+              _codify(_var_str) + "[" + str(_size) + "];" + _codify_newl)
+    if declared_variables is not None:
+        if _var_str not in declared_variables[0]:
+            declared_variables[0] += [_codify(_var_str)]
+    return _macro
+
 def _codify_declaration(_var_str, _expr, _type = None):
     if _type is not None:
         return _type + " " + _codify_assignment(_var_str, _expr)

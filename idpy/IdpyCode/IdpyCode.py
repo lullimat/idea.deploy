@@ -42,7 +42,7 @@ import sys
 
 from functools import reduce
 
-from idpy.IdpyCode.IdpyConsts import AddrQualif, KernQualif, FuncQualif
+from idpy.IdpyCode.IdpyConsts import AddrQualif, KernQualif, FuncQualif, SyncQualif
 
 from idpy.IdpyCode import idpy_nvcc_path, idpy_langs_list
 from idpy.IdpyCode import idpy_langs_dict_sym, idpy_langs_sys
@@ -182,15 +182,89 @@ class IdpyKernel:
 
         self.kernels_qualifiers = KernQualif()
         self.AddrQ = AddrQualif()
+        self.SyncQ = SyncQualif()
 
         '''
         List of variables and constants for metaprogramming
         '''
         self.declared_variables, self.declared_constants = [[]], [[]]
 
+        '''
+        Dynamic (runtime-sized) block/threadgroup-shared buffers.
+        A list of dicts {'name': str, 'type': ctype_str, 'dtype': np.dtype};
+        populated by SetDynamicSharedMemory(). Portability across CUDA/OpenCL/
+        Metal follows the lowest common denominator (CUDA's single
+        'extern __shared__' region), so at most one buffer is allowed.
+        '''
+        self.shared_dynamic = []
+
         # Code Flags
         self.code_flags = defaultdict(dict)
         self.InitCodeFlags()
+
+    def SetDynamicSharedMemory(self, buffers = None):
+        '''
+        Declare runtime-sized shared memory that the kernel body can use by
+        name (like a 'global' buffer but living in fast on-chip shared/local/
+        threadgroup memory). The byte size is fixed per launch (at kernel
+        instantiation), not at compile time -- mapping to:
+            CUDA   : 'extern __shared__ T name[];' + launch 'shared=' bytes
+            OpenCL : '__local T * name' kernel arg  + cl.LocalMemory(bytes)
+            Metal  : 'threadgroup T * name [[threadgroup(0)]]'
+                     + encoder.set_threadgroup_memory_length(bytes, 0)
+
+        'buffers': a dict {name: {'type': ctype_str, 'dtype': np_dtype}} or a
+        list of {'name','type','dtype'} dicts. numpy dtype is used to size the
+        allocation from an element count. At most one buffer is supported
+        (CUDA exposes a single dynamic shared region); index into it manually
+        for multiple logical tiles.
+        '''
+        _norm = []
+        if buffers is None:
+            self.shared_dynamic = _norm
+            return _norm
+        if isinstance(buffers, dict):
+            _items = [
+                {'name': _n, 'type': _v['type'], 'dtype': np.dtype(_v['dtype'])}
+                for _n, _v in buffers.items()
+            ]
+        else:
+            _items = [
+                {'name': _b['name'], 'type': _b['type'],
+                 'dtype': np.dtype(_b['dtype'])}
+                for _b in buffers
+            ]
+        if len(_items) > 1:
+            raise NotImplementedError(
+                "At most one dynamic shared buffer per kernel is portable: "
+                "CUDA exposes a single 'extern __shared__' region. Declare one "
+                "buffer and index into it manually for multiple logical tiles."
+            )
+        self.shared_dynamic = _items
+        return _items
+
+    def DynSharedBytes(self, block = None, dyn_shared_count = None,
+                       dyn_shared_bytes = None):
+        '''
+        Resolve the dynamic-shared byte size for one launch. Explicit
+        'dyn_shared_bytes' wins; else 'dyn_shared_count' elements times the
+        buffer dtype's itemsize; else default to one element per thread
+        (product of the block dimensions), the common tiling case.
+        '''
+        if not self.shared_dynamic:
+            return 0
+        if dyn_shared_bytes is not None:
+            return int(dyn_shared_bytes)
+        _itemsize = self.shared_dynamic[0]['dtype'].itemsize
+        if dyn_shared_count is not None:
+            return int(dyn_shared_count) * _itemsize
+        if block is not None:
+            _threads = int(reduce(lambda x, y: x * y, block))
+            return _threads * _itemsize
+        raise ValueError(
+            "Cannot size dynamic shared memory: pass dyn_shared_bytes=, "
+            "dyn_shared_count=, or a block to default to one element per thread"
+        )
 
     def InitFunctions(self):
         '''
@@ -354,9 +428,18 @@ class IdpyKernel:
                          (threadIdx.y + threadIdx.z * blockDim.y) * blockDim.x;\n""")
         _swap[OCL_T] = ("""unsigned int """ + self.lthread_id_code + """ = """ + \
                         """
-                        get_local_id(0) + 
+                        get_local_id(0) +
                         (get_local_id(1) + get_local_id(2) * get_local_size(1)) * get_local_size(0);\n""")
-        _swap[METAL_T] = ""
+        # Metal: l_tid is a kernel parameter with [[thread_position_in_threadgroup]]
+        # when requested on its own. If the local thread coords are *also*
+        # requested, that attribute is carried by the uint3 '<l_tid_c>_vec'
+        # param (an attribute may appear once), so derive the linear id from it.
+        if self.code_flags[self.lthread_id_coords_code]:
+            _swap[METAL_T] = ("""unsigned int """ + self.lthread_id_code +
+                              """ = """ + self.lthread_id_coords_code +
+                              """_vec.x;\n""")
+        else:
+            _swap[METAL_T] = ""
         return _swap
 
     def SetLocalThreadCoords(self):
@@ -374,7 +457,12 @@ class IdpyKernel:
                         """get_local_id(1);\n""" +
                         """unsigned int """ + self.lthread_id_coords_code + """_z""" + """ = """ + \
                         """get_local_id(2);\n""")
-        _swap[METAL_T] = ""
+        # Metal: coords come from the uint3 '<code>_vec [[thread_position_in_threadgroup]]'
+        # kernel parameter injected by WriteCodeParams.
+        _c = self.lthread_id_coords_code
+        _swap[METAL_T] = ("""unsigned int """ + _c + """_x = """ + _c + """_vec.x;\n""" +
+                          """unsigned int """ + _c + """_y = """ + _c + """_vec.y;\n""" +
+                          """unsigned int """ + _c + """_z = """ + _c + """_vec.z;\n""")
         return _swap
 
     def SetLocalBlockCoords(self):
@@ -392,7 +480,12 @@ class IdpyKernel:
                         """get_group_id(1);\n""" +
                         """unsigned int """ + self.block_coords_code + """_z""" + """ = """ + \
                         """get_group_id(2);\n""")
-        _swap[METAL_T] = ""
+        # Metal: block/threadgroup coords from the uint3
+        # '<code>_vec [[threadgroup_position_in_grid]]' kernel parameter.
+        _b = self.block_coords_code
+        _swap[METAL_T] = ("""unsigned int """ + _b + """_x = """ + _b + """_vec.x;\n""" +
+                          """unsigned int """ + _b + """_y = """ + _b + """_vec.y;\n""" +
+                          """unsigned int """ + _b + """_z = """ + _b + """_vec.z;\n""")
         return _swap
 
     def WriteAsHeader(self, lang = None, prepend_path = None):
@@ -449,6 +542,67 @@ class IdpyKernel:
         _swap += '\n'
         return _swap
 
+    def CollectiveMacros(self, lang = None):
+        '''
+        Emit the portable shared-memory / barrier metalanguage tokens as
+        per-language #define's, so a single IDPY_T kernel body can harness
+        block/threadgroup-shared memory and thread synchronization without
+        hard-coding any backend intrinsic:
+
+            idpy_shared         block/threadgroup-shared address qualifier
+                                (CUDA __shared__ | OpenCL __local |
+                                 Metal threadgroup | CTypes static)
+            idpy_sync           collective barrier + shared(local) mem fence
+                                (CUDA __syncthreads() | OpenCL
+                                 barrier(CLK_LOCAL_MEM_FENCE) | Metal
+                                 threadgroup_barrier(mem_flags::mem_threadgroup))
+            idpy_sync_global    collective barrier + global(device) mem fence
+
+        Same mechanism as the Metal 'precise::' math defines above: the right
+        construct is chosen at compile time by 'lang'. Companion codegen helpers
+        live in idpy.IdpyCode.IdpyUnroll (_codify_shared_declaration,
+        _codify_sync, _codify_sync_global).
+        '''
+        _shared = self.AddrQ[lang]['shared']
+        _sync = self.SyncQ[lang]['sync']
+        _sync_global = self.SyncQ[lang]['sync_global']
+
+        _macros = ''
+        _macros += '#define idpy_shared ' + _shared + '\n'
+        _macros += '#define idpy_sync ' + _sync + '\n'
+        _macros += '#define idpy_sync_global ' + _sync_global + '\n\n'
+        return _macros
+
+    def DynSharedParams(self, lang = None, AddrQ = None):
+        '''
+        Kernel-parameter fragments for runtime-sized shared memory. OpenCL and
+        Metal pass the region as a pointer argument (with '__local' /
+        'threadgroup' address space); Metal also needs the '[[threadgroup(0)]]'
+        attribute. CUDA/CTYPES return an empty list (CUDA declares it in-body).
+        '''
+        if not self.shared_dynamic or lang not in (OCL_T, METAL_T):
+            return []
+        _shared_q = AddrQ['shared']
+        _params = []
+        for _i, _buf in enumerate(self.shared_dynamic):
+            _p = _shared_q + " " + _buf['type'] + " * " + _buf['name']
+            if lang == METAL_T:
+                _p += " [[threadgroup(" + str(_i) + ")]]"
+            _params.append(_p)
+        return _params
+
+    def DynSharedCUDADeclaration(self):
+        '''
+        CUDA in-body declaration of the runtime-sized shared region:
+            extern __shared__ T name[];
+        The byte size is supplied at launch via the 'shared=' kernel argument.
+        '''
+        if not self.shared_dynamic:
+            return ""
+        _buf = self.shared_dynamic[0]
+        return ("extern " + self.AddrQ[CUDA_T]['shared'] + " " +
+                _buf['type'] + " " + _buf['name'] + "[];\n")
+
     def Code(self, lang = None):
         # Argument Qualifiers
         AddrQ = self.AddrQ[lang]
@@ -479,6 +633,12 @@ class IdpyKernel:
             self.code += self.IncludeHeaders()
             self.headers_files = _saved_headers
 
+        # Inserting portable collective-memory metalanguage macros
+        # (idpy_shared / idpy_sync / idpy_sync_global). Emitted after any
+        # 'using namespace metal;' so Metal's mem_flags/threadgroup_barrier
+        # resolve, and before functions/kernel body so both can use them.
+        self.code += self.CollectiveMacros(lang=lang)
+
         # Inserting macros
         if self.declare_macros == 'header':
             self.code += self.DeclareMacros(lang=lang)
@@ -496,21 +656,51 @@ class IdpyKernel:
         else:
             self.code += self.return_type + " " + self.name
 
+        # Dynamic (runtime-sized) shared memory: OpenCL and Metal carry it as a
+        # kernel parameter; CUDA declares 'extern __shared__' in the body and
+        # CTYPES has no shared memory (guarded below).
+        _dyn_shared_params = self.DynSharedParams(lang, AddrQ)
+
         # Kernel Parameters
         if lang == METAL_T:
-            g_tid = (self.gthread_id_code
-                     if self.code_flags[self.gthread_id_code] else None)
+            _metal_builtins = {
+                'g_tid': (self.gthread_id_code
+                          if self.code_flags[self.gthread_id_code] else None),
+                'l_tid': (self.lthread_id_code
+                          if self.code_flags[self.lthread_id_code] else None),
+                'l_tid_c': (self.lthread_id_coords_code
+                            if self.code_flags[self.lthread_id_coords_code] else None),
+                'bid_c': (self.block_coords_code
+                          if self.code_flags[self.block_coords_code] else None),
+            }
             self.code += WriteCodeParams(
-                self.params, AddrQ, metal_kernel=True, g_tid_name=g_tid
+                self.params, AddrQ, metal_kernel=True,
+                metal_builtins=_metal_builtins, extra_params=_dyn_shared_params
             )
         else:
-            self.code += WriteCodeParams(self.params, AddrQ)
+            self.code += WriteCodeParams(
+                self.params, AddrQ, extra_params=_dyn_shared_params
+            )
 
         # Inserting kernel body
         self.code += """{\n"""
         ## Global thread id
         if self.code_flags[self.gthread_id_code]:
             self.code += self.SetGlobalThreadId()[lang]
+        ## Block-local indexing (l_tid / l_tid_c / bid_c) is a block-parallel
+        ## concept with no counterpart in the CTYPES serial-loop model; the
+        ## same holds for idpy_shared / idpy_sync (block-collective) kernels.
+        if lang == CTYPES_T and (
+                self.code_flags[self.lthread_id_code] or
+                self.code_flags[self.lthread_id_coords_code] or
+                self.code_flags[self.block_coords_code] or
+                self.shared_dynamic):
+            raise NotImplementedError(
+                "CTYPES backend has no block-local thread id / shared memory: "
+                "its kernel body runs as a serial loop over the global thread "
+                "id, so 'l_tid'/'l_tid_c'/'bid_c' and idpy_shared/idpy_sync "
+                "kernels are unsupported. Target CUDA, OpenCL or Metal instead."
+            )
         ## Local thread id
         if self.code_flags[self.lthread_id_code]:
             self.code += self.SetLocalThreadId()[lang]
@@ -520,6 +710,11 @@ class IdpyKernel:
         ## Block coords
         if self.code_flags[self.block_coords_code]:
             self.code += self.SetLocalBlockCoords()[lang]
+        ## Dynamic shared memory: CUDA declares the runtime-sized region in the
+        ## body as 'extern __shared__ T name[];' (OpenCL/Metal took it as a
+        ## kernel parameter above).
+        if lang == CUDA_T:
+            self.code += self.DynSharedCUDADeclaration()
 
         ## Kernel Code
         if lang in self.kernels:
@@ -543,7 +738,16 @@ class IdpyKernel:
 
     def __call__(self, tenet = None,
                  grid = None, block = None, **kwargs):
-        
+
+        # Resolve runtime-sized shared memory bytes once, from the *original*
+        # block (OpenCL rewrites block to None for CPU devices below). 0 when
+        # the kernel declares no dynamic shared buffer.
+        _dyn_shared_bytes = self.DynSharedBytes(
+            block=block,
+            dyn_shared_count=kwargs.get('dyn_shared_count'),
+            dyn_shared_bytes=kwargs.get('dyn_shared_bytes'),
+        )
+
         if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
 
             _kernel_module = cl.Program(tenet.context, self.Code(OCL_T)).build(self.SetMacros(OCL_T))
@@ -572,6 +776,12 @@ class IdpyKernel:
                         else:
                             _args_data.append(arg)
 
+                    # Runtime-sized __local buffer is a trailing kernel arg
+                    if self.k_dict.get('dyn_shared_bytes'):
+                        _args_data.append(
+                            cl.LocalMemory(self.k_dict['dyn_shared_bytes'])
+                        )
+
                     '''
                     print(self.k_dict['_kernel_function'].get_info(cl.kernel_info.FUNCTION_NAME))
                     print(self.k_dict['_kernel_function'].get_work_group_info(cl.kernel_work_group_info.WORK_GROUP_SIZE, self.k_dict['tenet'].device))
@@ -590,6 +800,12 @@ class IdpyKernel:
                             _args_data.append(arg.data)
                         else:
                             _args_data.append(arg)
+
+                    # Runtime-sized __local buffer is a trailing kernel arg
+                    if self.k_dict.get('dyn_shared_bytes'):
+                        _args_data.append(
+                            cl.LocalMemory(self.k_dict['dyn_shared_bytes'])
+                        )
 
                     # Apple OpenCL event timestamps are unreliable; use host
                     # wall clock (enqueue + wait), matching Metal DeployProfiling.
@@ -619,7 +835,8 @@ class IdpyKernel:
                 
 
             return Idea({'tenet': tenet, 'grid': grid, 'block': block,
-                         '_kernel_function': _kernel_function, '_kernel_name': self.name})
+                         '_kernel_function': _kernel_function, '_kernel_name': self.name,
+                         'dyn_shared_bytes': _dyn_shared_bytes})
 
         if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
             _kernel_module = cu_SourceModule(self.Code(CUDA_T), options = self.SetMacros(CUDA_T),
@@ -634,6 +851,7 @@ class IdpyKernel:
                     return self.k_dict['_kernel_function'](*args_list,
                                                            grid = self.k_dict['grid'],
                                                            block = self.k_dict['block'],
+                                                           shared = self.k_dict['dyn_shared_bytes'],
                                                            stream = idpy_stream)
 
                 def DeployProfiling(self, args_list = None, idpy_stream = None):
@@ -644,21 +862,24 @@ class IdpyKernel:
                     self.k_dict['_kernel_function'](*args_list,
                                                     grid = self.k_dict['grid'],
                                                     block = self.k_dict['block'],
+                                                    shared = self.k_dict['dyn_shared_bytes'],
                                                     stream = idpy_stream)
-                    
+
                     _start.record(stream = idpy_stream)
                     self.k_dict['_kernel_function'](*args_list,
                                                     grid = self.k_dict['grid'],
                                                     block = self.k_dict['block'],
+                                                    shared = self.k_dict['dyn_shared_bytes'],
                                                     stream = idpy_stream)
                     _end.record(stream = idpy_stream)
                     _end.synchronize()
                     _time_sec = _start.time_till(_end) * 1e-3
                     return None, _time_sec
-                
-                
+
+
             return Idea({'_kernel_function': _kernel_function, '_kernel_name': self.name,
-                         'tenet': tenet, 'grid': grid, 'block': block})
+                         'tenet': tenet, 'grid': grid, 'block': block,
+                         'dyn_shared_bytes': _dyn_shared_bytes})
 
         if idpy_langs_sys[CTYPES_T] and isinstance(tenet, CTTenet):
 
@@ -754,6 +975,11 @@ class IdpyKernel:
                     encoder.set_compute_pipeline_state(self.k_dict['_pipeline'])
                     for i, buf in enumerate(_args_data):
                         encoder.set_buffer(buf, 0, i)
+                    # Runtime-sized threadgroup memory for the [[threadgroup(0)]] param
+                    if self.k_dict.get('dyn_shared_bytes'):
+                        encoder.set_threadgroup_memory_length(
+                            self.k_dict['dyn_shared_bytes'], 0
+                        )
                     encoder.dispatch_threads(
                         self.k_dict['global'], self.k_dict['block']
                     )
@@ -783,7 +1009,7 @@ class IdpyKernel:
 
             return Idea({'_pipeline': _pipeline, '_kernel_name': self.name,
                          'tenet': tenet, 'grid': grid, 'block': _block,
-                         'global': _global})
+                         'global': _global, 'dyn_shared_bytes': _dyn_shared_bytes})
 
     def ResetCode(self):
         self.code = ""
@@ -845,7 +1071,16 @@ class IdpyFunction:
         self.code = ""
 
 def WriteCodeParams(params = None, AddrQ = None,
-                    metal_kernel = False, g_tid_name = None):
+                    metal_kernel = False, g_tid_name = None,
+                    metal_builtins = None, extra_params = None):
+    # Back-compat: a bare g_tid_name folds into the builtins dict.
+    if metal_builtins is None:
+        metal_builtins = {}
+    if extra_params is None:
+        extra_params = []
+    if g_tid_name is not None and 'g_tid' not in metal_builtins:
+        metal_builtins = dict(metal_builtins)
+        metal_builtins['g_tid'] = g_tid_name
     _code = ""
     _code += "("
     buffer_i = 0
@@ -884,8 +1119,33 @@ def WriteCodeParams(params = None, AddrQ = None,
             else:
                 _code += param + ","
 
-    if metal_kernel and g_tid_name is not None:
-        _code += "uint " + g_tid_name + " [[thread_position_in_grid]], "
+    # Framework-injected extra params (already fully formatted, e.g. dynamic
+    # shared memory pointers). For Metal these carry their own [[threadgroup(i)]]
+    # attribute and must precede the position-attributed built-ins below.
+    for _extra in extra_params:
+        _code += _extra + ", "
+
+    if metal_kernel:
+        # Attributed built-in kernel params. A given Metal attribute may appear
+        # at most once, so when both the linear local id (l_tid) and the local
+        # coords (l_tid_c) are requested, only the uint3 coords vector carries
+        # [[thread_position_in_threadgroup]] and l_tid is derived from its .x
+        # in the kernel body (see SetLocalThreadId).
+        _g = metal_builtins.get('g_tid')
+        _l = metal_builtins.get('l_tid')
+        _lc = metal_builtins.get('l_tid_c')
+        _bc = metal_builtins.get('bid_c')
+
+        if _g is not None:
+            _code += "uint " + _g + " [[thread_position_in_grid]], "
+        if _lc is not None:
+            _code += ("uint3 " + _lc +
+                      "_vec [[thread_position_in_threadgroup]], ")
+        elif _l is not None:
+            _code += "uint " + _l + " [[thread_position_in_threadgroup]], "
+        if _bc is not None:
+            _code += ("uint3 " + _bc +
+                      "_vec [[threadgroup_position_in_grid]], ")
 
     # Eliminating last comma/space
     _code = _code.rstrip()
