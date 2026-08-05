@@ -223,6 +223,16 @@ class KvikIOStore(MemMapStore):
         MemMapStore.__init__(self, path, n_elems, block_elems, dtype, mode=mode)
         self._cufile = None
         self._direct = IsModuleThere('kvikio')
+        '''
+        Whether a direct read has actually SUCCEEDED, as opposed to whether
+        kvikio merely imports. The two differ constantly: on a host with kvikio
+        installed, a CTypes or OpenCL cache still takes the staged path, because
+        the destination is not a CUDA array. Reporting availability as if it
+        were use produced the line "kvikio/cuFile: 0 direct / 34 staged", which
+        names a path that was never taken -- exactly the kind of label that lets
+        a silently-degraded fast path look engaged.
+        '''
+        self._direct_used = False
 
     def _CuFile(self):
         if self._cufile is None:
@@ -261,10 +271,17 @@ class KvikIOStore(MemMapStore):
             return False
 
         self.bytes_read += _nbytes
+        self._direct_used = True
         return True
 
     def DirectPathName(self):
-        return 'kvikio/cuFile' if self._direct else None
+        '''
+        The direct path actually in use, or None.
+
+        Keyed on a successful read rather than on kvikio being importable, so a
+        store that has only ever taken the staged route says so.
+        '''
+        return 'kvikio/cuFile' if self._direct_used else None
 
     def Close(self):
         if self._cufile is not None:
