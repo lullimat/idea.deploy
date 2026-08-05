@@ -969,6 +969,15 @@ class IdpyKernel:
             # include_dirs goes through SourceModule's own parameter rather than
             # as '-I' in options: pycuda passes it to nvcc for us, and keeps the
             # paths out of the space-split options string.
+            #
+            # CAVEAT: pycuda wraps the source in 'extern "C" { ... }' unless
+            # no_extern_c is set, so any '#include' emitted by IncludeHeaders
+            # lands INSIDE that wrapper. Harmless for a macro-only header, which
+            # is all test_linkage L4 exercises and all this path is verified for.
+            # A header carrying declarations may not survive being given C
+            # linkage -- notably anything with templates or overloads. If that
+            # case is needed, the fix is to pass no_extern_c=True and mark the
+            # kernel entry point 'extern "C"' explicitly.
             _kernel_module = cu_SourceModule(self.Code(CUDA_T), options = self.SetMacros(CUDA_T),
                                              nvcc = idpy_nvcc_path,
                                              include_dirs = (
