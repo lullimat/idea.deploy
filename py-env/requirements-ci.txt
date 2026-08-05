@@ -1,0 +1,24 @@
+# Minimal dependency set for the CTypes-only CI job.
+#
+# NOT a substitute for requirements.txt, which provisions a full research
+# environment (jupyter, opencv, scikit-learn, einsteinpy, plotly ...) and takes
+# minutes to install. This is the subset actually reachable from an import of
+# idpy plus the suites that run without a GPU.
+#
+# Derived by walking every import in idpy/ and removing the standard library
+# and the GPU bindings, which are guarded by IsModuleThere and simply report
+# their backend as absent when missing.
+#
+# Keeping it in sync is self-policing: adding a dependency that CI does not
+# install fails the job at import, which is the right place to find out.
+
+numpy
+scipy
+sympy
+matplotlib
+h5py
+psutil
+py-cpuinfo
+dill
+multiprocess
+ipython
