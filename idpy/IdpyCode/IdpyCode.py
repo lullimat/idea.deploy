@@ -163,6 +163,41 @@ class IdpyKernel:
         self.headers_files = (
             list(headers_files) if headers_files is not None else None
         )
+        '''
+        Insertion point (2): static code linked into the kernel compile unit.
+
+        These three were validated and then dropped on the floor -- a caller who
+        passed objects_files got a type check and silence. They are stored and
+        used now (Phase 4). Each maps to a different mechanism, and each has a
+        different reach across backends:
+
+          definitions_files  source text injected into the compile unit. Works
+                             everywhere, since every backend compiles from a
+                             source string. Entries may be paths, or objects
+                             exposing Code(lang) -- which is how an IdpyKernel
+                             or IdpyFunction gets pulled into another kernel's
+                             compile unit.
+          include_dirs       compiler search paths. CUDA (SourceModule's own
+                             include_dirs), OpenCL and CTypes ('-I'). Not
+                             expressible on Metal.
+          objects_files      pre-compiled native objects to link. Only CTypes
+                             has a native link step; CUDA compiles to cubin
+                             through nvcc, and OpenCL and Metal build from
+                             source with no object linking at all.
+
+        Where a mechanism has no meaning on a backend it now raises rather than
+        being ignored -- see CheckLinkage. Silently accepting an argument that
+        cannot work is what this phase exists to remove.
+        '''
+        self.include_dirs = (
+            list(include_dirs) if include_dirs is not None else None
+        )
+        self.definitions_files = (
+            list(definitions_files) if definitions_files is not None else None
+        )
+        self.objects_files = (
+            list(objects_files) if objects_files is not None else None
+        )
         self.declarations = {}
 
         '''
@@ -331,10 +366,15 @@ class IdpyKernel:
 
             if self.optimizer_flag is False:
                 self.macros += " -cl-opt-disable"
-                
+
+            # Insertion point (2): header search paths for '#include'
+            if self.include_dirs:
+                for _inc in self.include_dirs:
+                    self.macros += " -I " + str(_inc)
+
             ##if self.macros == '':
             ##    self.macros = None
-                
+
             return self.macros
 
         if lang == CTYPES_T:
@@ -361,10 +401,24 @@ class IdpyKernel:
             '''
             if self.headers_files is not None and 'math.h' in self.headers_files:
                 self.macros += " -lm"
-                
+
+            '''
+            Insertion point (2). CTypes is the only backend with a native link
+            step, so it is the only one where objects_files means anything.
+            Both are appended to the compile string, which HostModule splits on
+            spaces and hands to the compiler -- object files may appear anywhere
+            in a gcc/clang argument vector, so position ahead of '-o' is fine.
+            '''
+            if self.include_dirs:
+                for _inc in self.include_dirs:
+                    self.macros += " -I " + str(_inc)
+            if self.objects_files:
+                for _obj in self.objects_files:
+                    self.macros += " " + str(_obj)
+
             if self.macros == '':
                 self.macros = None
-                
+
             return self.macros
 
         if lang == METAL_T:
@@ -542,6 +596,64 @@ class IdpyKernel:
         _swap += '\n'
         return _swap
 
+    def CheckLinkage(self, lang = None):
+        '''
+        Refuse a linkage mechanism the target cannot express.
+
+        The point of Phase 4 is that these parameters stop being silently
+        discarded, so an unusable combination has to say so. Raising here rather
+        than at the compile site means the failure arrives on Code(), before any
+        backend has been asked to build something that could not have worked.
+        '''
+        if self.objects_files and lang != CTYPES_T:
+            raise NotImplementedError(
+                "objects_files is only supported on CTYPES_T: it needs a native "
+                "link step. CUDA compiles to cubin through nvcc, and OpenCL and "
+                "Metal build from source with no object linking. Use "
+                "definitions_files to inject source into the compile unit "
+                "instead."
+            )
+        if self.include_dirs and lang == METAL_T:
+            raise NotImplementedError(
+                "include_dirs cannot be expressed on Metal: the library is built "
+                "from a source string with no search-path option. Use "
+                "definitions_files to inject the contents directly."
+            )
+
+    def IncludeDefinitions(self, lang = None):
+        '''
+        Inject source into this kernel's compile unit.
+
+        An entry is either a path, whose text is read verbatim, or an object
+        exposing Code(lang) -- an IdpyFunction, or another IdpyKernel. A kernel
+        is injected WITHOUT its preamble, so its headers, macros and typedefs do
+        not collide with this one's; duplicate typedefs are an error in C99 and
+        would otherwise make the mechanism unusable for exactly the case it
+        exists to serve.
+
+        Consequence worth knowing: the compile unit belongs to the top-level
+        kernel. An injected kernel's own definitions_files are NOT pulled in
+        transitively -- declare everything the unit needs on the kernel that
+        owns it. Nesting would otherwise duplicate injections with no way to
+        deduplicate them across independently-built sources.
+        '''
+        if not self.definitions_files:
+            return ''
+        _swap = ''
+        for _d_file in self.definitions_files:
+            _code_fn = getattr(_d_file, 'Code', None)
+            if callable(_code_fn):
+                try:
+                    _swap += _code_fn(lang = lang, preamble = False)
+                except TypeError:
+                    # IdpyFunction emits a bare function: no preamble to skip
+                    _swap += _code_fn(lang = lang)
+            else:
+                with open(str(_d_file), 'r') as _fh:
+                    _swap += _fh.read()
+            _swap += '\n'
+        return _swap + '\n'
+
     def CollectiveMacros(self, lang = None):
         '''
         Emit the portable shared-memory / barrier metalanguage tokens as
@@ -603,14 +715,24 @@ class IdpyKernel:
         return ("extern " + self.AddrQ[CUDA_T]['shared'] + " " +
                 _buf['type'] + " " + _buf['name'] + "[];\n")
 
-    def Code(self, lang = None):
+    def Code(self, lang = None, preamble = True):
+        '''
+        Generate this kernel's source for 'lang'.
+
+        preamble=False emits only the functions, the kernel signature and the
+        body -- no headers, macros or typedefs. That is the form used when this
+        kernel is injected into another one's compile unit via
+        definitions_files, where the enclosing kernel already supplies the
+        preamble and a second copy of the typedefs would not compile.
+        '''
         # Argument Qualifiers
         AddrQ = self.AddrQ[lang]
+        self.CheckLinkage(lang = lang)
         self.ResetCode()
         # Inserting headers
         ## Checking for 'math.h'
 
-        if lang == METAL_T:
+        if lang == METAL_T and preamble:
             self.code += "#include <metal_stdlib>\n"
             self.code += "using namespace metal;\n"
             # Default Metal tanh/exp/log overflow to NaN for large |x| on Apple
@@ -621,7 +743,7 @@ class IdpyKernel:
             self.code += "#define log2(X) precise::log2(X)\n"
             self.code += "#define log10(X) precise::log10(X)\n\n"
 
-        if self.headers_files is not None:
+        if self.headers_files is not None and preamble:
             # Work on a local copy — never mutate self.headers_files in place
             # (shared default lists like ['math.h'] must stay intact for CTYPES).
             _headers_for_code = list(self.headers_files)
@@ -633,18 +755,23 @@ class IdpyKernel:
             self.code += self.IncludeHeaders()
             self.headers_files = _saved_headers
 
-        # Inserting portable collective-memory metalanguage macros
-        # (idpy_shared / idpy_sync / idpy_sync_global). Emitted after any
-        # 'using namespace metal;' so Metal's mem_flags/threadgroup_barrier
-        # resolve, and before functions/kernel body so both can use them.
-        self.code += self.CollectiveMacros(lang=lang)
+        if preamble:
+            # Inserting portable collective-memory metalanguage macros
+            # (idpy_shared / idpy_sync / idpy_sync_global). Emitted after any
+            # 'using namespace metal;' so Metal's mem_flags/threadgroup_barrier
+            # resolve, and before functions/kernel body so both can use them.
+            self.code += self.CollectiveMacros(lang=lang)
 
-        # Inserting macros
-        if self.declare_macros == 'header':
-            self.code += self.DeclareMacros(lang=lang)
-        # Inserting types
-        if self.declare_types == 'typedef':
-            self.code += self.DeclareTypes()
+            # Inserting macros
+            if self.declare_macros == 'header':
+                self.code += self.DeclareMacros(lang=lang)
+            # Inserting types
+            if self.declare_types == 'typedef':
+                self.code += self.DeclareTypes()
+            # Insertion point (2): source injected into this compile unit.
+            # After the typedefs, so injected code can use the kernel's types;
+            # before the functions and body, which may call into it.
+            self.code += self.IncludeDefinitions(lang=lang)
         # Inserting Functions
         self.InitFunctions()
         for function in self.functions:
@@ -839,8 +966,15 @@ class IdpyKernel:
                          'dyn_shared_bytes': _dyn_shared_bytes})
 
         if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
+            # include_dirs goes through SourceModule's own parameter rather than
+            # as '-I' in options: pycuda passes it to nvcc for us, and keeps the
+            # paths out of the space-split options string.
             _kernel_module = cu_SourceModule(self.Code(CUDA_T), options = self.SetMacros(CUDA_T),
-                                             nvcc = idpy_nvcc_path)
+                                             nvcc = idpy_nvcc_path,
+                                             include_dirs = (
+                                                 [str(_d) for _d in self.include_dirs]
+                                                 if self.include_dirs else []
+                                             ))
             _kernel_function = _kernel_module.get_function(self.name)
 
             class Idea:

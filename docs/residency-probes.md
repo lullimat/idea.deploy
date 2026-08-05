@@ -502,6 +502,61 @@ land in `idpy.core` anyway, so this costs nothing later.
 
 ---
 
+## 2h. Phase 4: insertion point (2) wired
+
+`include_dirs`, `definitions_files` and `objects_files` were validated by
+`IdpyKernel.__init__` and then discarded (§2). They are stored and used now.
+The three do genuinely different things and reach different backends — that
+asymmetry is the substance of the phase, not an implementation detail:
+
+| mechanism | what it does | backends |
+|---|---|---|
+| `definitions_files` | source text injected into the compile unit | **all four** — every backend compiles from a source string |
+| `include_dirs` | compiler search paths | CUDA (SourceModule's own parameter), OpenCL and CTypes (`-I`); **not expressible on Metal** |
+| `objects_files` | native static linking | **CTypes only** — the only backend with a link step |
+
+`definitions_files` entries may be paths, or objects exposing `Code(lang)`. That
+last form is how the design's specific ask — passing an `IdpyKernel` into
+another kernel's compile unit — is served: the injected kernel is emitted with
+**`preamble=False`**, a new argument to `Code()` that suppresses headers, macros
+and typedefs. Without it the duplicate `typedef float FType;` is a C99 error and
+the mechanism would be unusable for precisely the case it exists for.
+
+Consequence recorded in the code: the compile unit belongs to the top-level
+kernel, so an injected kernel's own `definitions_files` are **not** pulled in
+transitively. Declare everything the unit needs on the kernel that owns it.
+Nesting would otherwise duplicate injections with no way to deduplicate across
+independently-built sources.
+
+### Refusals are the point
+
+Where a mechanism has no meaning on a backend, `CheckLinkage` now raises
+`NotImplementedError` from `Code()` — before anything reaches a compiler.
+`objects_files` on CUDA/OpenCL/Metal, `include_dirs` on Metal. Silently
+accepting an argument that cannot work is the behaviour being removed, and
+replacing it with a different silence would have missed the point.
+
+### Result
+
+| check | OpenCL | Metal | CTypes |
+|---|---|---|---|
+| L1 definitions from a path | exact | exact | exact |
+| L2 definitions from an `IdpyFunction` | exact | exact | exact |
+| L3 definitions from an `IdpyKernel` (donor present, one typedef) | exact | exact | exact |
+| L4 `include_dirs` | exact | refused | exact |
+| L5 `objects_files` | refused | refused | **exact** |
+
+L5 on CTypes is the end-to-end case: a native object compiled outside idpy
+entirely, then linked into a generated kernel that calls into it. That is the
+shape of every capability shim Phase 3 will need — code that is not generated,
+not injectable as text, and available only as a compiled artifact.
+
+CUDA is codegen-verified only here (no CUDA on the dev machine); its
+`include_dirs` path goes through `SourceModule(include_dirs=...)` and needs a
+run on `id`.
+
+---
+
 ## 3. Standing constraints
 
 - ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`
