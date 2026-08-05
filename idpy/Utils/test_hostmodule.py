@@ -65,14 +65,18 @@ from idpy.Utils.HostModule import (
 
 _C_SOURCE = '''
 #include <stddef.h>
+#include <stdint.h>
 
 void idpy_scale(double * out, const double * in, int n, double factor){
     for(int i = 0; i < n; i++){ out[i] = in[i] * factor; }
 }
 
-/* Takes a raw address rather than an array: the shape a capability shim has. */
+/* Takes a raw address rather than an array: the shape a capability shim has.
+   Converts through uintptr_t, which is the defined way to turn a pointer into
+   an integer -- subtracting (char *)0 is undefined behaviour and a compiler is
+   entitled to fold it. */
 size_t idpy_probe_handle(void * handle, size_t offset){
-    return (size_t)((char *)handle - (char *)0) + offset;
+    return (size_t)(uintptr_t)handle + offset;
 }
 '''
 
