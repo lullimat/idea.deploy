@@ -692,6 +692,53 @@ naming a path that was never taken. The counters were right; the label lied.
 store that has only ever taken the staged route says so. Exactly the class of
 label that would let a degraded fast path look engaged.
 
+### Metal row: MTLIOCommandQueue via a Swift shim
+
+The row that makes the storage claim **portable rather than merely present**.
+Metal's storage API has no Python binding, pymetallic does not wrap it, and
+Swift is the only language that can see it — so this is the case the whole
+`HostModule` design was aimed at. Nothing is generated per kernel: it is fixed
+host code, written once, which is why Swift stays a *compiler choice* and there
+is still no `SWIFT_T` in `idpy_langs_dict`.
+
+Three things had to be verified rather than assumed, and were, by probing before
+building:
+
+1. **Pointer bridging.** pymetallic exposes `_device_ptr` / `_buffer_ptr` as raw
+   pointers; Swift reconstitutes them with
+   `Unmanaged.fromOpaque(...).takeUnretainedValue()`. The probe created an
+   `MTLIOCommandQueue` from pymetallic's own device.
+2. **Sub-range targeting.** The load writes at a byte offset inside an existing
+   buffer, so it fills a `SubView` of the cache rather than a whole allocation.
+   This works *because* Phase 2b gave `IdpyArrayMETAL` an element offset against
+   its parent Buffer — without that bookkeeping there is nothing to aim at.
+   Verified in isolation first: reading the second block of a file into the
+   middle of a buffer left the head untouched and matched exactly.
+3. **The Swift spelling.** It is
+   `load(_:offset:size:sourceHandle:sourceHandleOffset:)`. `loadBuffer(...)` is
+   the Objective-C name and was obsoleted in Swift 3; the compiler says so
+   plainly.
+
+`CreateFileStore(path, array, block_elems, tenet=)` picks the lowering —
+KvikIO/cuFile on CUDA, `MTLIOCommandQueue` on Metal, plain memmap elsewhere.
+Every option subclasses `MemMapStore`, so an unmatched backend, a missing
+binding or a failed open all land on the same staged path.
+
+### Phase 3 status
+
+| backend | mechanism | verified |
+|---|---|---|
+| **CUDA** | KvikIO / cuFile | **34 direct / 0 staged**, P1 exact (`id`) |
+| **Metal** | `MTLIOCommandQueue` | **34 direct / 0 staged**, P1 exact (M1 Max) |
+| OpenCL | — declines, stages | 0 direct / 34 staged |
+| CTypes | — declines, stages | 0 direct / 34 staged |
+| AMD | rocm-xio | not started; needs hardware |
+
+Two backends now stream storage→device through **the same policy code** with
+entirely different mechanisms underneath — cuFile on one, a Swift-compiled
+Metal IO queue on the other. That is the design's central asymmetry carried all
+the way to storage: the policy is one program, the lowerings are not.
+
 ### Layering lint
 
 `scripts/check_layering.py` enforces `STRATEGY.md`'s "core never imports

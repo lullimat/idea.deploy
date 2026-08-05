@@ -132,12 +132,16 @@ def sweep(tenet, lattice, n_slots=_N_SLOTS, policy='lru', tmpdir=None):
     _out_path = os.path.join(tmpdir, 'lattice_out_%s.bin' % policy)
 
     '''
-    KvikIOStore even off CUDA: it subclasses MemMapStore, so on any backend
-    without a direct storage->device path it declines and the cache falls back.
-    That way the decline path is exercised everywhere rather than only being
-    reasoned about, and the direct path is exercised wherever it exists.
+    CreateFileStore picks the storage->device lowering for this backend --
+    KvikIO/cuFile on CUDA, MTLIOCommandQueue on Metal, plain memmap elsewhere.
+    Every option subclasses MemMapStore, so a backend with no direct path (or a
+    missing binding, or a failed open) declines and the cache falls back. The
+    decline path is therefore exercised wherever it applies rather than merely
+    reasoned about.
     '''
-    in_store = IdpyResidency.KvikIOStore.Create(_in_path, lattice, _BLOCK_ELEMS)
+    in_store = IdpyResidency.CreateFileStore(
+        _in_path, lattice, _BLOCK_ELEMS, tenet=tenet,
+    )
     out_store = IdpyResidency.MemMapStore.Create(
         _out_path, np.zeros_like(lattice), _BLOCK_ELEMS
     )
