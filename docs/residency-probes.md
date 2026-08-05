@@ -475,6 +475,17 @@ Plus the existing suites unchanged: core 40 OK, convolution 21 OK, shared 4
 exact, residency 9 exact, policy 3 backends OK, Metal 10 OK, LBM with the same
 pre-existing error.
 
+**Verified on two different C compilers.** The M1 Max builds with
+`clang -fPIC -shared -arch arm64 -std=c99`, `id` with
+`gcc -fPIC -shared -std=c99`. H1–H4 pass identically on both, including H2's
+flag-sensitivity check — which is where the inherited space-splitting of the
+compile command meets a second compiler's argument handling, and the place a
+toolchain abstraction would most plausibly leak. H5 skips on Linux
+(`Available()` reports no `swiftc`) and the C path there also exercises
+`CTypesKernelModule` through `idpy.test` and LBM. Two compilers is a weak
+generalisation, but it is the difference between a parameter that is used and a
+parameter that merely exists.
+
 **H3 and H5 are the pair that matters.** Together they are the claim that Swift
 is a *compiler choice* and not a language target: one facility builds both
 `CTYPES_T`'s C kernels and a Swift shim exposing C entry points, so binding
