@@ -538,22 +538,31 @@ replacing it with a different silence would have missed the point.
 
 ### Result
 
-| check | OpenCL | Metal | CTypes |
-|---|---|---|---|
-| L1 definitions from a path | exact | exact | exact |
-| L2 definitions from an `IdpyFunction` | exact | exact | exact |
-| L3 definitions from an `IdpyKernel` (donor present, one typedef) | exact | exact | exact |
-| L4 `include_dirs` | exact | refused | exact |
-| L5 `objects_files` | refused | refused | **exact** |
+Verified on **all four backends** across both machines:
+
+| check | CUDA | OpenCL | Metal | CTypes |
+|---|---|---|---|---|
+| L1 definitions from a path | exact | exact | exact | exact |
+| L2 definitions from an `IdpyFunction` | exact | exact | exact | exact |
+| L3 definitions from an `IdpyKernel` (donor present, one typedef) | exact | exact | exact | exact |
+| L4 `include_dirs` | exact | exact | refused | exact |
+| L5 `objects_files` | refused | refused | refused | **exact** |
 
 L5 on CTypes is the end-to-end case: a native object compiled outside idpy
 entirely, then linked into a generated kernel that calls into it. That is the
 shape of every capability shim Phase 3 will need — code that is not generated,
 not injectable as text, and available only as a compiled artifact.
 
-CUDA is codegen-verified only here (no CUDA on the dev machine); its
-`include_dirs` path goes through `SourceModule(include_dirs=...)` and needs a
-run on `id`.
+Two CUDA-specific unknowns cleared on `id`. `SourceModule(include_dirs=...)`
+exists and works on that pycuda — it could not be checked from the dev machine,
+where pycuda is not importable. And L3 puts two `__global__` functions in one
+`SourceModule`, with `get_function(name)` resolving the right one.
+
+**One narrower claim than it looks.** pycuda wraps source in `extern "C" { ... }`
+by default, so L4's `#include <idpy_hdr.h>` lands inside that wrapper. Harmless
+for the macro-only header the test uses, but L4 passing does not establish that
+a header carrying declarations would work on CUDA. Worth knowing before relying
+on `include_dirs` for anything beyond macros there.
 
 ---
 
