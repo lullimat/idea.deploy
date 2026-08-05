@@ -193,6 +193,68 @@ two-stream + pinned-memory variant is now buildable — see §4.
 
 ---
 
+## 2d. T3-overlap results, and a latent metalanguage trap
+
+**Overlap is real on both backends and both machines.** `test_overlap.py` times
+the kernel alone (tK), the transfer alone (tC), and both issued together (tB),
+reporting `(tK + tC - tB) / min(tK, tC)` — 1.0 fully concurrent, 0.0 fully
+serialized. 128 MB transfer:
+
+| host / backend | kernel | copy | both | serial would be | overlap | bandwidth |
+|---|---|---|---|---|---|---|
+| M1 Max / OpenCL | 37.86 ms | 6.33 ms | 38.51 ms | 44.19 ms | **0.90** | 21.2 GB/s |
+| RTX 5060 / CUDA | 39.30 ms | 9.33 ms | 39.49 ms | 48.64 ms | **0.98** | 14.4 GB/s |
+| RTX 5060 / OpenCL | 39.38 ms | 14.75 ms | 39.28 ms | 54.13 ms | **1.01** | 9.1 GB/s |
+
+Correctness exact everywhere, on both the transferred and the computed half.
+
+Reading these honestly:
+
+- **The bandwidths are not comparable across hosts.** On Apple the "transfer" is
+  a memcpy into unified storage; on NVIDIA it crosses PCIe from pinned memory.
+  Same API, physically different operations. The *overlap ratio* is comparable;
+  the GB/s figure is not.
+- **1.01 is noise, not superlinearity.** tB came in marginally under tK alone.
+  Values at or slightly above 1.0 mean the copy was fully hidden and the
+  measurement has hit its noise floor.
+- CUDA at 0.98 with pinned memory on a non-default stream is close to ideal:
+  the transfer is essentially free when there is compute to hide it behind.
+
+### The trap: float constants emit as double literals
+
+`_format_c_macro_value` (`idpy/IdpyCode/IdpyCode.py:60`) falls through to
+`str(value)` for floats, so `constants['X'] = 0.99999` becomes
+`#define X 0.99999` — a **double** in C. Any surrounding `float` arithmetic then
+promotes, and the expression evaluates in fp64 wherever fp64 exists.
+
+Caught because the calibrated ITERS disagreed wildly between machines: 723 on the
+M1 Max versus 60 on the RTX 5060 for the same 39 ms of kernel. The Mac has no
+fp64 to promote to, so it ran fp32; the GeForce ran the chain on its 1/64-rate
+fp64 path. Roughly a 12x gap, from two innocuous-looking constants.
+
+**Currently latent, not a live bug.** Instrumenting `IdpyKernel.__init__` across
+the whole LBM suite found **no kernel built with a float constant** — the physics
+code passes floating-point data as typed device arrays (`W_list`, `XI_list`),
+never as `#define` macros. `test_overlap.py` was the first thing in the repo to
+do it, and now emits `'0.99999f'` as an explicit string instead.
+
+Two reasons to record it rather than let it sit:
+
+1. **It is a portability-of-results issue, not just performance.** A float
+   constant makes the same kernel compute fp64 intermediates on CUDA and fp32 on
+   Apple. That is a silent cross-backend numerical divergence, which is exactly
+   what `STRATEGY.md`'s "verified-identical results across backends" criterion
+   forbids.
+2. **It is the same weakness as F4.** The type model does not describe
+   constants any more than it describes packed layouts — `CustomTypes` maps
+   aliases to type strings and nothing knows what precision a literal should
+   carry. A proper fix is type-aware constant emission, which is a metalanguage
+   design decision (a kernel using `double` types legitimately wants double
+   literals), not a one-line patch. Flagged for a decision rather than fixed
+   unilaterally.
+
+---
+
 ## 3. Standing constraints
 
 - ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`
