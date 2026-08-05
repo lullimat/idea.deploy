@@ -94,6 +94,7 @@ from idpy.IdpyCode.IdpyCode import IdpyKernel
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode.IdpyUnroll import _codify_comment
 from idpy.Utils.CustomTypes import CustomTypes
+from idpy.Utils.TestExit import report_exit as _report_exit
 
 _OVERLAP_LANGS = (CUDA_T, OCL_T, METAL_T)
 
@@ -361,6 +362,7 @@ def _verdict(overlap):
 
 
 def main(copy_mb=128, repeats=3):
+    _ok, _ran = True, False
     print("=== T3-overlap: is the async partial write concurrent with compute? ===\n")
     for lang in _OVERLAP_LANGS:
         human = idpy_langs_human_dict[lang]
@@ -370,10 +372,15 @@ def main(copy_mb=128, repeats=3):
         try:
             r = measure(lang, copy_mb=copy_mb, repeats=repeats)
         except Exception as exc:
+            _ok = False
             print(f"  [err ] {human}: {type(exc).__name__}: {exc}\n")
             continue
+        _ran = True
 
         ok = (r['err_transferred'] == 0.0 and r['err_computed'] == 0.0)
+        # correctness gates the exit status; the overlap RATIO never does --
+        # it is a machine-dependent measurement, not a pass/fail property
+        _ok = _ok and ok
         print(f"  {human}: ITERS={r['iters']}, transfer={r['copy_MB']:.0f} MB")
         print(f"    kernel alone   {r['t_kernel_ms']:8.2f} ms")
         print(f"    copy alone     {r['t_copy_ms']:8.2f} ms"
@@ -394,6 +401,7 @@ def main(copy_mb=128, repeats=3):
         "IdpyArrayMETAL's\ndrain-on-touch is replaced (F2) -- until then it has "
         "nothing to overlap with."
     )
+    _report_exit(_ok, checks_run=_ran, what='backends')
 
 
 if __name__ == '__main__':

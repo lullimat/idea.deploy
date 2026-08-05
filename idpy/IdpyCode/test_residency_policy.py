@@ -79,6 +79,7 @@ from idpy.IdpyCode import (
 )
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode import IdpyResidency
+from idpy.Utils.TestExit import report_exit as _report_exit
 
 _POLICY_LANGS = (CTYPES_T, CUDA_T, OCL_T, METAL_T)
 
@@ -226,6 +227,7 @@ def run_on(lang, tmpdir):
 
 def main():
     print("=== Phase 2: residency policy over a lattice larger than the cache ===\n")
+    _ok, _ran = True, False
     with tempfile.TemporaryDirectory() as tmpdir:
         for lang in _POLICY_LANGS:
             human = idpy_langs_human_dict[lang]
@@ -235,8 +237,10 @@ def main():
             try:
                 r = run_on(lang, tmpdir)
             except Exception as exc:
+                _ok = False
                 print(f"  [err ] {human}: {type(exc).__name__}: {exc}\n")
                 continue
+            _ran = True
 
             ok = (
                 r['P1 err'] == 0.0
@@ -260,6 +264,7 @@ def main():
             print(f"    P5 LRU vs FIFO          max|lru-fifo| = "
                   f"{r['P5 lru_vs_fifo']:g}")
             print(f"    -> {'OK' if ok else 'FAIL'}\n")
+            _ok = _ok and ok
 
     print(
         "The policy layer has no per-backend branches: it is written entirely\n"
@@ -267,6 +272,8 @@ def main():
         "backend, the policy above them does not -- which is the asymmetry the\n"
         "design is built around."
     )
+
+    _report_exit(_ok, checks_run=_ran, what='backends')
 
 
 if __name__ == '__main__':

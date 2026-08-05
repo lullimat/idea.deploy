@@ -69,6 +69,7 @@ from idpy.IdpyCode.IdpyCode import IdpyKernel, IdpyFunction
 from idpy.IdpyCode import IdpyMemory
 from idpy.IdpyCode.IdpyUnroll import _codify_assignment, _array_value
 from idpy.Utils.CustomTypes import CustomTypes
+from idpy.Utils.TestExit import report_exit as _report_exit
 
 _LANGS = (CUDA_T, OCL_T, METAL_T, CTYPES_T)
 _N = 1024
@@ -315,6 +316,7 @@ def l5_objects_files(tenet, tmpdir, host_in):
 
 def main():
     print("=== Phase 4: linking static code into the kernel compile unit ===\n")
+    _ok, _ran = True, False
     with tempfile.TemporaryDirectory() as tmpdir:
         for lang in _LANGS:
             human = idpy_langs_human_dict[lang]
@@ -324,8 +326,10 @@ def main():
             try:
                 r = run_on(lang, tmpdir)
             except Exception as exc:
+                _ok = False
                 print(f"  [err ] {human}: {type(exc).__name__}: {exc}\n")
                 continue
+            _ran = True
 
             _errs = [r[k] for k in ('L1 err', 'L2 err', 'L3 err', 'L4 err',
                                     'L5 err') if r[k] is not None]
@@ -346,12 +350,15 @@ def main():
                   + (f"max|out-ref| = {r['L5 err']:g}" if r['L5 err'] is not None
                      else "unsupported") + f", refusal: {r['L5 refusal']}")
             print(f"    -> {'OK' if ok else 'FAIL'}\n")
+            _ok = _ok and ok
 
     print(
         "Where a mechanism has no meaning on a backend it now raises from\n"
         "Code(), before anything reaches a compiler. That refusal is the point:\n"
         "these three parameters used to be validated and then discarded."
     )
+
+    _report_exit(_ok, checks_run=_ran, what='backends')
 
 
 if __name__ == '__main__':
