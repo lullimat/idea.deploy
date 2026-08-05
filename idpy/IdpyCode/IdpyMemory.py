@@ -546,6 +546,60 @@ if idpy_langs_sys[METAL_T]:
     def _min_METAL(a, stream=None):
         return np.amin(a.D2H())
 
+def PinnedHost(shape, dtype, tenet = None):
+    '''
+    Host staging buffer suitable for overlapped transfers.
+
+    On CUDA this is page-locked memory, which is *required* for an async H2D to
+    genuinely overlap with compute -- a pageable buffer silently degrades to a
+    synchronous copy. Every other backend returns a plain numpy array, which is
+    the correct answer there: OpenCL pins internally as needed, and Metal/CTypes
+    are unified so no staging copy exists to overlap.
+
+    Returning a real numpy-compatible buffer everywhere keeps caller code
+    backend-agnostic.
+    '''
+    if tenet is not None and idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
+        return _pinned_host_CUDA(shape, dtype)
+    return np.empty(shape, dtype = dtype)
+
+
+def SiblingStream(tenet):
+    '''
+    A second execution stream on the same device, for issuing a transfer
+    concurrently with a kernel rather than behind it.
+
+    CUDA   -> a new cu_driver.Stream(); pass it as 'idpy_stream' to Deploy or to
+              the H2DSub/D2HSub family.
+    OpenCL -> a sibling CommandQueue on the same context/device. Needed because
+              a single in-order queue is entitled to serialize the two.
+    Metal / CTypes -> None. Metal currently drains on every host touch (F2), so
+              there is nothing to be concurrent with until that is reworked.
+
+    Returns None when the backend has no sibling-stream concept, so callers can
+    branch on it rather than on the language tag.
+    '''
+    if idpy_langs_sys[CUDA_T] and isinstance(tenet, CUTenet):
+        return cu_driver.Stream()
+
+    if idpy_langs_sys[OCL_T] and isinstance(tenet, CLTenet):
+        '''
+        from_parent() copies only context/device/properties, not the runtime
+        attributes OpenCL.GetTenet() attaches afterwards (kind, device_name,
+        mem_pool). Without them the sibling is not usable where the parent is --
+        instantiating a kernel against it fails on 'kind'. Carry them over, but
+        share the parent's memory pool rather than creating a second one: two
+        pools on one context would fragment the same device memory.
+        '''
+        _sibling = CLTenet.from_parent(tenet)
+        _sibling.SetKind(tenet.GetKind())
+        _sibling.SetDeviceName(tenet.device_name)
+        _sibling.mem_pool = tenet.mem_pool
+        return _sibling
+
+    return None
+
+
 def Array(*args, **kwargs):
     if 'tenet' not in kwargs:
         raise Exception("Need to pass tenet = tenetObject")
