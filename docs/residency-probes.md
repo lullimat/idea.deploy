@@ -200,11 +200,15 @@ the kernel alone (tK), the transfer alone (tC), and both issued together (tB),
 reporting `(tK + tC - tB) / min(tK, tC)` — 1.0 fully concurrent, 0.0 fully
 serialized. 128 MB transfer:
 
+All rows below are post-fp32-fix (see the trap section), so the filler kernel is
+genuinely fp32 everywhere and the numbers are mutually consistent:
+
 | host / backend | kernel | copy | both | serial would be | overlap | bandwidth |
 |---|---|---|---|---|---|---|
-| M1 Max / OpenCL | 37.86 ms | 6.33 ms | 38.51 ms | 44.19 ms | **0.90** | 21.2 GB/s |
-| RTX 5060 / CUDA | 39.30 ms | 9.33 ms | 39.49 ms | 48.64 ms | **0.98** | 14.4 GB/s |
-| RTX 5060 / OpenCL | 39.38 ms | 14.75 ms | 39.28 ms | 54.13 ms | **1.01** | 9.1 GB/s |
+| M1 Max / OpenCL | 38.12 ms | 4.81 ms | 38.90 ms | 42.93 ms | **0.84** | 27.9 GB/s |
+| M1 Max / Metal | 38.48 ms | 2.80 ms | 38.54 ms | 41.28 ms | **0.98** | 48.0 GB/s |
+| RTX 5060 / CUDA | 27.51 ms | 9.33 ms | 27.41 ms | 36.84 ms | **1.01** | 14.4 GB/s |
+| RTX 5060 / OpenCL | 26.30 ms | 15.04 ms | 26.22 ms | 41.34 ms | **1.00** | 8.9 GB/s |
 
 Correctness exact everywhere, on both the transferred and the computed half.
 
@@ -229,8 +233,36 @@ promotes, and the expression evaluates in fp64 wherever fp64 exists.
 
 Caught because the calibrated ITERS disagreed wildly between machines: 723 on the
 M1 Max versus 60 on the RTX 5060 for the same 39 ms of kernel. The Mac has no
-fp64 to promote to, so it ran fp32; the GeForce ran the chain on its 1/64-rate
-fp64 path. Roughly a 12x gap, from two innocuous-looking constants.
+fp64 to promote to, so it ran fp32; the GeForce ran the chain on its fp64 path.
+
+**Magnitude, measured properly.** The cross-machine ratio above (~12x) is *not*
+the size of the effect — it compares one machine's fp64 to another's fp32 and
+attributes the whole difference to precision. Re-running the same host after the
+fix isolates it:
+
+| RTX 5060, same kernel | ITERS | kernel time | throughput |
+|---|---|---|---|
+| double literals (fp64 path) | 60 | 39.30 ms | 48.9 G FMA/s |
+| `f`-suffixed literals (fp32) | 8731 | 27.51 ms | **10,160 G FMA/s** |
+
+**~208x on one machine**, and the fp32 figure — 20.3 TFLOP/s — is essentially the
+card's fp32 peak, so the post-fix number is the honest one. The penalty exceeds
+the nominal 1/64 fp64 rate because each iteration also pays two float↔double
+conversions around the fp64 FMA. Two innocuous-looking constants cost two orders
+of magnitude.
+
+A prediction was made before this run (that ITERS would land near the Mac's ~700)
+and it was wrong by an order of magnitude, for the reason above. Recorded because
+the mistake is instructive: cross-machine ratios cannot isolate a
+single-variable effect, and only the same-host before/after can.
+
+Now that both hosts run fp32, the remaining ITERS gap is a real hardware
+difference: 8731 iterations in 27.5 ms on the RTX 5060 against 702 in 38.5 ms on
+the M1 Max, roughly 17x in throughput on *this dependent-chain microbenchmark*.
+The Apple part sits near 11% of its fp32 peak here while the NVIDIA part sits
+near 100%, which says the chain is latency-bound on Apple — a property of this
+one synthetic kernel, not a general throughput comparison, and not something to
+generalise from.
 
 **Currently latent, not a live bug.** Instrumenting `IdpyKernel.__init__` across
 the whole LBM suite found **no kernel built with a float constant** — the physics
@@ -303,6 +335,14 @@ an immediate host store.
 
 **Phase 2b is now complete on CUDA, OpenCL and Metal.** CTypes remains, and is
 trivially unified.
+
+**Cross-check after the Metal work** (2026-08-05, `id`): the Metal rework touched
+`IdpyCode.py`, which every backend imports, so CUDA and OpenCL were re-run there.
+`test_residency` T1/T2/T3 exact on both; `test_overlap` 1.01 / 1.00 with
+bandwidth unchanged (14.39 vs 14.38 GB/s CUDA, 8.93 vs 9.10 GB/s OpenCL —
+transfer speed never involved the kernel); `idpy.test` 41 OK. No regression: the
+Metal changes live inside `if idpy_langs_sys[METAL_T]` blocks or the Metal
+module, and are invisible on a host without Metal.
 
 ---
 
