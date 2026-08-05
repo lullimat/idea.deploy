@@ -1,7 +1,7 @@
 # idpy — Strategy & Roadmap
 
 > **Living document.** Update as milestones are reached and decisions are made.
-> Last updated: 2026-03-24
+> Last updated: 2026-08-06
 
 ---
 
@@ -48,7 +48,10 @@ infrastructure. idpy fills that gap.
 - Paper-repo workflow: `papers/idpy-papers.py` clones and links published
   experiment repositories.
 - Shell-based environment setup: `idpy-init.sh`, `idpy-bootstrap.sh`.
-- Test coverage via `unittest` (`idpy/test.py`, `idpy/LBM/test.py`).
+- Test coverage via `unittest` (`idpy/test.py`, `idpy/LBM/test.py`) plus the
+  cross-backend suites added with the residency work (`test_residency`,
+  `test_residency_policy`, `test_linkage`, `test_constants`, `test_shared`,
+  `test_overlap`, `test_hostmodule`), all with meaningful exit codes.
 - Tutorials: Ising 2D, Metal test notebook.
 
 ### What needs improvement
@@ -63,14 +66,18 @@ infrastructure. idpy fills that gap.
   - `TenetNew` in OpenCL is broken/dead code.
   - Windows detection bug in `idpy/__init__.py` (`==` vs `=`).
 - **Fragile setup:** `sys.path` hacks in every submodule `__init__.py`.
-- **No CI pipeline.**
+- ~~**No CI pipeline.**~~ Resolved 2026-08-06: GitHub Actions runs CTypes on
+  Linux and macOS plus OpenCL on Linux (POCL). The prerequisite was that every
+  print-style test script exited 0 regardless of what it printed -- as gates
+  they were theatre; see `idpy/Utils/TestExit.py`.
 - **Core and physics layers are entangled** — difficult to use backends
   without pulling in LBM.
 
 ### Stability rating
 
 - Research velocity: **medium-high** (works well for the author).
-- Maintainability: **medium-low** (implicit contracts, no CI).
+- Maintainability: **medium** (implicit contracts remain; CI now runs
+  CTypes + OpenCL on every push).
 - Extensibility: **low** (adding a backend requires reverse-engineering
   existing ones).
 - Adoption readiness: **low** (not installable, high onboarding friction).
@@ -272,22 +279,89 @@ OCaml is treated as a **compiled-kernel backend**, parallel to
 
 ## 8. Phased Roadmap
 
-### Phase 0: Foundation (Weeks 1–3)
+### Phase 0: Foundation
 
-- [ ] Restructure into `src/idpy/core/` and `src/idpy/physics/`
-- [ ] Create `pyproject.toml` with optional dependency extras
-- [ ] Define backend protocol (`src/idpy/core/backends/base.py`)
-- [ ] Fix known bugs (OpenCL aggregation, CUDA guard, CTypes metadata,
-      remove `TenetNew`)
-- [ ] Eliminate `sys.path` hacks — package-relative imports throughout
-- [ ] Write backend conformance test suite
-- [ ] Set up GitHub Actions CI (CTypes on every push)
-- [ ] Rewrite README with "Statement of Need"
-- [ ] Create `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`
+> **Split into 0a and 0b (2026-08-06).** This phase originally bundled
+> "make it installable" with "move everything into `src/idpy/{core,physics}`".
+> Those have very different costs and serve different goals, and bundling them
+> made the cheap half look as expensive as the dear one.
+>
+> **Installability does not require the move.** `pyproject.toml` works on the
+> current flat layout — `packages = ["idpy"]` and `pip install idpy` works. The
+> `src/` layout and the core/physics split are conventions serving architectural
+> clarity; JOSS asks for installability, documentation, tests and a contribution
+> guide, and **none of those touch a single import path**.
+>
+> Only the move changes module paths, and module paths are what the published
+> paper notebooks import. So 0a is paper-safe and 0b is not — which is the whole
+> reason to separate them.
+
+#### Phase 0a — packaging and JOSS readiness (paper-safe)
+
+No import path changes; nothing in `papers/` is affected.
+
+- [ ] `pyproject.toml` on the **current layout**, with optional dependency
+      extras (`cuda`, `opencl`, `metal`, `physics`, `mpi`)
+- [x] GitHub Actions CI — CTypes on Linux and macOS, plus OpenCL on Linux via
+      POCL, which also makes the LBM suite runnable there. CUDA and Metal stay
+      manual on the development machines.
+- [ ] Rewrite README with a "Statement of Need"
+- [ ] `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`
 - [ ] Architecture diagram
 
-**Milestone:** `pip install idpy` works. Conformance tests green on
-CTypes. **Tag v0.1.0.**
+**Milestone:** `pip install idpy` works, CI green. **Tag v0.1.0.**
+
+#### Phase 0b — restructure (breaks import paths)
+
+- [ ] Restructure into `src/idpy/core/` and `src/idpy/physics/`
+- [ ] Define backend protocol (`core/backends/base.py`)
+- [ ] Eliminate `sys.path` hacks — package-relative imports throughout
+- [ ] Backend conformance test suite
+- [ ] Fix the remaining known bugs (OpenCL aggregation, CUDA guard, CTypes
+      metadata, remove `TenetNew`)
+
+**Compatibility shims are the mechanism, not paper-repo edits.** When the move
+happens, `idpy/LBM/LBM.py` and friends become two-line re-exports at the new
+locations with a `DeprecationWarning`. Published notebooks keep working
+untouched and the shims retire on our schedule. "Update every paper repository"
+is not a requirement of this phase, and treating it as one is what made 0b look
+prohibitive.
+
+**Cheap way to preserve restructurability meanwhile:** the architectural
+invariant already almost holds — as of 2026-08-06 there are exactly **two**
+core→physics imports, both function-local, both in
+`idpy/Utils/IdpySymbolic.py` (lines 1182 and 1240, importing
+`idpy.IdpyStencils.IdpyConvolution`), so `idpy.Utils` already loads cleanly
+without physics. A small CI lint would hold that line for free and keep 0b
+mechanical rather than archaeological. Deferring the restructure is reasonable;
+letting the layering rot while deferring is what would make it expensive.
+
+#### Phase 0c — versioning the reproducibility promise
+
+This is the item the packaging discussion actually surfaced, and it is
+independent of both 0a and 0b.
+
+The promise is currently **unversioned**. The README says "keep pulling the
+updates" *and* "backwards compatibility will be assured". Together those are an
+unbounded obligation: every future change must preserve every past notebook,
+forever, against a moving `master`. That, rather than any particular
+restructure, is what makes structural change feel expensive.
+
+- [ ] Pin each paper repository to a **tagged** idea.deploy release, so
+      "reproducible" means "works against `v0.2.0`" — checkable — instead of
+      "works against whatever master is today", which is not
+- [ ] Periodic (not per-push) smoke job that constructs the simulations from
+      each paper notebook and checks they still build
+
+The smoke job is the part that turns the promise into something with teeth: it
+reports that a paper has broken *before a reader finds out*. Periodic rather
+than per-push because these are slow.
+
+Worth recording that the notebooks were checked on 2026-08-06 and are **fine** —
+they pass the parameters `SetupRoot` requires. It was the repository's own
+`idpy/LBM/test.py` that had gone stale, not the papers. The discipline has been
+applied to the published work; what is missing is the machinery to keep proving
+it.
 
 ### Phase 1: Metal Backend (Weeks 4–6)
 
