@@ -46,9 +46,31 @@ class CTypesTypes:
                   'long long int': ctypes.c_int64,
                   'unsigned long': ctypes.c_uint64,
                   'unsigned long long int': ctypes.c_uint64,
-                  'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte, 
-                  'unsigned': ctypes.c_uint32}
+                  'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte,
+                  'unsigned': ctypes.c_uint32,
+                  # Opaque handle types, for host-side capability shims rather
+                  # than kernels. A cuFile or MTLIOCommandQueue binding takes
+                  # arguments numpy cannot describe -- a device pointer as an
+                  # integer handle, a stream or queue handle, a byte offset --
+                  # and HostModule keeps these as c_void_p instead of wrapping
+                  # them in an ndpointer, which would demand a host array that
+                  # does not exist. 'size_t' is here for the same reason: byte
+                  # counts and offsets in those APIs are size_t, not int.
+                  #
+                  # Comments, not a '''...''' block: a string literal inside a
+                  # dict literal concatenates with the key that follows it,
+                  # silently swallowing that entry.
+                  'uintptr': ctypes.c_void_p,
+                  'handle': ctypes.c_void_p,
+                  'void': ctypes.c_void_p,
+                  'size_t': ctypes.c_size_t}
 
+        '''
+        Reverse map. Built by iterating self.C, so where several C spellings
+        share one ctypes type the last one wins -- 'void' resolves back from
+        c_void_p, not 'uintptr'. Only used for display, so the collision is
+        harmless, but worth knowing before relying on it.
+        '''
         self.CTypes = {value: key for (key, value) in self.C.items()}
 
     def ToList(self):

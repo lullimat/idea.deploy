@@ -435,6 +435,62 @@ because it is a deliberate departure from §3.
 
 ---
 
+## 2g. Phase 1: HostModule
+
+`CTypesKernelModule` lifted into `idpy/Utils/HostModule.py` with the compiler as
+a parameter. Nothing in that class was ever CPU-compute-specific — it hashes a
+source string, caches the build, and hands back ctypes callables — so it is now
+shared machinery and `CTYPES_T` is simply its first consumer.
+
+Two axes that were hard-coded are parameters now:
+
+- **`Toolchain`** — command + flags, source extension, library extension.
+  `CToolchain()` reproduces the existing C build exactly; `SwiftToolchain()`
+  drives `swiftc -emit-library`.
+- **argtypes** — `GetKernelFunction` keeps the numpy-shaped ABI (every pointer
+  becomes an `ndpointer`). `GetFunction` is the escape hatch: explicit ctypes
+  argtypes, no numpy assumption. `CTypesTypes` gained `uintptr` / `handle` /
+  `void` / `size_t`, and a pointer whose element type is opaque resolves to
+  `c_void_p` instead of being wrapped — `ndpointer(c_void_p)` is meaningless,
+  and a device pointer or queue handle has no host array behind it.
+
+**Behaviour preserved deliberately**, down to the details: same cache directory,
+same hash inputs (so warm caches stay valid), same option-string concatenation
+without a separator, same `ndpointer` argtypes for kernels. The awkward bits were
+inherited rather than tidied, because tidying them would have made this something
+other than a lift — the space-splitting of the compile command is documented in
+place instead.
+
+### Acceptance
+
+| check | result |
+|---|---|
+| H1 C toolchain | compiles, loads, computes — `max\|out-ref\| = 0` |
+| H2 build cache | identical builds share an artifact and reuse it; changed flags produce a different library from the same source |
+| H3 opaque argtypes | `void *` / `size_t` resolve to `c_void_p` / `c_size_t` and call correctly against a raw address |
+| H4 raw entry point | `GetFunction` with explicit argtypes, no numpy |
+| **H5 Swift shim** | **`swiftc` builds a `@_cdecl` library, ctypes loads and calls it** |
+
+Plus the existing suites unchanged: core 40 OK, convolution 21 OK, shared 4
+exact, residency 9 exact, policy 3 backends OK, Metal 10 OK, LBM with the same
+pre-existing error.
+
+**H3 and H5 are the pair that matters.** Together they are the claim that Swift
+is a *compiler choice* and not a language target: one facility builds both
+`CTYPES_T`'s C kernels and a Swift shim exposing C entry points, so binding
+`MTLIOCommandQueue` in Phase 3 needs no new entry in `idpy_langs_dict`. That was
+the scoping question §8 flagged as the one worth getting right, and it now has a
+working answer rather than an argued one.
+
+### Placement
+
+`idpy/Utils/` rather than `idpy/IdpyCode/`. `IdpyCode/__init__.py` imports every
+backend package, so a backend importing back from it risks a cycle; `Utils` has
+no import-time dependency on `IdpyCode`. Under the `STRATEGY.md` restructure both
+land in `idpy.core` anyway, so this costs nothing later.
+
+---
+
 ## 3. Standing constraints
 
 - ~~No CUDA on the development machine.~~ **Both CUDA debts settled** on `id`

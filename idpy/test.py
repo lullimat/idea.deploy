@@ -178,8 +178,17 @@ class TestCTypesTypes(unittest.TestCase):
                 'long long int': ctypes.c_int64,
                 'unsigned long': ctypes.c_uint64,
                 'unsigned long long int': ctypes.c_uint64,
-                'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte, 
-                'unsigned': ctypes.c_uint32
+                'char': ctypes.c_byte, 'unsigned char': ctypes.c_ubyte,
+                'unsigned': ctypes.c_uint32,
+                # Opaque handle types added for HostModule capability shims
+                # (Phase 1): these stay c_void_p rather than becoming an
+                # ndpointer, because the things they describe -- device
+                # pointers, queue handles, file descriptors -- have no host
+                # array behind them.
+                'uintptr': ctypes.c_void_p,
+                'handle': ctypes.c_void_p,
+                'void': ctypes.c_void_p,
+                'size_t': ctypes.c_size_t
             }
         self.known_ctypes_types = {value: key for (key, value) in self.known_c_types.items()}
 
