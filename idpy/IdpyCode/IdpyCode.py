@@ -36,6 +36,7 @@ as long as the different meta-declarations are consistent
 '''
 
 import numpy as np
+import warnings
 from collections import defaultdict
 from pathlib import Path
 import sys
@@ -57,21 +58,104 @@ from idpy.Utils.SimpleTiming import SimpleTiming
 _C_INT64_MAX = 0x7fffffffffffffff
 
 
-def _format_c_macro_value(value, lang=None):
+class IdpyConstantPrecisionWarning(UserWarning):
+    '''
+    A floating-point constant was emitted with no stated precision.
+
+    A bare Python float reaches the generated source as a bare literal, which is
+    a *double* in C. Surrounding fp32 arithmetic then promotes: measured at ~208x
+    slower on a GeForce part (1/64-rate fp64 plus a float<->double conversion per
+    operation), and -- worse -- it makes the same kernel compute fp64
+    intermediates on CUDA and fp32 on Apple, where there is no fp64 to promote
+    to. That is a silent cross-backend numerical divergence.
+
+    Silence it by saying what you mean, either way:
+        constants_types={'X': 'FType'}   follows custom_types, including the
+                                         runtime double->float downcast that
+                                         CheckOCLFP/CheckMetalFP apply on
+                                         devices without fp64
+        constants['X'] = np.float32(v)   pinned to fp32 on every device
+    '''
+
+
+_UNTYPED_FLOAT_WARNED = set()
+
+
+def _warn_untyped_float(name, value):
+    _key = (str(name), str(value))
+    if _key in _UNTYPED_FLOAT_WARNED:
+        return
+    _UNTYPED_FLOAT_WARNED.add(_key)
+    warnings.warn(
+        "constant %s = %s has no stated precision and will be emitted as a C "
+        "double literal; fp32 arithmetic touching it will promote. Declare it "
+        "with constants_types={'%s': '<type alias>'} or pass np.float32(...)."
+        % (name, value, name),
+        IdpyConstantPrecisionWarning, stacklevel=3,
+    )
+
+
+def _float_suffix_for(ctype):
+    '''
+    C literal suffix for a resolved type name, or None when it says nothing.
+
+    Only 'float' changes the literal; double is C's default for an unsuffixed
+    one. An unrecognised type returns None rather than guessing -- a custom
+    alias resolving to something exotic must not silently acquire an 'f'.
+    '''
+    if ctype is None:
+        return None
+    _c = str(ctype).strip()
+    if _c == 'float':
+        return 'f'
+    if _c in ('double', 'long double'):
+        return ''
+    return None
+
+
+def _format_c_macro_value(value, lang=None, ctype=None, name=None):
     '''
     Format a Python constant for #define / -D emission.
+
     Values above signed int64 max (e.g. ID_RANDMAX_MMIX = 2^64-1) need an
     explicit unsigned suffix or compilers warn / mis-parse the literal.
+
+    Floating-point values take their precision from, in order:
+      1. 'ctype' -- the constant's declared type, already resolved through
+         custom_types by IdpyKernel.ConstantCType. This is the form that tracks
+         a runtime double->float downcast.
+      2. the value's own numpy dtype, so np.float32(x) pins fp32 with no
+         further ceremony.
+      3. nothing, in which case C's default (double) applies and a warning
+         fires -- see IdpyConstantPrecisionWarning.
+
+    A str value is passed through verbatim, which is the escape hatch for a
+    literal that has to be spelled exactly ('0.5f', '1e-5L', a macro call).
     '''
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         return '1' if value else '0'
-    if isinstance(value, int):
-        if value > _C_INT64_MAX:
+    # np.integer is not a subclass of int, so it must be named explicitly or
+    # large numpy integers would miss the unsigned suffix below.
+    if isinstance(value, (int, np.integer)):
+        _v = int(value)
+        if _v > _C_INT64_MAX:
             # Metal has no long long; unsigned long is 64-bit.
             if lang == METAL_T:
-                return str(value) + 'UL'
-            return str(value) + 'ULL'
-        return str(value)
+                return str(_v) + 'UL'
+            return str(_v) + 'ULL'
+        return str(_v)
+    if isinstance(value, (float, np.floating)):
+        _suffix = _float_suffix_for(ctype)
+        if _suffix is None:
+            if isinstance(value, np.float32):
+                _suffix = 'f'
+            else:
+                _suffix = ''
+                # np.float64 states 'double' as explicitly as np.float32 states
+                # 'float'; only a bare Python float leaves it unsaid.
+                if not isinstance(value, np.floating):
+                    _warn_untyped_float(name, value)
+        return str(value) + _suffix
     return str(value)
 
 if idpy_langs_sys[CUDA_T]:
@@ -122,7 +206,8 @@ class IdpyKernel:
     kernel
     - Need to discuss somewhere the difference between CUDA grid and OpenCL
     '''
-    def __init__(self, custom_types = {}, constants = {}, f_classes = [],
+    def __init__(self, custom_types = {}, constants = {}, constants_types = {},
+                 f_classes = [],
                  gthread_id_code = 'g_tid', lthread_id_code = 'l_tid',
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
                  optimizer_flag = None, declare_types = None, declare_macros = None,
@@ -145,6 +230,18 @@ class IdpyKernel:
             {}, {}, f_classes, []
         
         self.custom_types, self.constants = custom_types, constants
+        '''
+        Declared precision for constants: {constant_name: type_alias}.
+
+        The alias is resolved through custom_types at EMISSION time, not here,
+        which is the whole point: CheckOCLFP/CheckMetalFP rewrite custom_types
+        double->float on devices without fp64, and a constant declared 'FType'
+        follows that downcast. Pinning a constant instead -- np.float32(x) in
+        'constants' -- is the other valid choice, and says something different.
+        '''
+        self.constants_types = (
+            dict(constants_types) if constants_types else {}
+        )
         '''
         Need to check the type of optimizer_flag
         '''
@@ -334,7 +431,9 @@ class IdpyKernel:
                 for const in self.constants:
                     self.macros.append(
                         "-D " + const + "=" +
-                        _format_c_macro_value(self.constants[const], lang)
+                        _format_c_macro_value(self.constants[const], lang,
+                                              ctype=self.ConstantCType(const),
+                                              name=const)
                     )
                 
             # Types
@@ -355,7 +454,9 @@ class IdpyKernel:
                 for const in self.constants:
                     self.macros += (
                         " -D " + const + "=" +
-                        _format_c_macro_value(self.constants[const], lang)
+                        _format_c_macro_value(self.constants[const], lang,
+                                              ctype=self.ConstantCType(const),
+                                              name=const)
                     )
                 
             # Types
@@ -384,7 +485,9 @@ class IdpyKernel:
                 for const in self.constants:
                     self.macros += (
                         " -D " + const + "=" +
-                        _format_c_macro_value(self.constants[const], lang)
+                        _format_c_macro_value(self.constants[const], lang,
+                                              ctype=self.ConstantCType(const),
+                                              name=const)
                     )
                 
             # Types
@@ -583,11 +686,30 @@ class IdpyKernel:
         for c_macro in self.constants:
             _swap += (
                 '#define ' + c_macro + ' ' +
-                _format_c_macro_value(self.constants[c_macro], lang) + '\n'
+                _format_c_macro_value(self.constants[c_macro], lang,
+                                      ctype=self.ConstantCType(c_macro),
+                                      name=c_macro) + '\n'
             )
         _swap += '\n'
         
         return _swap    
+
+    def ConstantCType(self, name):
+        '''
+        Resolve a constant's declared type alias to a concrete C type, or None
+        when it was not declared.
+
+        Resolution happens here rather than at construction so that a runtime
+        rewrite of custom_types -- the double->float downcast applied on devices
+        without fp64 -- is picked up. A constant declared 'FType' is emitted as
+        a float literal on Apple and a double literal on a card with fp64, which
+        is the behaviour that keeps one kernel numerically consistent with its
+        own arrays across backends.
+        '''
+        _alias = self.constants_types.get(name)
+        if _alias is None:
+            return None
+        return self.custom_types.get(_alias, _alias)
 
     def IncludeHeaders(self):
         _swap = ''

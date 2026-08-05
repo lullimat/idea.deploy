@@ -119,22 +119,24 @@ class K_ComputeBound(IdpyKernel):
         constants = OrderedDict()
         constants['ITERS'] = int(iters)
         '''
-        Emitted as STRINGS carrying an explicit 'f' suffix, not as Python
-        floats.
+        np.float32, not bare Python floats.
 
-        A Python float reaches the generated source through str() as a bare
-        literal -- '#define CHAIN_A 0.99999' -- which is a *double* in C. The
-        surrounding 'float v' then promotes, and the whole chain evaluates in
-        fp64 wherever fp64 exists. On a GeForce part that is the 1/64-rate path:
-        measured here as ~12x fewer iterations for the same wall time on an
-        RTX 5060 than on an M1 Max, which has no fp64 to promote to. The 'f'
-        suffix keeps the arithmetic in fp32 on every backend and makes the
-        calibrated ITERS comparable across machines.
+        A Python float reaches the generated source as a bare literal --
+        '#define CHAIN_A 0.99999' -- which is a *double* in C. The surrounding
+        'float v' then promotes and the whole chain evaluates in fp64 wherever
+        fp64 exists; on an RTX 5060 that measured ~208x slower than the fp32
+        path. np.float32 pins the literal to fp32 on every backend, which is
+        what this benchmark wants: the filler kernel's cost must depend on the
+        hardware, not on which hardware happens to have fp64 units.
+
+        Pinning rather than declaring constants_types={'CHAIN_A': 'FType'} is
+        deliberate here. These are algorithmic constants of the benchmark, not
+        physics values that should track the kernel's working precision.
 
         |A| < 1 keeps the chain bounded; B keeps it from decaying to zero.
         '''
-        constants['CHAIN_A'] = '0.99999f'
-        constants['CHAIN_B'] = '0.00001f'
+        constants['CHAIN_A'] = np.float32(0.99999)
+        constants['CHAIN_B'] = np.float32(0.00001)
 
         IdpyKernel.__init__(
             self, custom_types=custom_types, constants=constants,
