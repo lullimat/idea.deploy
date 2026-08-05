@@ -1185,6 +1185,12 @@ def _metal_touched_from_args(args_list):
     included: they are created per-dispatch and never observed by the host, so
     they cannot be the subject of a host/GPU conflict.
     '''
+    if not idpy_langs_sys[METAL_T]:
+        # IdpyArrayMETAL is only imported when the Metal backend is present, so
+        # the isinstance below would NameError on a machine without it. Reaching
+        # here without Metal should be impossible, but 'unknown' is the safe
+        # answer rather than a crash.
+        return None
     _touched = {}
     for arg in (args_list or []):
         if isinstance(arg, IdpyArrayMETAL):
