@@ -63,7 +63,8 @@ from collections import OrderedDict
 
 import numpy as np
 
-from idpy.IdpyCode import IdpyMemory
+from idpy.IdpyCode import IdpyMemory, CUDA_T
+from idpy.Utils.IsModuleThere import IsModuleThere
 
 
 class BackingStore:
@@ -97,6 +98,35 @@ class BackingStore:
 
     def WriteBlock(self, block_id, data):
         raise NotImplementedError
+
+    '''
+    Storage -> device, Phase 3.
+
+    ReadBlock hands back a host array, which the cache then copies into a device
+    slot: storage -> page cache -> host buffer -> device. That is the universal
+    path and it is always correct. It is also two copies more than the hardware
+    requires, and on a residency workload -- where the whole point is that the
+    dataset does not fit and is therefore read continuously -- those copies are
+    the cost.
+
+    A store that can write into device memory directly overrides ReadBlockInto.
+    Returning False means "I cannot", and the cache falls back to the host path
+    without caring why. That keeps the capability optional per store rather than
+    per backend, and keeps the fallback the default rather than the exception.
+    '''
+    def ReadBlockInto(self, block_id, view):
+        '''
+        Fill a device slot with a block, bypassing host memory.
+
+        'view' is an Idpy array covering exactly one block. Return True if the
+        block was written, False to decline -- declining is not an error, it is
+        how a store says it has no direct path on this configuration.
+        '''
+        return False
+
+    def DirectPathName(self):
+        '''Human-readable name of the direct path, or None when there is none.'''
+        return None
 
 
 class ArrayStore(BackingStore):
@@ -168,6 +198,84 @@ class MemMapStore(BackingStore):
         self.map = None
 
 
+class KvikIOStore(MemMapStore):
+    '''
+    A file store that can read straight into device memory on CUDA (Phase 3).
+
+    Uses KvikIO, which wraps NVIDIA's cuFile / GPUDirect Storage. The reason it
+    is the cheapest backend to start with is not performance: **KvikIO degrades
+    to a POSIX read when GPUDirect is unavailable**, so the same code path is
+    exercised, and stays correct, on a machine with no GDS hardware, no
+    compatible filesystem and no nvidia-fs driver. A correctness path that does
+    not depend on hardware you may not have is worth more early than a fast path
+    that does.
+
+    Inherits MemMapStore's host path unchanged, so the fallback is not a
+    separate implementation that could drift from the direct one -- it is the
+    same store answering a different way.
+
+    Availability is decided per instance, not per import: kvikio present, a CUDA
+    array on the other end, and a successful open. Any of those missing and
+    ReadBlockInto declines, which the cache handles as an ordinary miss.
+    '''
+
+    def __init__(self, path, n_elems, block_elems, dtype, mode='r+'):
+        MemMapStore.__init__(self, path, n_elems, block_elems, dtype, mode=mode)
+        self._cufile = None
+        self._direct = IsModuleThere('kvikio')
+
+    def _CuFile(self):
+        if self._cufile is None:
+            import kvikio
+            self._cufile = kvikio.CuFile(self.path, 'r')
+        return self._cufile
+
+    def ReadBlockInto(self, block_id, view):
+        '''
+        Read a block straight into 'view'. Declines unless the destination is a
+        CUDA array -- KvikIO writes through __cuda_array_interface__, which the
+        host-backed arrays of the other backends do not provide, and which
+        nothing else here should pretend to satisfy.
+        '''
+        if not self._direct:
+            return False
+        if getattr(view, 'lang', None) != CUDA_T:
+            return False
+
+        _start, _stop = self.BlockSpan(block_id)
+        _itemsize = int(self.dtype.itemsize)
+        _nbytes = (_stop - _start) * _itemsize
+        try:
+            _future = self._CuFile().pread(
+                view, size=_nbytes, file_offset=_start * _itemsize,
+            )
+            _future.get()
+        except Exception:
+            '''
+            Decline permanently rather than raising. A read that cannot use the
+            direct path is a configuration fact, not a failure: the cache falls
+            back and the run stays correct, only staged. Sticking the flag off
+            avoids paying the exception on every subsequent miss.
+            '''
+            self._direct = False
+            return False
+
+        self.bytes_read += _nbytes
+        return True
+
+    def DirectPathName(self):
+        return 'kvikio/cuFile' if self._direct else None
+
+    def Close(self):
+        if self._cufile is not None:
+            try:
+                self._cufile.close()
+            except Exception:
+                pass
+            self._cufile = None
+        MemMapStore.Close(self)
+
+
 class ResidentCache:
     '''
     A fixed number of device-resident slots over a larger backing store.
@@ -227,7 +335,8 @@ class ResidentCache:
         self._pinned = set()
 
         self.stats = OrderedDict(
-            [('hits', 0), ('misses', 0), ('evictions', 0), ('writebacks', 0)]
+            [('hits', 0), ('misses', 0), ('evictions', 0), ('writebacks', 0),
+             ('direct_reads', 0), ('staged_reads', 0)]
         )
 
     # -- policy ------------------------------------------------------------
@@ -269,7 +378,20 @@ class ResidentCache:
 
         self.stats['misses'] += 1
         _slot = self._AllocateSlot()
-        self.slots[_slot].H2DSub(self.store.ReadBlock(block_id), start=0)
+        '''
+        Try storage -> device first; fall back to storage -> host -> device.
+
+        The counters distinguish the two so a run can say which path it actually
+        took. A direct path that silently degrades to the host bounce would look
+        exactly like a working one in every correctness test -- that is the same
+        failure mode as an 'async' copy that is secretly synchronous, and it is
+        worth being able to see rather than infer.
+        '''
+        if self.store.ReadBlockInto(block_id, self.slots[_slot]):
+            self.stats['direct_reads'] += 1
+        else:
+            self.slots[_slot].H2DSub(self.store.ReadBlock(block_id), start=0)
+            self.stats['staged_reads'] += 1
         self._resident[block_id] = _slot
         self._slot_block[_slot] = block_id
         if pin:
@@ -326,6 +448,7 @@ class ResidentCache:
         _r['hit_rate'] = self.HitRate()
         _r['bytes_read'] = self.store.bytes_read
         _r['bytes_written'] = self.store.bytes_written
+        _r['direct_path'] = self.store.DirectPathName()
         return _r
 
 

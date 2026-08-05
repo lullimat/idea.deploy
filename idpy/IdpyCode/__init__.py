@@ -51,9 +51,13 @@ idpy_opencl_macro_spacing = None
 if idpy_os_found == "linux":
     idpy_opencl_macro_spacing = '\t'
 if idpy_os_found == "darwin":
-    idpy_opencl_macro_spacing = '\ '
+    # '\\ ', spelled explicitly: a bare '\ ' is an invalid escape sequence,
+    # which Python currently accepts with a SyntaxWarning and will one day
+    # reject outright. The value is identical -- backslash followed by space,
+    # which is how a space is escaped inside an OpenCL -D flag.
+    idpy_opencl_macro_spacing = '\\ '
 if idpy_os_found == "win32":
-    idpy_opencl_macro_spacing = '\ '
+    idpy_opencl_macro_spacing = '\\ '
 
 '''
 Define some virtual environment variables
