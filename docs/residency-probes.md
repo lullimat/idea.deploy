@@ -16,7 +16,7 @@ unchanged") is measured against.
 | F2 | can `IdpyMemory` express the residency op? | inspection | **no — settled** |
 | F4 | can `IDPY_T` express sub-byte packed types? | inspection | **no — settled** |
 | P1 | sustained storage->device bandwidth under overlap | measurement | **measured (§2k)**; CUDA pending |
-| P3 | is one dynamic shared buffer enough? | inspection + kernel design | **not yet run** |
+| P3 | is one dynamic shared buffer enough? | built and measured | **yes — settled (§2l)** |
 
 Two of the four original probes were answerable by reading the tree rather than
 by measurement. Both came back negative. See §4 of `idea.deploy-extension.md`
@@ -911,6 +911,55 @@ producing confident nonsense:
   comparison silently stopped being controlled. Calibration now happens once per
   backend and the kernel is shared. A ratio outside `[-0.2, 1.2]` — impossible
   by construction — is now reported as unresolved rather than printed.
+
+---
+
+## 2l. P3 answered: one dynamic buffer is enough
+
+The last open probe. `SetDynamicSharedMemory` allows one runtime-sized buffer
+because CUDA exposes a single `extern __shared__` region, and the question was
+whether that lowest-common-denominator constraint blocks the lattice kernels or
+is merely an ergonomic wrinkle. If it blocked them, the constraint rather than
+the residency layer would have been the real obstacle.
+
+**It does not block them.** Answered by building the case that would break it: a
+two-field 3-point stencil with periodic halos,
+
+    out[i] = (a[i-1] + a[i] + a[i+1]) + 2*(b[i-1] + b[i] + b[i+1])
+
+which needs two tiles by construction — each field carries its own `BLOCK+2`
+halo window, and every output element reads slots written by other lanes.
+
+| check | OpenCL | Metal |
+|---|---|---|
+| T1 two logical tiles inside **one** dynamic buffer, manual offsets | exact | exact |
+| T2 two tiles from **static** shared memory | exact | exact |
+| T3 guard: declaring two dynamic buffers raises | — raises `NotImplementedError` |
+
+Two routes, both working. The dynamic case uses exactly the workaround the
+`SetDynamicSharedMemory` docstring prescribes — one buffer, indexed manually for
+multiple logical tiles — and the static case has no constraint to work around at
+all, since a compile-time declaration is ordinary and a kernel may have as many
+arrays as fit.
+
+Capacity is not close to binding either: two tiles at `BLOCK=64` are ~0.5 KiB
+against 48 KiB of CUDA shared memory and 32 KiB of Metal threadgroup memory. The
+constraint is on the *number of declarations*, not on space, and one declaration
+holds as many logical tiles as arithmetic can address.
+
+### The probe has teeth
+
+A negative control confirms it can fail: pointing both logical tiles at the same
+base — the mis-addressing the manual-offset workaround exists to get right —
+gives `max|out-ref| = 1532.25` rather than a quiet pass. The body is also
+identical text between T1 and T2 apart from the tile bases, which isolates the
+question to where the storage comes from rather than how it is addressed.
+
+**Consequence:** the LCD constraint stands as documented and costs nothing for
+lattice work. Phase 5 remains gated on F4, not on this.
+
+**Phase 0 is complete.** F2 and F4 settled by inspection, both negative; P1
+measured after correcting itself three times; P3 built and settled here.
 
 ---
 
