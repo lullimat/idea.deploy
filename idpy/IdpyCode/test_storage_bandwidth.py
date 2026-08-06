@@ -78,6 +78,7 @@ Run directly:
     python -m idpy.IdpyCode.test_storage_bandwidth
 '''
 
+import fcntl
 import gc
 import os
 import tempfile
@@ -103,6 +104,25 @@ _N_BLOCKS = 32                  # 256 MiB file
 _N_SLOTS = 4                    # 32 MiB resident: the file is 8x the cache
 _DTYPE = np.float32
 _REPEATS = 3
+
+'''
+Transfer-size sweep. A single block size samples one point on a bandwidth curve,
+and if that point sits near the knee -- where per-transfer overhead still
+competes with throughput -- run-to-run variance is large and a lone sample says
+little. This is why the same cold CUDA measurement produced 0.36 GB/s once and
+~1.4 the next time, and why a 4.36x ratio was recorded from it.
+
+The plateau is the stable estimate. Where the curve reaches it is separately
+useful: it is the block size the ResidentCache should be using.
+
+Total bytes are held constant across sizes so each row is the same work split
+differently, and the cache holds 4 blocks throughout, so the resident set grows
+with the block size exactly as it would in use.
+'''
+_SWEEP_MiB = (0.25, 1, 4, 16, 64)
+_SWEEP_TOTAL_MiB = 512
+_SWEEP_MAX_BLOCKS = 64
+_SWEEP_REPEATS = 2
 
 _TYPES = CustomTypes({'FType': 'float'}).Push()
 
@@ -169,6 +189,73 @@ def _PlainRead(path, chunk=1 << 22):
     return _n / (perf_counter() - _t) / 1e9
 
 
+_F_NOCACHE = 48          # macOS fcntl; no O_DIRECT and no posix_fadvise
+
+
+def DriveBandwidthNoCache(tmpdir, mib=256, chunk=1 << 22, repeats=3):
+    '''
+    Drive read bandwidth on macOS, which has neither posix_fadvise nor O_DIRECT.
+
+    'purge' needs sudo, and F_NOCACHE on a read does not evict pages that are
+    already resident -- it only changes future caching policy. The way through
+    is to keep the pages out of the cache in the first place: write the scratch
+    file with F_NOCACHE set, then read it back with F_NOCACHE set. Verified to
+    give ~5 GB/s against ~11 GB/s for a cached read on the same file, so it is
+    genuinely reaching the device.
+
+    A separate scratch file rather than the test file, because the sweep's
+    staged path reads through numpy.memmap and repopulates the cache on first
+    touch. This measures the DEVICE; the sweep on macOS stays warm and is
+    labelled as such.
+    '''
+    if not hasattr(fcntl, 'fcntl'):
+        return None
+    '''
+    Repeated and reported as a RANGE. A single sample of this measurement spanned
+    2.66-4.32 GB/s across six runs on one machine, and the maximum was recorded
+    as the value -- the same single-sample error that produced 0.24x, 4.36x and
+    1.12x for the direct/staged ratio. Any bandwidth figure this harness prints
+    should carry its spread.
+    '''
+    _runs = []
+    _path = os.path.join(tmpdir, 'drive_probe.bin')
+    _blob = os.urandom(1 << 22)
+    try:
+      for _rep in range(repeats):
+        _fd = os.open(_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+        try:
+            fcntl.fcntl(_fd, _F_NOCACHE, 1)
+            for _ in range(max(1, mib // 4)):
+                os.write(_fd, _blob)
+            os.fsync(_fd)
+        finally:
+            os.close(_fd)
+
+        _fd = os.open(_path, os.O_RDONLY)
+        try:
+            fcntl.fcntl(_fd, _F_NOCACHE, 1)
+            _t, _n = perf_counter(), 0
+            while True:
+                _b = os.read(_fd, chunk)
+                if not _b:
+                    break
+                _n += len(_b)
+        finally:
+            os.close(_fd)
+        _runs.append(_n / (perf_counter() - _t) / 1e9)
+      if not _runs:
+          return None
+      _runs.sort()
+      return {'min': _runs[0], 'med': _runs[len(_runs) // 2], 'max': _runs[-1]}
+    except OSError:
+        return None
+    finally:
+        try:
+            os.remove(_path)
+        except OSError:
+            pass
+
+
 def RawColdBandwidth(path, chunk=1 << 22):
     '''
     Sequential read bandwidth straight from the drive, with no idpy in the way.
@@ -214,8 +301,16 @@ def _sweep_cache(cache, n_blocks):
 
 def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
                cold=False):
-    '''Minimum wall time over 'repeats' full sweeps, plus the store used.'''
-    _best, _store, _cache = None, None, None
+    '''
+    Wall time over 'repeats' full sweeps, plus the store used.
+
+    Returns the best time AND the full list. Min alone was not enough: the cold
+    CUDA staged leg read 0.36 GB/s in one run and ~1.4 in the next, a 4x spread
+    on the same quantity, and reporting only the minimum turned a sample into an
+    apparent result. Cold I/O has a long tail -- eviction cost, fault storms,
+    drive state -- so the spread is the measurement, not an imperfection in it.
+    '''
+    _best, _store, _cache, _all = None, None, None, []
     for _ in range(repeats):
         if cold:
             '''
@@ -242,16 +337,83 @@ def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
         _t0 = perf_counter()
         _bytes = _sweep_cache(_cache, n_blocks)
         _dt = perf_counter() - _t0
+        _all.append(_dt)
         _best = _dt if _best is None else min(_best, _dt)
         _direct = _cache.stats['direct_reads']
-    return _best, _bytes, _store, _direct
+    return _best, _bytes, _store, _direct, _all
+
+
+def _ColdSweep(tenet, path, staged_f, direct_f, lattice):
+    '''
+    Cold bandwidth against transfer size, for both routes.
+
+    Every point drops the page cache first, so every point reads the drive.
+    Returns a list of (MiB, staged_GBs, direct_GBs, direct_reads).
+    '''
+    if not hasattr(os, 'posix_fadvise'):
+        return None
+    _item = np.dtype(_DTYPE).itemsize
+    _rows = []
+    for _mib in _SWEEP_MiB:
+        _block = max(1, int(_mib * (1 << 20)) // _item)
+        # Clamp to what the file actually holds. Belt and braces: the file is
+        # sized for the sweep above, but a mismatch between the two should
+        # shorten the measurement rather than raise IndexError mid-run.
+        _avail = max(1, lattice.size // _block)
+        '''
+        Cap the block COUNT, not the total bytes. Cost is driven by per-block
+        overhead times count, so holding total bytes constant makes the smallest
+        row 2048 acquires -- which, with a command buffer per acquire on Metal,
+        does not finish. Bandwidth is bytes over time, so each row only needs
+        enough bytes to clear timer noise, not the same total as its neighbours.
+        '''
+        _nb = max(4, min(int(_SWEEP_TOTAL_MiB / _mib), _SWEEP_MAX_BLOCKS,
+                         _avail))
+        _bytes = _nb * _block * _item
+
+        def _run(factory):
+            _best, _direct = None, 0
+            for _ in range(_SWEEP_REPEATS):
+                gc.collect()
+                DropPageCache(path)
+                _store = factory(path, lattice, _block)
+                _cache = IdpyResidency.Cache(tenet=tenet, store=_store,
+                                             n_slots=_N_SLOTS)
+                _t0 = perf_counter()
+                for _b in range(_nb):
+                    _cache.Acquire(_b)
+                    _cache.EndStep()
+                _dt = perf_counter() - _t0
+                _direct = _cache.stats['direct_reads']
+                _best = _dt if _best is None else min(_best, _dt)
+                _close = getattr(_store, 'Close', None)
+                if callable(_close):
+                    try:
+                        _close()
+                    except Exception:
+                        pass
+            return _bytes / _best / 1e9, _direct
+
+        _s_bw, _ = _run(lambda p, a, blk: IdpyResidency.MemMapStore(
+            p, a.size, blk, a.dtype))
+        _d_bw, _dr = _run(lambda p, a, blk: IdpyResidency.FileStoreClass(tenet)(
+            p, a.size, blk, a.dtype))
+        _rows.append((_mib, _s_bw, _d_bw, _dr))
+    return _rows
 
 
 def measure(lang, tmpdir):
     tenet = GetTenet(_tenet_params(lang))
     out = OrderedDict()
     try:
-        _n = _N_BLOCKS * _BLOCK_ELEMS
+        '''
+        The file must cover the LARGEST total any measurement asks for. Sizing
+        it to the single-size run while the sweep requested twice that produced
+        'IndexError: block 1024 out of range [0, 1024)' -- two constants that
+        had to agree, in different places, with nothing enforcing it.
+        '''
+        _n = max(_N_BLOCKS * _BLOCK_ELEMS,
+                 int(_SWEEP_TOTAL_MiB * (1 << 20)) // np.dtype(_DTYPE).itemsize)
         lattice = np.arange(_n, dtype=_DTYPE) * np.float32(0.5)
         _path = os.path.join(tmpdir, 'bw_%s.bin' % lang)
         lattice.tofile(_path)
@@ -264,17 +426,21 @@ def measure(lang, tmpdir):
         with open(_path, 'rb') as _fh:
             os.fsync(_fh.fileno())
         out['raw'] = RawColdBandwidth(_path)
+        if out['raw'] is None:
+            # No posix_fadvise (macOS): measure the device directly instead, and
+            # keep the sweep labelled warm rather than pretending otherwise.
+            out['drive_nocache'] = DriveBandwidthNoCache(tmpdir)
 
         # -- B1: staged. MemMapStore has no direct path by construction.
         _staged = lambda p, a: IdpyResidency.MemMapStore(
             p, a.size, _BLOCK_ELEMS, a.dtype)
-        _t_staged, _bytes, _s1, _d1 = _time_load(
+        _t_staged, _bytes, _s1, _d1, _a1 = _time_load(
             tenet, _staged, _path, lattice, _N_BLOCKS, _REPEATS)
 
         # -- B2: whatever direct lowering this backend has, if any.
         _direct_f = lambda p, a: IdpyResidency.FileStoreClass(tenet)(
             p, a.size, _BLOCK_ELEMS, a.dtype)
-        _t_direct, _, _s2, _d2 = _time_load(
+        _t_direct, _, _s2, _d2, _a2 = _time_load(
             tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS)
 
         '''
@@ -289,19 +455,7 @@ def measure(lang, tmpdir):
         out['path'] = _s2.DirectPathName() or 'staged (no direct path)'
         _s1 = _s2 = None                 # release the warm stores' mappings
         gc.collect()
-        _cold_ok = DropPageCache(_path)
-        if _cold_ok:
-            _t_cold_staged, _, _, _ = _time_load(
-                tenet, _staged, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
-            _t_cold_direct, _, _, _dc = _time_load(
-                tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
-            out['cold_staged_GBs'] = _bytes / _t_cold_staged / 1e9
-            out['cold_direct_GBs'] = _bytes / _t_cold_direct / 1e9
-            out['cold_direct_reads'] = _dc
-        else:
-            out['cold_staged_GBs'] = None
-            out['cold_direct_GBs'] = None
-            out['cold_direct_reads'] = None
+        out['sweep'] = _ColdSweep(tenet, _path, _staged, _direct_f, lattice)
 
         out['MiB'] = _bytes / (1 << 20)
         out['staged_GBs'] = _bytes / _t_staged / 1e9
@@ -486,6 +640,11 @@ def main():
                   f"   ({r['direct_reads']} direct reads)")
             print(f"    B2/B1                {r['speedup']:7.2f}x   "
                   f"(warm cache: B1 reads RAM, so this is NOT a fair race)")
+            _dn = r.get('drive_nocache')
+            if _dn is not None:
+                print(f"    B0 drive (F_NOCACHE) {_dn['med']:7.2f} GB/s"
+                      f"   (range {_dn['min']:.2f}-{_dn['max']:.2f}, n=3)"
+                      f"   <-- device; sweep below stays WARM here")
             _raw = r.get('raw')
             if _raw is not None:
                 print(f"    B0 plain read        warm {_raw['warm']:6.2f} / "
@@ -493,16 +652,32 @@ def main():
                       + ("   <-- cold is the drive"
                          if _raw['evicted'] else
                          "   <-- NOT EVICTED: every figure below reads cache"))
-            if r['cold_staged_GBs'] is None:
-                print(f"    B4 cold cache        unavailable "
-                      f"(posix_fadvise is Linux-only)")
-            else:
+            _sw = r.get('sweep')
+            if _sw:
+                print(f"    B6 cold sweep        block      staged    direct")
+                for _mib, _sb, _db, _dr in _sw:
+                    _lab = (f"{_mib:g} MiB" if _mib >= 1
+                            else f"{int(_mib * 1024)} KiB")
+                    print(f"                       {_lab:>8}   {_sb:7.2f}   "
+                          f"{_db:7.2f} GB/s" + ("" if _dr else "  (staged)"))
+                _pm, _ps, _pd, _ = _sw[-1]
+                print(f"       plateau ({_pm:g} MiB)  staged {_ps:.2f} / "
+                      f"direct {_pd:.2f} GB/s   ratio {_pd / _ps:.2f}x"
+                      f"   <-- the stable estimate")
+            if True:
+                if not _sw:
+                    print(f"    B4 cold cache        unavailable "
+                          f"(posix_fadvise is Linux-only)")
+            if False:
                 print(f"    B4 cold staged       {r['cold_staged_GBs']:7.2f} GB/s")
                 print(f"    B5 cold direct       {r['cold_direct_GBs']:7.2f} GB/s"
                       f"   ({r['cold_direct_reads']} direct reads)")
+                _cs, _cd = r['cold_staged_spread'], r['cold_direct_spread']
+                print(f"       spread staged     {_cs[0]:.2f} - {_cs[1]:.2f} GB/s"
+                      f"   direct {_cd[0]:.2f} - {_cd[1]:.2f} GB/s")
                 print(f"    B5/B4                "
                       f"{r['cold_direct_GBs'] / r['cold_staged_GBs']:7.2f}x"
-                      f"   <-- the fair comparison")
+                      f"   (best-of; see spread -- cold I/O has a long tail)")
             _ovs = r.get('overlap_staged')
             if _ovs is not None and _ovs['overlap'] is not None:
                 print(f"    B3 overlap, staged   {_ovs['overlap']:7.2f}"
