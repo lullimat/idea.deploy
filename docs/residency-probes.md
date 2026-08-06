@@ -827,45 +827,72 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-### CUDA: direct vs staged is **unresolved**, not 4.36x
+### CUDA: cuFile is 1.26x at plateau — settled by a size sweep
 
-Two runs of the same measurement on the same machine:
+Cold, on `id`. Every point drops the page cache first, so every point reads the
+drive:
 
-| run | B0 cold = drive | B4 cold staged | B5 cold direct | B5/B4 |
-|---|---|---|---|---|
-| first | 1.60 GB/s | **0.36** | 1.59 | **4.36x** |
-| second | 1.34 GB/s | ~1.4 | ~1.5 | **1.12x** |
+| block | staged | cuFile | ratio |
+|---|---|---|---|
+| 256 KiB | 0.50 | **0.87** | 1.74x |
+| 1 MiB | 0.84 | **1.32** | 1.57x |
+| 4 MiB | 1.24 | **1.53** | 1.23x |
+| 16 MiB | 1.18 | **1.52** | 1.29x |
+| **64 MiB (plateau)** | **1.21** | **1.52** | **1.26x** |
 
-A **4x spread on the same quantity**. The 4.36x rested entirely on a single
-cold-staged reading of 0.36 GB/s that has not reproduced, and it was recorded as
-a result — including in merged PR #9 — on the strength of one sample.
+**cuFile is faster at every size**, plateauing at 1.52 GB/s against staged's
+1.21. It also exceeds B0's plain cold read (1.18–1.71 across runs, itself noisy),
+which is consistent: B0 is a POSIX read into userspace carrying its own copy,
+while GPUDirect skips the host. cuFile's 1.52, stable across three block sizes,
+is the better estimate of what the drive can deliver.
 
-**What is stable across runs:** the drive at ~1.3–1.7 GB/s, and both routes
-landing near it. The OpenCL and CTypes controls (no direct lowering, so both
-columns measure one path twice) read 0.97x and 1.01x, consistent with parity.
+The controls behave as they must: OpenCL and CTypes have no direct lowering, so
+their two columns track each other to within 1–9% across the whole sweep.
 
-**What is not established:** that the direct path is faster on this hardware.
-The honest statement is that when both paths genuinely read the drive they
-perform comparably, and any difference is below what this harness can resolve.
+### Why this answer is trustworthy where three earlier ones were not
 
-The cause is that cold I/O has a long tail — eviction cost, fault storms, drive
-state — and reporting `min` over three repeats turns a sample into an apparent
-result. `_time_load` now returns the full list and the harness prints the
-**spread** for both cold legs, so a 4x range is visible as a range instead of
-collapsing to its most flattering end.
+The same measurement previously produced **0.24x**, then **4.36x**, then
+**1.12x**. Each was a single block size — one point on a curve — reported as
+though it were the curve. The sweep was suggested by Matteo as standard practice
+in bandwidth studies, and it is what turned a number that kept moving into
+something that explains why it moved:
 
-### Consequence for the earlier claims
+- 0.24x was a **warm-vs-cold** comparison, not a size effect (staged reading RAM).
+- 4.36x and 1.12x were both **cold** and both at 8 MiB, differing only by
+  cold-I/O tail — the very variance a plateau averages out.
 
-- *"cuFile is worth 4.36x"* — **withdrawn**. Unsupported by the second run.
-- *"Without the direct path CUDA streaming would be ~4x worse"* — **withdrawn**,
-  it followed from the same number.
-- The streamed-CFD figures **stand**: they depend on the drive rate (~1.5 GB/s),
-  which is stable, not on the direct/staged ratio. ~92x for the
-  conservative-form method and ~275x for D3Q27, with the ~3x ratio between them
-  unchanged since it depends on state-to-traffic.
-- Phase 3's storage lowerings remain justified as **portability and
-  correctness**, which is what they were originally claimed to be before this
-  probe briefly promoted them.
+What makes the plateau credible: it is consistent across 4, 16 and 64 MiB;
+both routes are measured on the same curve under the same conditions; and the
+two no-direct-path backends serve as controls that correctly show no difference.
+
+### The knee, which was asserted and is now measured
+
+Both routes rise steeply to ~4 MiB and flatten after. At 256 KiB the staged path
+delivers ~40% of its plateau. "Larger blocks are the first lever" was claimed
+earlier without evidence; the lever engages at **~4 MiB and is spent by 16**.
+`ResidentCache`'s 8 MiB default sits just past the knee — defensible, with
+perhaps a few percent available at 16 MiB.
+
+### Overlap does not survive real I/O on this machine
+
+B3 falls to ~0.0 for both routes cold, where warm runs showed 0.2–0.4. Once the
+load is genuine disk I/O (4–18 ms) it does not hide behind compute here. Metal's
+~1.0 stands apart and for a clear reason: a host store into unified memory runs
+on the CPU while the GPU works, which is a different mechanism from queuing a
+transfer.
+
+### Consequence for streamed CFD
+
+Using the measured cuFile plateau of **1.52 GB/s**:
+
+| method | at the assumed 7 GB/s | **measured** |
+|---|---|---|
+| conservative-form CFD (18 planes state, 108 traffic) | 21x | **~98x** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64x | **~295x** |
+
+The ~3x ratio between methods is unchanged, since it depends on state-to-traffic
+rather than on the drive. And the direct path is worth a real 1.26x of that —
+modest, consistent, and no longer a claim resting on one sample.
 
 ### Three wrong readings, one cause
 
