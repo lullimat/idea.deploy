@@ -120,6 +120,8 @@ with the block size exactly as it would in use.
 '''
 _SWEEP_MiB = (0.25, 1, 4, 16, 64)
 _SWEEP_TOTAL_MiB = 512
+_SWEEP_MAX_BLOCKS = 64
+_SWEEP_REPEATS = 2
 
 _TYPES = CustomTypes({'FType': 'float'}).Push()
 
@@ -286,12 +288,24 @@ def _ColdSweep(tenet, path, staged_f, direct_f, lattice):
     _rows = []
     for _mib in _SWEEP_MiB:
         _block = max(1, int(_mib * (1 << 20)) // _item)
-        _nb = max(1, int(_SWEEP_TOTAL_MiB / _mib))
+        # Clamp to what the file actually holds. Belt and braces: the file is
+        # sized for the sweep above, but a mismatch between the two should
+        # shorten the measurement rather than raise IndexError mid-run.
+        _avail = max(1, lattice.size // _block)
+        '''
+        Cap the block COUNT, not the total bytes. Cost is driven by per-block
+        overhead times count, so holding total bytes constant makes the smallest
+        row 2048 acquires -- which, with a command buffer per acquire on Metal,
+        does not finish. Bandwidth is bytes over time, so each row only needs
+        enough bytes to clear timer noise, not the same total as its neighbours.
+        '''
+        _nb = max(4, min(int(_SWEEP_TOTAL_MiB / _mib), _SWEEP_MAX_BLOCKS,
+                         _avail))
         _bytes = _nb * _block * _item
 
         def _run(factory):
             _best, _direct = None, 0
-            for _ in range(_REPEATS):
+            for _ in range(_SWEEP_REPEATS):
                 gc.collect()
                 DropPageCache(path)
                 _store = factory(path, lattice, _block)
@@ -324,7 +338,14 @@ def measure(lang, tmpdir):
     tenet = GetTenet(_tenet_params(lang))
     out = OrderedDict()
     try:
-        _n = _N_BLOCKS * _BLOCK_ELEMS
+        '''
+        The file must cover the LARGEST total any measurement asks for. Sizing
+        it to the single-size run while the sweep requested twice that produced
+        'IndexError: block 1024 out of range [0, 1024)' -- two constants that
+        had to agree, in different places, with nothing enforcing it.
+        '''
+        _n = max(_N_BLOCKS * _BLOCK_ELEMS,
+                 int(_SWEEP_TOTAL_MiB * (1 << 20)) // np.dtype(_DTYPE).itemsize)
         lattice = np.arange(_n, dtype=_DTYPE) * np.float32(0.5)
         _path = os.path.join(tmpdir, 'bw_%s.bin' % lang)
         lattice.tofile(_path)
