@@ -827,68 +827,70 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-### CUDA: cuFile is not slow — everything else was reading RAM
+### CUDA: cuFile is 4.36x faster — the final, fair measurement
 
-Settled on `id` by a diagnostic with no idpy in it:
+Once the page cache is genuinely evicted (which took four attempts), on `id`:
 
-| plain sequential read | GB/s |
-|---|---|
-| warm (page cache) | **11.12** |
-| cold (the drive) | **1.63** |
-| cold, repeated | 1.62 |
+| backend | B0 cold = drive | B4 cold staged | B5 cold direct | **B5/B4** |
+|---|---|---|---|---|
+| **CUDA** | 1.60 GB/s | **0.36** | **1.59** (cuFile) | **4.36x** |
+| OpenCL | 1.68 | 1.29 | 1.26 (no direct path) | 0.98x |
+| CTypes | 1.71 | 1.24 | 1.24 (no direct path) | 1.00x |
 
-Against that ground truth, the measured paths read:
+**GPUDirect reaches 1.59 of a 1.60 GB/s drive — essentially all of it.** The
+staged route on CUDA manages 0.36, so the direct path is worth **4.36x** on this
+hardware. Phase 3's CUDA row is a performance feature, not merely a portability
+one.
 
-| | GB/s | reading |
+The OpenCL and CTypes rows are the control: neither has a direct lowering, so
+both columns measure the same staged path twice and land within 2% of each
+other, at ~75% of drive speed.
+
+### Three wrong readings, one cause
+
+The same figure — B2/B1 = 0.24x — was recorded three times with three different
+explanations, and every one was an artefact of the page cache:
+
+1. *"cuFile is a 4x pessimization from compatibility mode."* Falsified by a
+   one-line diagnostic: `is_compat_mode_preferred() -> False`.
+2. *"The cold control fixes it."* It did not — `POSIX_FADV_DONTNEED` cannot evict
+   pages held by a live mapping, and `MemMapStore` keeps the file mapped.
+3. *"The ground-truth line will catch it."* It did not either — B0 itself read
+   12 GB/s, because `measure()` still held the warm stores' mappings alive while
+   B0 ran.
+
+Each time, cuFile was the only path performing I/O while everything else was
+served from RAM. The fix that finally worked was structural rather than
+attentional: measure the drive **first, before any store exists**, and have
+`RawColdBandwidth()` report warm and cold together with an explicit
+`NOT EVICTED` verdict when `cold >= 0.5 * warm`. The harness now refuses to
+present a cache figure as a drive figure, instead of relying on a reader to
+notice the contradiction.
+
+### One thing left unexplained
+
+CUDA's cold staged path reaches 0.36 GB/s where OpenCL and CTypes reach ~1.25
+through the same `MemMapStore`. The difference is downstream of the read, in
+`H2DSub` — plausibly the pageable `memcpy_htod` combined with 4 KiB memmap
+faults on cold pages — but that is a hypothesis, not a measurement, and this
+document has already carried three of those. Recorded as open.
+
+### Consequence for streamed CFD
+
+The corrected figures stand, since the direct path achieves drive speed:
+
+| method | as originally quoted | corrected |
 |---|---|---|
-| staged, warm and "cold" alike | 6.5–7.1 | **page cache** |
-| kvikio/cuFile | **1.57** | **the drive**, at ~96% of its sequential rate |
+| conservative-form CFD (18 planes state, 108 traffic) | 21x | **~92x** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64x | **~275x** |
 
-**cuFile was never slow. It was the only thing in the test doing I/O.** GPUDirect
-bypasses the page cache by design, so it paid for real disk reads while every
-other path was served from RAM.
+with the ~3x ratio between methods unchanged, since it depends on
+state-to-traffic rather than on the drive.
 
-Two wrong conclusions were recorded before this one, and both are worth keeping
-visible:
-
-1. *"cuFile is a 4× pessimization caused by compatibility mode."* Falsified by
-   asking for a diagnostic alongside the measurement:
-   `is_compat_mode_preferred() -> False`.
-2. *"The page-cache control fixes the comparison."* It did not.
-   `POSIX_FADV_DONTNEED` **cannot evict pages held by a live mapping**, and
-   `MemMapStore` keeps the file mapped through `numpy.memmap`. The advisory
-   succeeded, the syscall returned success, and nothing was dropped — so a
-   "cold" staged figure of 6.5 GB/s sat next to a 1.6 GB/s drive without
-   contradiction being noticed.
-
-Both errors share a shape: **a number that looked like a result but was an
-artefact of what was not being measured.** The fix is structural rather than
-careful-reading — `RawColdBandwidth()` now reports the drive directly, so any
-figure above that line is cache-assisted by definition and cannot be mistaken
-for throughput. `_time_load` also releases the mapping and collects before
-advising the kernel, so the cold path is genuinely cold.
-
-### Consequence for streamed CFD: the estimates were ~4× optimistic
-
-Every streaming estimate so far used ~7 GB/s. **The honest figure on this drive
-is ~1.6 GB/s** — the earlier number was page-cache bandwidth throughout.
-
-Reworking the slowdown of streamed evolution against fully-resident compute:
-
-| method | at 7 GB/s (as quoted) | at 1.63 GB/s (measured) |
-|---|---|---|
-| conservative-form CFD (18 planes state, 108 traffic) | 21× | **~92×** |
-| D3Q27 LBM (27 planes state, 54 traffic) | 64× | **~275×** |
-
-The **ratio between the methods is unchanged at ~3×** — it depends on
-state-to-traffic, not on the drive — so the structural conclusion survives. The
-absolute case for streamed *evolution* is considerably weaker than quoted, and
-the regimes that remain viable are the ones already identified: a localised
-active set, temporal blocking, or single-pass analysis over a stored field.
-
-Both figures are drive-specific. A Gen5 NVMe at 12 GB/s would move them by
-nearly an order of magnitude, which is itself the point: this is now a measured
-input rather than an assumed one.
+What the fair comparison adds: **without the direct path, CUDA streaming would be
+~4x worse still** (0.36 GB/s rather than 1.59). So the storage lowering is not a
+refinement on this hardware — it is most of what makes streamed residency
+arithmetically arguable at all.
 
 ### What B3 can and cannot resolve
 
