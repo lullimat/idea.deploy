@@ -104,6 +104,23 @@ _N_SLOTS = 4                    # 32 MiB resident: the file is 8x the cache
 _DTYPE = np.float32
 _REPEATS = 3
 
+'''
+Transfer-size sweep. A single block size samples one point on a bandwidth curve,
+and if that point sits near the knee -- where per-transfer overhead still
+competes with throughput -- run-to-run variance is large and a lone sample says
+little. This is why the same cold CUDA measurement produced 0.36 GB/s once and
+~1.4 the next time, and why a 4.36x ratio was recorded from it.
+
+The plateau is the stable estimate. Where the curve reaches it is separately
+useful: it is the block size the ResidentCache should be using.
+
+Total bytes are held constant across sizes so each row is the same work split
+differently, and the cache holds 4 blocks throughout, so the resident set grows
+with the block size exactly as it would in use.
+'''
+_SWEEP_MiB = (0.25, 1, 4, 16, 64)
+_SWEEP_TOTAL_MiB = 512
+
 _TYPES = CustomTypes({'FType': 'float'}).Push()
 
 
@@ -256,6 +273,53 @@ def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
     return _best, _bytes, _store, _direct, _all
 
 
+def _ColdSweep(tenet, path, staged_f, direct_f, lattice):
+    '''
+    Cold bandwidth against transfer size, for both routes.
+
+    Every point drops the page cache first, so every point reads the drive.
+    Returns a list of (MiB, staged_GBs, direct_GBs, direct_reads).
+    '''
+    if not hasattr(os, 'posix_fadvise'):
+        return None
+    _item = np.dtype(_DTYPE).itemsize
+    _rows = []
+    for _mib in _SWEEP_MiB:
+        _block = max(1, int(_mib * (1 << 20)) // _item)
+        _nb = max(1, int(_SWEEP_TOTAL_MiB / _mib))
+        _bytes = _nb * _block * _item
+
+        def _run(factory):
+            _best, _direct = None, 0
+            for _ in range(_REPEATS):
+                gc.collect()
+                DropPageCache(path)
+                _store = factory(path, lattice, _block)
+                _cache = IdpyResidency.Cache(tenet=tenet, store=_store,
+                                             n_slots=_N_SLOTS)
+                _t0 = perf_counter()
+                for _b in range(_nb):
+                    _cache.Acquire(_b)
+                    _cache.EndStep()
+                _dt = perf_counter() - _t0
+                _direct = _cache.stats['direct_reads']
+                _best = _dt if _best is None else min(_best, _dt)
+                _close = getattr(_store, 'Close', None)
+                if callable(_close):
+                    try:
+                        _close()
+                    except Exception:
+                        pass
+            return _bytes / _best / 1e9, _direct
+
+        _s_bw, _ = _run(lambda p, a, blk: IdpyResidency.MemMapStore(
+            p, a.size, blk, a.dtype))
+        _d_bw, _dr = _run(lambda p, a, blk: IdpyResidency.FileStoreClass(tenet)(
+            p, a.size, blk, a.dtype))
+        _rows.append((_mib, _s_bw, _d_bw, _dr))
+    return _rows
+
+
 def measure(lang, tmpdir):
     tenet = GetTenet(_tenet_params(lang))
     out = OrderedDict()
@@ -298,23 +362,7 @@ def measure(lang, tmpdir):
         out['path'] = _s2.DirectPathName() or 'staged (no direct path)'
         _s1 = _s2 = None                 # release the warm stores' mappings
         gc.collect()
-        _cold_ok = DropPageCache(_path)
-        if _cold_ok:
-            _t_cold_staged, _, _, _, _ac = _time_load(
-                tenet, _staged, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
-            _t_cold_direct, _, _, _dc, _ad = _time_load(
-                tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
-            out['cold_staged_spread'] = (_bytes / max(_ac) / 1e9,
-                                         _bytes / min(_ac) / 1e9)
-            out['cold_direct_spread'] = (_bytes / max(_ad) / 1e9,
-                                         _bytes / min(_ad) / 1e9)
-            out['cold_staged_GBs'] = _bytes / _t_cold_staged / 1e9
-            out['cold_direct_GBs'] = _bytes / _t_cold_direct / 1e9
-            out['cold_direct_reads'] = _dc
-        else:
-            out['cold_staged_GBs'] = None
-            out['cold_direct_GBs'] = None
-            out['cold_direct_reads'] = None
+        out['sweep'] = _ColdSweep(tenet, _path, _staged, _direct_f, lattice)
 
         out['MiB'] = _bytes / (1 << 20)
         out['staged_GBs'] = _bytes / _t_staged / 1e9
@@ -506,10 +554,23 @@ def main():
                       + ("   <-- cold is the drive"
                          if _raw['evicted'] else
                          "   <-- NOT EVICTED: every figure below reads cache"))
-            if r['cold_staged_GBs'] is None:
-                print(f"    B4 cold cache        unavailable "
-                      f"(posix_fadvise is Linux-only)")
-            else:
+            _sw = r.get('sweep')
+            if _sw:
+                print(f"    B6 cold sweep        block      staged    direct")
+                for _mib, _sb, _db, _dr in _sw:
+                    _lab = (f"{_mib:g} MiB" if _mib >= 1
+                            else f"{int(_mib * 1024)} KiB")
+                    print(f"                       {_lab:>8}   {_sb:7.2f}   "
+                          f"{_db:7.2f} GB/s" + ("" if _dr else "  (staged)"))
+                _pm, _ps, _pd, _ = _sw[-1]
+                print(f"       plateau ({_pm:g} MiB)  staged {_ps:.2f} / "
+                      f"direct {_pd:.2f} GB/s   ratio {_pd / _ps:.2f}x"
+                      f"   <-- the stable estimate")
+            if True:
+                if not _sw:
+                    print(f"    B4 cold cache        unavailable "
+                          f"(posix_fadvise is Linux-only)")
+            if False:
                 print(f"    B4 cold staged       {r['cold_staged_GBs']:7.2f} GB/s")
                 print(f"    B5 cold direct       {r['cold_direct_GBs']:7.2f} GB/s"
                       f"   ({r['cold_direct_reads']} direct reads)")
