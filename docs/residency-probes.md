@@ -859,31 +859,39 @@ first place, and reading back with it set then reaches the device. Verified:
 
 | | device read | vs `id` |
 |---|---|---|
-| **M1 Max internal SSD** | **4.32 GB/s** | **~3x faster** |
+| **M1 Max internal SSD** | **~3.9 GB/s** (range 2.7–4.3, n=13) | **~2.6x faster** |
 | `id` NVMe (cuFile plateau) | 1.52 GB/s | — |
+
+The first figure recorded here was **4.32 GB/s** — the maximum of the range,
+taken from a single sample. Repeating the measurement across two rounds and
+three backends gave 2.66 to 4.32, a 1.6x spread. `DriveBandwidthNoCache` now
+repeats internally and prints a median with its range, because a single sample
+of a bandwidth figure has misled this document four separate times.
 
 The two machines therefore sit in different regimes. On `id` the drive
 (1.5 GB/s) is ~5x below the machinery ceiling, so storage dominates completely.
-On the M1 Max the drive (4.3) and the machinery (6.3 warm) are within ~1.5x of
-each other, so both matter.
+On the M1 Max the drive (~3.9) and the machinery (6.3–7.8 warm) are within ~2x
+of each other, so both matter.
 
 **Consequence for streamed CFD on Apple Silicon**, using ~400 GB/s of device
 bandwidth:
 
-| method | on `id` (1.52 GB/s) | **on M1 Max (4.32 GB/s)** |
+| method | on `id` (1.52 GB/s) | **on M1 Max (~3.9 GB/s)** |
 |---|---|---|
-| conservative-form CFD | ~98x | **~31x** |
-| D3Q27 LBM | ~295x | **~93x** |
+| conservative-form CFD | ~98x | **~34x** |
+| D3Q27 LBM | ~295x | **~103x** |
 
-**Streamed residency is ~3x more viable on Apple Silicon than on the NVIDIA
+**Streamed residency is ~2.6x more viable on Apple Silicon than on the NVIDIA
 box** — the SSD is ~3x faster while GPU bandwidth is comparable. That is a point
 in favour of `STRATEGY.md`'s central thesis which had not been measured before,
 and it arrives from the direction the thesis did not claim: not FLOPS per dollar
 or unified memory, but storage bandwidth relative to compute.
 
-**One asymmetry worth recording:** Metal's warm `MTLIOCommandQueue` figure
-(6.99 GB/s) *exceeds* the device rate (4.32), so **`MTLIOCommandQueue` does not
-bypass the page cache the way cuFile does**. Apple's storage API is built around
+**One asymmetry worth recording:** Metal's warm `MTLIOCommandQueue` figure runs
+7.1–7.7 GB/s, roughly **twice** the device rate of ~3.9, so **`MTLIOCommandQueue` does not
+bypass the page cache the way cuFile does**. That conclusion strengthened on
+repetition rather than weakening: across runs the warm figure stays ~2x the
+device, well outside the spread of either. Apple's storage API is built around
 efficient streaming and decompression rather than DMA-that-skips-the-host, and
 the residency layer should not assume the two behave alike. The macOS sweep
 therefore stays warm and is labelled as such rather than presented beside the

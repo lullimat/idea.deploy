@@ -192,7 +192,7 @@ def _PlainRead(path, chunk=1 << 22):
 _F_NOCACHE = 48          # macOS fcntl; no O_DIRECT and no posix_fadvise
 
 
-def DriveBandwidthNoCache(tmpdir, mib=256, chunk=1 << 22):
+def DriveBandwidthNoCache(tmpdir, mib=256, chunk=1 << 22, repeats=3):
     '''
     Drive read bandwidth on macOS, which has neither posix_fadvise nor O_DIRECT.
 
@@ -210,9 +210,18 @@ def DriveBandwidthNoCache(tmpdir, mib=256, chunk=1 << 22):
     '''
     if not hasattr(fcntl, 'fcntl'):
         return None
+    '''
+    Repeated and reported as a RANGE. A single sample of this measurement spanned
+    2.66-4.32 GB/s across six runs on one machine, and the maximum was recorded
+    as the value -- the same single-sample error that produced 0.24x, 4.36x and
+    1.12x for the direct/staged ratio. Any bandwidth figure this harness prints
+    should carry its spread.
+    '''
+    _runs = []
     _path = os.path.join(tmpdir, 'drive_probe.bin')
     _blob = os.urandom(1 << 22)
     try:
+      for _rep in range(repeats):
         _fd = os.open(_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
         try:
             fcntl.fcntl(_fd, _F_NOCACHE, 1)
@@ -233,7 +242,11 @@ def DriveBandwidthNoCache(tmpdir, mib=256, chunk=1 << 22):
                 _n += len(_b)
         finally:
             os.close(_fd)
-        return _n / (perf_counter() - _t) / 1e9
+        _runs.append(_n / (perf_counter() - _t) / 1e9)
+      if not _runs:
+          return None
+      _runs.sort()
+      return {'min': _runs[0], 'med': _runs[len(_runs) // 2], 'max': _runs[-1]}
     except OSError:
         return None
     finally:
@@ -629,8 +642,9 @@ def main():
                   f"(warm cache: B1 reads RAM, so this is NOT a fair race)")
             _dn = r.get('drive_nocache')
             if _dn is not None:
-                print(f"    B0 drive (F_NOCACHE) {_dn:7.2f} GB/s"
-                      f"   <-- the device; the sweep below stays WARM here")
+                print(f"    B0 drive (F_NOCACHE) {_dn['med']:7.2f} GB/s"
+                      f"   (range {_dn['min']:.2f}-{_dn['max']:.2f}, n=3)"
+                      f"   <-- device; sweep below stays WARM here")
             _raw = r.get('raw')
             if _raw is not None:
                 print(f"    B0 plain read        warm {_raw['warm']:6.2f} / "
