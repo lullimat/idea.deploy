@@ -158,6 +158,17 @@ def DropPageCache(path):
         return False
 
 
+def _PlainRead(path, chunk=1 << 22):
+    _t, _n = perf_counter(), 0
+    with open(path, 'rb', buffering=0) as _fh:
+        while True:
+            _b = _fh.read(chunk)
+            if not _b:
+                break
+            _n += len(_b)
+    return _n / (perf_counter() - _t) / 1e9
+
+
 def RawColdBandwidth(path, chunk=1 << 22):
     '''
     Sequential read bandwidth straight from the drive, with no idpy in the way.
@@ -169,16 +180,21 @@ def RawColdBandwidth(path, chunk=1 << 22):
 
     Any figure above this line is cache-assisted, by definition.
     '''
+    if not hasattr(os, 'posix_fadvise'):
+        return None
+    _warm = _PlainRead(path)                 # ensure resident, and measure RAM
     if not DropPageCache(path):
         return None
-    _t, _n = perf_counter(), 0
-    with open(path, 'rb', buffering=0) as _fh:
-        while True:
-            _b = _fh.read(chunk)
-            if not _b:
-                break
-            _n += len(_b)
-    return _n / (perf_counter() - _t) / 1e9
+    _cold = _PlainRead(path)
+    """
+    Self-validating: report BOTH, and let the caller see whether the eviction
+    actually happened. A cold figure close to the warm one means the pages were
+    not dropped -- which has now happened three times in this harness, always
+    because something still held the file mapped, and each time it was noticed
+    only by comparing against an external probe. The check belongs in the
+    measurement, not in the reader.
+    """
+    return {'warm': _warm, 'cold': _cold, 'evicted': _cold < 0.5 * _warm}
 
 
 def _tenet_params(lang):
@@ -239,6 +255,15 @@ def measure(lang, tmpdir):
         lattice = np.arange(_n, dtype=_DTYPE) * np.float32(0.5)
         _path = os.path.join(tmpdir, 'bw_%s.bin' % lang)
         lattice.tofile(_path)
+        '''
+        Ground truth FIRST, before any store exists. numpy.memmap keeps the file
+        mapped and pinned pages cannot be evicted, so measuring the drive after
+        the stores are built measures the page cache instead -- which is exactly
+        how a 12 GB/s "drive" came to be printed next to a 1.6 GB/s one.
+        '''
+        with open(_path, 'rb') as _fh:
+            os.fsync(_fh.fileno())
+        out['raw'] = RawColdBandwidth(_path)
 
         # -- B1: staged. MemMapStore has no direct path by construction.
         _staged = lambda p, a: IdpyResidency.MemMapStore(
@@ -257,7 +282,8 @@ def measure(lang, tmpdir):
         page cache dropped first, so neither is reading RAM. Warm numbers are
         kept because they bound what the machinery can do when I/O is free.
         '''
-        out['raw_cold_GBs'] = RawColdBandwidth(_path)
+        _s1 = _s2 = None                 # release the warm stores' mappings
+        gc.collect()
         _cold_ok = DropPageCache(_path)
         if _cold_ok:
             _t_cold_staged, _, _, _ = _time_load(
@@ -456,9 +482,13 @@ def main():
                   f"   ({r['direct_reads']} direct reads)")
             print(f"    B2/B1                {r['speedup']:7.2f}x   "
                   f"(warm cache: B1 reads RAM, so this is NOT a fair race)")
-            if r.get('raw_cold_GBs') is not None:
-                print(f"    B0 raw cold read     {r['raw_cold_GBs']:7.2f} GB/s"
-                      f"   <-- the drive; anything above this reads cache")
+            _raw = r.get('raw')
+            if _raw is not None:
+                print(f"    B0 plain read        warm {_raw['warm']:6.2f} / "
+                      f"cold {_raw['cold']:6.2f} GB/s"
+                      + ("   <-- cold is the drive"
+                         if _raw['evicted'] else
+                         "   <-- NOT EVICTED: every figure below reads cache"))
             if r['cold_staged_GBs'] is None:
                 print(f"    B4 cold cache        unavailable "
                       f"(posix_fadvise is Linux-only)")
