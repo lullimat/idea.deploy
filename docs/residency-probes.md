@@ -827,57 +827,68 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-### CUDA measured — and my first explanation was wrong
+### CUDA: cuFile is not slow — everything else was reading RAM
 
-On `id` (dual RTX 5060, kvikio-cu13 26.6.0), warm cache:
+Settled on `id` by a diagnostic with no idpy in it:
 
-| | bandwidth |
+| plain sequential read | GB/s |
 |---|---|
-| B1 staged | 6.15–6.76 GB/s |
-| B2 kvikio/cuFile | **1.46–1.59 GB/s** |
-| B2/B1 | **0.24x** |
+| warm (page cache) | **11.12** |
+| cold (the drive) | **1.63** |
+| cold, repeated | 1.62 |
 
-The effect is real and far outside the ~6% floor. **The explanation I first
-recorded is not.**
+Against that ground truth, the measured paths read:
 
-I attributed it to KvikIO compatibility mode — cuFile degrading to a POSIX read
-without GPUDirect — and added detection to decline the direct path when that
-happens. Querying the flag on the machine in question returned
-**`is_compat_mode_preferred() -> False`**. The detector works; the hypothesis was
-wrong.
+| | GB/s | reading |
+|---|---|---|
+| staged, warm and "cold" alike | 6.5–7.1 | **page cache** |
+| kvikio/cuFile | **1.57** | **the drive**, at ~96% of its sequential rate |
 
-**The likely explanation was in this file's own caveat, and I failed to apply
-it.** B1 reads a warm page cache — RAM. cuFile with GPUDirect **bypasses the page
-cache by design** and reads the drive. So the comparison was RAM against disk,
-and 1.5 GB/s may simply be what that SSD delivers.
+**cuFile was never slow. It was the only thing in the test doing I/O.** GPUDirect
+bypasses the page cache by design, so it paid for real disk reads while every
+other path was served from RAM.
 
-If so, the consequences run well past this test:
+Two wrong conclusions were recorded before this one, and both are worth keeping
+visible:
 
-- **1.5 GB/s, not 7, could be the honest sustained storage bandwidth**, which is
-  the input to every streamed-CFD estimate made so far. Those numbers should be
-  treated as unverified until the fair comparison exists.
-- cuFile may be doing exactly its job and simply being measured against a
-  control that was not doing any I/O at all.
+1. *"cuFile is a 4× pessimization caused by compatibility mode."* Falsified by
+   asking for a diagnostic alongside the measurement:
+   `is_compat_mode_preferred() -> False`.
+2. *"The page-cache control fixes the comparison."* It did not.
+   `POSIX_FADV_DONTNEED` **cannot evict pages held by a live mapping**, and
+   `MemMapStore` keeps the file mapped through `numpy.memmap`. The advisory
+   succeeded, the syscall returned success, and nothing was dropped — so a
+   "cold" staged figure of 6.5 GB/s sat next to a 1.6 GB/s drive without
+   contradiction being noticed.
 
-**The fair comparison is now implemented and not yet run**: `DropPageCache()`
-uses `posix_fadvise(POSIX_FADV_DONTNEED)` — no root required — to evict the file
-before each repeat, giving cold B4 (staged) and B5 (direct) alongside the warm
-pair. It is Linux-only, which is where it matters, since that is where the
-discrete GPUs and cuFile are. On macOS the harness reports it as unavailable
-rather than silently producing warm numbers under a cold label.
+Both errors share a shape: **a number that looked like a result but was an
+artefact of what was not being measured.** The fix is structural rather than
+careful-reading — `RawColdBandwidth()` now reports the drive directly, so any
+figure above that line is cache-assisted by definition and cannot be mistaken
+for throughput. `_time_load` also releases the mapping and collects before
+advising the kernel, so the cold path is genuinely cold.
 
-The compat-mode detection stays, with its justification rewritten as the
-**precaution** it is rather than the measured result it was claimed to be: in
-compat mode cuFile really is a POSIX read plus a bounce buffer, so declining
-costs nothing. But that is reasoning, not evidence, and it is now labelled as
-such.
+### Consequence for streamed CFD: the estimates were ~4× optimistic
 
-**What this episode is actually evidence for:** the direct/staged counters, and
-the habit of asking for a diagnostic alongside a measurement. The probe that
-falsified my explanation was one line, requested specifically because I could
-not test the accessor locally and did not want to assume it. Had I only asked
-for the bandwidth, the wrong attribution would have entered the record looking
-confirmed.
+Every streaming estimate so far used ~7 GB/s. **The honest figure on this drive
+is ~1.6 GB/s** — the earlier number was page-cache bandwidth throughout.
+
+Reworking the slowdown of streamed evolution against fully-resident compute:
+
+| method | at 7 GB/s (as quoted) | at 1.63 GB/s (measured) |
+|---|---|---|
+| conservative-form CFD (18 planes state, 108 traffic) | 21× | **~92×** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64× | **~275×** |
+
+The **ratio between the methods is unchanged at ~3×** — it depends on
+state-to-traffic, not on the drive — so the structural conclusion survives. The
+absolute case for streamed *evolution* is considerably weaker than quoted, and
+the regimes that remain viable are the ones already identified: a localised
+active set, temporal blocking, or single-pass analysis over a stored field.
+
+Both figures are drive-specific. A Gen5 NVMe at 12 GB/s would move them by
+nearly an order of magnitude, which is itself the point: this is now a measured
+input rather than an assumed one.
 
 ### What B3 can and cannot resolve
 

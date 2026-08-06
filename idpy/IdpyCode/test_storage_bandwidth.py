@@ -78,6 +78,7 @@ Run directly:
     python -m idpy.IdpyCode.test_storage_bandwidth
 '''
 
+import gc
 import os
 import tempfile
 from collections import OrderedDict
@@ -157,6 +158,29 @@ def DropPageCache(path):
         return False
 
 
+def RawColdBandwidth(path, chunk=1 << 22):
+    '''
+    Sequential read bandwidth straight from the drive, with no idpy in the way.
+
+    The ground truth this test lacked. Without it there is no way to tell a
+    fast path from a path that is quietly reading RAM, and that ambiguity
+    produced two wrong conclusions in a row: first that cuFile was a
+    pessimization, then that the page-cache control had fixed the comparison.
+
+    Any figure above this line is cache-assisted, by definition.
+    '''
+    if not DropPageCache(path):
+        return None
+    _t, _n = perf_counter(), 0
+    with open(path, 'rb', buffering=0) as _fh:
+        while True:
+            _b = _fh.read(chunk)
+            if not _b:
+                break
+            _n += len(_b)
+    return _n / (perf_counter() - _t) / 1e9
+
+
 def _tenet_params(lang):
     params = {'lang': lang}
     if lang == OCL_T:
@@ -175,9 +199,26 @@ def _sweep_cache(cache, n_blocks):
 def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
                cold=False):
     '''Minimum wall time over 'repeats' full sweeps, plus the store used.'''
-    _best, _store = None, None
+    _best, _store, _cache = None, None, None
     for _ in range(repeats):
         if cold:
+            '''
+            Release the previous mapping BEFORE advising the kernel. numpy.memmap
+            keeps the file mapped, and POSIX_FADV_DONTNEED cannot evict pages
+            held by a live mapping -- so dropping without this is a silent no-op
+            for the staged path, which is exactly how a "cold" staged number of
+            6.5 GB/s came to sit next to a 1.6 GB/s drive.
+            '''
+            if _store is not None:
+                _close = getattr(_store, 'Close', None)
+                if callable(_close):
+                    try:
+                        _close()
+                    except Exception:
+                        pass
+                _store = None
+            _cache = None
+            gc.collect()
             DropPageCache(path)
         _store = store_factory(path, lattice)
         _cache = IdpyResidency.Cache(tenet=tenet, store=_store,
@@ -216,6 +257,7 @@ def measure(lang, tmpdir):
         page cache dropped first, so neither is reading RAM. Warm numbers are
         kept because they bound what the machinery can do when I/O is free.
         '''
+        out['raw_cold_GBs'] = RawColdBandwidth(_path)
         _cold_ok = DropPageCache(_path)
         if _cold_ok:
             _t_cold_staged, _, _, _ = _time_load(
@@ -414,6 +456,9 @@ def main():
                   f"   ({r['direct_reads']} direct reads)")
             print(f"    B2/B1                {r['speedup']:7.2f}x   "
                   f"(warm cache: B1 reads RAM, so this is NOT a fair race)")
+            if r.get('raw_cold_GBs') is not None:
+                print(f"    B0 raw cold read     {r['raw_cold_GBs']:7.2f} GB/s"
+                      f"   <-- the drive; anything above this reads cache")
             if r['cold_staged_GBs'] is None:
                 print(f"    B4 cold cache        unavailable "
                       f"(posix_fadvise is Linux-only)")
