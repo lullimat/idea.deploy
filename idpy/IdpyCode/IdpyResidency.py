@@ -240,11 +240,17 @@ class KvikIOStore(MemMapStore):
         Is KvikIO running in compatibility mode -- i.e. POSIX reads dressed as
         cuFile, with no GPUDirect underneath?
 
-        This matters because it is not merely "no faster". Measured on a
-        dual-RTX-5060 host: 1.46 GB/s direct against 6.15 GB/s staged, a **4x
-        pessimization**, well outside the ~6% run-to-run floor. Compatibility
-        mode adds a bounce buffer and per-read overhead on top of a POSIX read
-        the staged path was already doing more directly.
+        Why it is worth declining on: in compatibility mode cuFile is a POSIX
+        read through a bounce buffer, which is what the staged path already does
+        with less ceremony, so the direct route can only cost more.
+
+        This is a PRECAUTION, not a measured result -- and the distinction was
+        earned the hard way. An earlier version of this docstring cited a 4x
+        slowdown on a dual-RTX-5060 host as evidence of compat mode. It was not:
+        querying the flag on that machine returned False. The slowdown was very
+        likely an unfair comparison instead, warm page cache (RAM) against
+        GPUDirect (which bypasses the page cache and reads the drive). See
+        docs/residency-probes.md section 2k.
 
         Returns True (compat), False (real GDS), or None (cannot tell). The
         accessor has moved across KvikIO versions, so several spellings are
@@ -293,11 +299,11 @@ class KvikIOStore(MemMapStore):
             self._compat = self.CompatMode()
             if self._compat is True:
                 '''
-                Decline rather than take a measured 4x pessimization. Without
-                GPUDirect, cuFile is a POSIX read with a bounce buffer, and the
-                staged path does the same work with less ceremony. The counters
-                will show 0 direct / N staged, which is the honest report --
-                the mechanism is present and correctly not used.
+                Decline: without GPUDirect there is nothing for the direct
+                route to win, and it carries extra ceremony. The counters then
+                show 0 direct / N staged, which is the honest report -- the
+                mechanism is present and correctly not used. Precautionary, not
+                measured; see CompatMode().
                 '''
                 self._direct = False
                 return False

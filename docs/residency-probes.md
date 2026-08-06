@@ -827,31 +827,57 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-### CUDA measured, and it is a 4x pessimization
+### CUDA measured — and my first explanation was wrong
 
-On `id` (dual RTX 5060, kvikio-cu13 26.6.0):
+On `id` (dual RTX 5060, kvikio-cu13 26.6.0), warm cache:
 
 | | bandwidth |
 |---|---|
-| B1 staged | 6.15 GB/s |
-| B2 kvikio/cuFile | **1.46 GB/s** |
+| B1 staged | 6.15–6.76 GB/s |
+| B2 kvikio/cuFile | **1.46–1.59 GB/s** |
 | B2/B1 | **0.24x** |
 
-Not noise — the floor is ~6%, and this is a factor of four the wrong way. Without
-GPUDirect, KvikIO runs in **compatibility mode**: a POSIX read with a bounce
-buffer, which is the same work the staged path already does, plus ceremony.
-That RTX 5060s are consumer parts with no GDS-capable stack makes this the
-expected configuration rather than a surprise.
+The effect is real and far outside the ~6% floor. **The explanation I first
+recorded is not.**
 
-**Acted on, not merely recorded.** `KvikIOStore.CompatMode()` now queries KvikIO
-(defensively — the accessor has moved across versions, and an unknown answer is
-reported as unknown rather than guessed) and **declines the direct path when
-compatibility mode is active**. The counters then read `0 direct / N staged`,
-which is the honest report: the mechanism is present and correctly not used.
+I attributed it to KvikIO compatibility mode — cuFile degrading to a POSIX read
+without GPUDirect — and added detection to decline the direct path when that
+happens. Querying the flag on the machine in question returned
+**`is_compat_mode_preferred() -> False`**. The detector works; the hypothesis was
+wrong.
 
-This is the clearest vindication of the direct/staged counters. Without them the
-Phase 3 CUDA row would read `34 direct / 0 staged` — engaged, correct, and
-quietly four times slower than doing nothing.
+**The likely explanation was in this file's own caveat, and I failed to apply
+it.** B1 reads a warm page cache — RAM. cuFile with GPUDirect **bypasses the page
+cache by design** and reads the drive. So the comparison was RAM against disk,
+and 1.5 GB/s may simply be what that SSD delivers.
+
+If so, the consequences run well past this test:
+
+- **1.5 GB/s, not 7, could be the honest sustained storage bandwidth**, which is
+  the input to every streamed-CFD estimate made so far. Those numbers should be
+  treated as unverified until the fair comparison exists.
+- cuFile may be doing exactly its job and simply being measured against a
+  control that was not doing any I/O at all.
+
+**The fair comparison is now implemented and not yet run**: `DropPageCache()`
+uses `posix_fadvise(POSIX_FADV_DONTNEED)` — no root required — to evict the file
+before each repeat, giving cold B4 (staged) and B5 (direct) alongside the warm
+pair. It is Linux-only, which is where it matters, since that is where the
+discrete GPUs and cuFile are. On macOS the harness reports it as unavailable
+rather than silently producing warm numbers under a cold label.
+
+The compat-mode detection stays, with its justification rewritten as the
+**precaution** it is rather than the measured result it was claimed to be: in
+compat mode cuFile really is a POSIX read plus a bounce buffer, so declining
+costs nothing. But that is reasoning, not evidence, and it is now labelled as
+such.
+
+**What this episode is actually evidence for:** the direct/staged counters, and
+the habit of asking for a diagnostic alongside a measurement. The probe that
+falsified my explanation was one line, requested specifically because I could
+not test the accessor locally and did not want to assume it. Had I only asked
+for the bandwidth, the wrong attribution would have entered the record looking
+confirmed.
 
 ### What B3 can and cannot resolve
 

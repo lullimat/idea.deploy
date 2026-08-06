@@ -130,6 +130,33 @@ class K_Spin(IdpyKernel):
         )
 
 
+def DropPageCache(path):
+    '''
+    Evict a file from the OS page cache, without root.
+
+    This is the control the first version of this test was missing, and its
+    absence produced a wrong conclusion: a warm B1 reads RAM while cuFile with
+    GPUDirect bypasses the page cache by design and reads the drive, so
+    comparing them measured RAM against disk and called the disk slow.
+
+    posix_fadvise(POSIX_FADV_DONTNEED) is Linux-only -- which is where it
+    matters, since that is where the discrete GPUs and cuFile are. Returns True
+    if the cache was actually dropped, so callers can label their numbers
+    honestly instead of assuming.
+    '''
+    if not hasattr(os, 'posix_fadvise'):
+        return False
+    try:
+        _fd = os.open(path, os.O_RDONLY)
+        try:
+            os.posix_fadvise(_fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        finally:
+            os.close(_fd)
+        return True
+    except OSError:
+        return False
+
+
 def _tenet_params(lang):
     params = {'lang': lang}
     if lang == OCL_T:
@@ -145,10 +172,13 @@ def _sweep_cache(cache, n_blocks):
     return n_blocks * cache.block_elems * np.dtype(_DTYPE).itemsize
 
 
-def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats):
+def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
+               cold=False):
     '''Minimum wall time over 'repeats' full sweeps, plus the store used.'''
     _best, _store = None, None
     for _ in range(repeats):
+        if cold:
+            DropPageCache(path)
         _store = store_factory(path, lattice)
         _cache = IdpyResidency.Cache(tenet=tenet, store=_store,
                                      n_slots=_N_SLOTS)
@@ -180,6 +210,25 @@ def measure(lang, tmpdir):
             p, a.size, _BLOCK_ELEMS, a.dtype)
         _t_direct, _, _s2, _d2 = _time_load(
             tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS)
+
+        '''
+        The comparison that actually answers the question: both routes with the
+        page cache dropped first, so neither is reading RAM. Warm numbers are
+        kept because they bound what the machinery can do when I/O is free.
+        '''
+        _cold_ok = DropPageCache(_path)
+        if _cold_ok:
+            _t_cold_staged, _, _, _ = _time_load(
+                tenet, _staged, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
+            _t_cold_direct, _, _, _dc = _time_load(
+                tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
+            out['cold_staged_GBs'] = _bytes / _t_cold_staged / 1e9
+            out['cold_direct_GBs'] = _bytes / _t_cold_direct / 1e9
+            out['cold_direct_reads'] = _dc
+        else:
+            out['cold_staged_GBs'] = None
+            out['cold_direct_GBs'] = None
+            out['cold_direct_reads'] = None
 
         out['MiB'] = _bytes / (1 << 20)
         out['staged_GBs'] = _bytes / _t_staged / 1e9
@@ -363,7 +412,18 @@ def main():
             print(f"    B1 staged            {r['staged_GBs']:7.2f} GB/s")
             print(f"    B2 {r['path']:<18} {r['direct_GBs']:7.2f} GB/s"
                   f"   ({r['direct_reads']} direct reads)")
-            print(f"    B2/B1                {r['speedup']:7.2f}x")
+            print(f"    B2/B1                {r['speedup']:7.2f}x   "
+                  f"(warm cache: B1 reads RAM, so this is NOT a fair race)")
+            if r['cold_staged_GBs'] is None:
+                print(f"    B4 cold cache        unavailable "
+                      f"(posix_fadvise is Linux-only)")
+            else:
+                print(f"    B4 cold staged       {r['cold_staged_GBs']:7.2f} GB/s")
+                print(f"    B5 cold direct       {r['cold_direct_GBs']:7.2f} GB/s"
+                      f"   ({r['cold_direct_reads']} direct reads)")
+                print(f"    B5/B4                "
+                      f"{r['cold_direct_GBs'] / r['cold_staged_GBs']:7.2f}x"
+                      f"   <-- the fair comparison")
             _ovs = r.get('overlap_staged')
             if _ovs is not None and _ovs['overlap'] is not None:
                 print(f"    B3 overlap, staged   {_ovs['overlap']:7.2f}"
