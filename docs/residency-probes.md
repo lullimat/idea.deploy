@@ -16,7 +16,7 @@ unchanged") is measured against.
 | F2 | can `IdpyMemory` express the residency op? | inspection | **no — settled** |
 | F4 | can `IDPY_T` express sub-byte packed types? | inspection | **no — settled** |
 | P1 | sustained storage->device bandwidth under overlap | measurement | **measured (§2k)**; CUDA pending |
-| P3 | is one dynamic shared buffer enough? | inspection + kernel design | **not yet run** |
+| P3 | is one dynamic shared buffer enough? | built and measured | **yes — settled (§2l)** |
 
 Two of the four original probes were answerable by reading the tree rather than
 by measurement. Both came back negative. See §4 of `idea.deploy-extension.md`
@@ -827,24 +827,120 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-### CUDA: cuFile is 4.36x faster — the final, fair measurement
+### CUDA: cuFile is 1.26x at plateau — settled by a size sweep
 
-Once the page cache is genuinely evicted (which took four attempts), on `id`:
+Cold, on `id`. Every point drops the page cache first, so every point reads the
+drive:
 
-| backend | B0 cold = drive | B4 cold staged | B5 cold direct | **B5/B4** |
-|---|---|---|---|---|
-| **CUDA** | 1.60 GB/s | **0.36** | **1.59** (cuFile) | **4.36x** |
-| OpenCL | 1.68 | 1.29 | 1.26 (no direct path) | 0.98x |
-| CTypes | 1.71 | 1.24 | 1.24 (no direct path) | 1.00x |
+| block | staged | cuFile | ratio |
+|---|---|---|---|
+| 256 KiB | 0.50 | **0.87** | 1.74x |
+| 1 MiB | 0.84 | **1.32** | 1.57x |
+| 4 MiB | 1.24 | **1.53** | 1.23x |
+| 16 MiB | 1.18 | **1.52** | 1.29x |
+| **64 MiB (plateau)** | **1.21** | **1.52** | **1.26x** |
 
-**GPUDirect reaches 1.59 of a 1.60 GB/s drive — essentially all of it.** The
-staged route on CUDA manages 0.36, so the direct path is worth **4.36x** on this
-hardware. Phase 3's CUDA row is a performance feature, not merely a portability
-one.
+**cuFile is faster at every size**, plateauing at 1.52 GB/s against staged's
+1.21. It also exceeds B0's plain cold read (1.18–1.71 across runs, itself noisy),
+which is consistent: B0 is a POSIX read into userspace carrying its own copy,
+while GPUDirect skips the host. cuFile's 1.52, stable across three block sizes,
+is the better estimate of what the drive can deliver.
 
-The OpenCL and CTypes rows are the control: neither has a direct lowering, so
-both columns measure the same staged path twice and land within 2% of each
-other, at ~75% of drive speed.
+The controls behave as they must: OpenCL and CTypes have no direct lowering, so
+their two columns track each other to within 1–9% across the whole sweep.
+
+### M1 Max: a different regime, and it favours Apple Silicon
+
+macOS has neither `posix_fadvise` nor `O_DIRECT`, and `purge` needs sudo, so the
+cold sweep cannot run there. `F_NOCACHE` does not evict pages that are already
+resident — but setting it on the **write** keeps them out of the cache in the
+first place, and reading back with it set then reaches the device. Verified:
+~4.3 GB/s against ~11 GB/s for a cached read of the same file.
+
+| | device read | vs `id` |
+|---|---|---|
+| **M1 Max internal SSD** | **~3.9 GB/s** (range 2.7–4.3, n=13) | **~2.6x faster** |
+| `id` NVMe (cuFile plateau) | 1.52 GB/s | — |
+
+The first figure recorded here was **4.32 GB/s** — the maximum of the range,
+taken from a single sample. Repeating the measurement across two rounds and
+three backends gave 2.66 to 4.32, a 1.6x spread. `DriveBandwidthNoCache` now
+repeats internally and prints a median with its range, because a single sample
+of a bandwidth figure has misled this document four separate times.
+
+The two machines therefore sit in different regimes. On `id` the drive
+(1.5 GB/s) is ~5x below the machinery ceiling, so storage dominates completely.
+On the M1 Max the drive (~3.9) and the machinery (6.3–7.8 warm) are within ~2x
+of each other, so both matter.
+
+**Consequence for streamed CFD on Apple Silicon**, using ~400 GB/s of device
+bandwidth:
+
+| method | on `id` (1.52 GB/s) | **on M1 Max (~3.9 GB/s)** |
+|---|---|---|
+| conservative-form CFD | ~98x | **~34x** |
+| D3Q27 LBM | ~295x | **~103x** |
+
+**Streamed residency is ~2.6x more viable on Apple Silicon than on the NVIDIA
+box** — the SSD is ~3x faster while GPU bandwidth is comparable. That is a point
+in favour of `STRATEGY.md`'s central thesis which had not been measured before,
+and it arrives from the direction the thesis did not claim: not FLOPS per dollar
+or unified memory, but storage bandwidth relative to compute.
+
+**One asymmetry worth recording:** Metal's warm `MTLIOCommandQueue` figure runs
+7.1–7.7 GB/s, roughly **twice** the device rate of ~3.9, so **`MTLIOCommandQueue` does not
+bypass the page cache the way cuFile does**. That conclusion strengthened on
+repetition rather than weakening: across runs the warm figure stays ~2x the
+device, well outside the spread of either. Apple's storage API is built around
+efficient streaming and decompression rather than DMA-that-skips-the-host, and
+the residency layer should not assume the two behave alike. The macOS sweep
+therefore stays warm and is labelled as such rather than presented beside the
+Linux cold numbers.
+
+### Why this answer is trustworthy where three earlier ones were not
+
+The same measurement previously produced **0.24x**, then **4.36x**, then
+**1.12x**. Each was a single block size — one point on a curve — reported as
+though it were the curve. The sweep was suggested by Matteo as standard practice
+in bandwidth studies, and it is what turned a number that kept moving into
+something that explains why it moved:
+
+- 0.24x was a **warm-vs-cold** comparison, not a size effect (staged reading RAM).
+- 4.36x and 1.12x were both **cold** and both at 8 MiB, differing only by
+  cold-I/O tail — the very variance a plateau averages out.
+
+What makes the plateau credible: it is consistent across 4, 16 and 64 MiB;
+both routes are measured on the same curve under the same conditions; and the
+two no-direct-path backends serve as controls that correctly show no difference.
+
+### The knee, which was asserted and is now measured
+
+Both routes rise steeply to ~4 MiB and flatten after. At 256 KiB the staged path
+delivers ~40% of its plateau. "Larger blocks are the first lever" was claimed
+earlier without evidence; the lever engages at **~4 MiB and is spent by 16**.
+`ResidentCache`'s 8 MiB default sits just past the knee — defensible, with
+perhaps a few percent available at 16 MiB.
+
+### Overlap does not survive real I/O on this machine
+
+B3 falls to ~0.0 for both routes cold, where warm runs showed 0.2–0.4. Once the
+load is genuine disk I/O (4–18 ms) it does not hide behind compute here. Metal's
+~1.0 stands apart and for a clear reason: a host store into unified memory runs
+on the CPU while the GPU works, which is a different mechanism from queuing a
+transfer.
+
+### Consequence for streamed CFD
+
+Using the measured cuFile plateau of **1.52 GB/s**:
+
+| method | at the assumed 7 GB/s | **measured** |
+|---|---|---|
+| conservative-form CFD (18 planes state, 108 traffic) | 21x | **~98x** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64x | **~295x** |
+
+The ~3x ratio between methods is unchanged, since it depends on state-to-traffic
+rather than on the drive. And the direct path is worth a real 1.26x of that —
+modest, consistent, and no longer a claim resting on one sample.
 
 ### Three wrong readings, one cause
 
@@ -911,6 +1007,55 @@ producing confident nonsense:
   comparison silently stopped being controlled. Calibration now happens once per
   backend and the kernel is shared. A ratio outside `[-0.2, 1.2]` — impossible
   by construction — is now reported as unresolved rather than printed.
+
+---
+
+## 2l. P3 answered: one dynamic buffer is enough
+
+The last open probe. `SetDynamicSharedMemory` allows one runtime-sized buffer
+because CUDA exposes a single `extern __shared__` region, and the question was
+whether that lowest-common-denominator constraint blocks the lattice kernels or
+is merely an ergonomic wrinkle. If it blocked them, the constraint rather than
+the residency layer would have been the real obstacle.
+
+**It does not block them.** Answered by building the case that would break it: a
+two-field 3-point stencil with periodic halos,
+
+    out[i] = (a[i-1] + a[i] + a[i+1]) + 2*(b[i-1] + b[i] + b[i+1])
+
+which needs two tiles by construction — each field carries its own `BLOCK+2`
+halo window, and every output element reads slots written by other lanes.
+
+| check | OpenCL | Metal |
+|---|---|---|
+| T1 two logical tiles inside **one** dynamic buffer, manual offsets | exact | exact |
+| T2 two tiles from **static** shared memory | exact | exact |
+| T3 guard: declaring two dynamic buffers raises | — raises `NotImplementedError` |
+
+Two routes, both working. The dynamic case uses exactly the workaround the
+`SetDynamicSharedMemory` docstring prescribes — one buffer, indexed manually for
+multiple logical tiles — and the static case has no constraint to work around at
+all, since a compile-time declaration is ordinary and a kernel may have as many
+arrays as fit.
+
+Capacity is not close to binding either: two tiles at `BLOCK=64` are ~0.5 KiB
+against 48 KiB of CUDA shared memory and 32 KiB of Metal threadgroup memory. The
+constraint is on the *number of declarations*, not on space, and one declaration
+holds as many logical tiles as arithmetic can address.
+
+### The probe has teeth
+
+A negative control confirms it can fail: pointing both logical tiles at the same
+base — the mis-addressing the manual-offset workaround exists to get right —
+gives `max|out-ref| = 1532.25` rather than a quiet pass. The body is also
+identical text between T1 and T2 apart from the tile bases, which isolates the
+question to where the storage comes from rather than how it is addressed.
+
+**Consequence:** the LCD constraint stands as documented and costs nothing for
+lattice work. Phase 5 remains gated on F4, not on this.
+
+**Phase 0 is complete.** F2 and F4 settled by inspection, both negative; P1
+measured after correcting itself three times; P3 built and settled here.
 
 ---
 
