@@ -223,6 +223,7 @@ class KvikIOStore(MemMapStore):
         MemMapStore.__init__(self, path, n_elems, block_elems, dtype, mode=mode)
         self._cufile = None
         self._direct = IsModuleThere('kvikio')
+        self._compat = None
         '''
         Whether a direct read has actually SUCCEEDED, as opposed to whether
         kvikio merely imports. The two differ constantly: on a host with kvikio
@@ -233,6 +234,43 @@ class KvikIOStore(MemMapStore):
         a silently-degraded fast path look engaged.
         '''
         self._direct_used = False
+
+    def CompatMode(self):
+        '''
+        Is KvikIO running in compatibility mode -- i.e. POSIX reads dressed as
+        cuFile, with no GPUDirect underneath?
+
+        This matters because it is not merely "no faster". Measured on a
+        dual-RTX-5060 host: 1.46 GB/s direct against 6.15 GB/s staged, a **4x
+        pessimization**, well outside the ~6% run-to-run floor. Compatibility
+        mode adds a bounce buffer and per-read overhead on top of a POSIX read
+        the staged path was already doing more directly.
+
+        Returns True (compat), False (real GDS), or None (cannot tell). The
+        accessor has moved across KvikIO versions, so several spellings are
+        tried and an unknown answer is reported as unknown rather than guessed.
+        '''
+        try:
+            import kvikio.defaults as _d
+        except Exception:
+            return None
+        for _name in ('is_compat_mode_preferred', 'compat_mode'):
+            _attr = getattr(_d, _name, None)
+            if _attr is None:
+                continue
+            try:
+                _val = _attr() if callable(_attr) else _attr
+            except Exception:
+                continue
+            if isinstance(_val, bool):
+                return _val
+            # CompatMode enum: ON / OFF / AUTO
+            _text = str(getattr(_val, 'name', _val)).upper()
+            if 'ON' in _text or 'TRUE' in _text:
+                return True
+            if 'OFF' in _text or 'FALSE' in _text:
+                return False
+        return None
 
     def _CuFile(self):
         if self._cufile is None:
@@ -251,6 +289,18 @@ class KvikIOStore(MemMapStore):
             return False
         if getattr(view, 'lang', None) != CUDA_T:
             return False
+        if self._compat is None:
+            self._compat = self.CompatMode()
+            if self._compat is True:
+                '''
+                Decline rather than take a measured 4x pessimization. Without
+                GPUDirect, cuFile is a POSIX read with a bounce buffer, and the
+                staged path does the same work with less ceremony. The counters
+                will show 0 direct / N staged, which is the honest report --
+                the mechanism is present and correctly not used.
+                '''
+                self._direct = False
+                return False
 
         _start, _stop = self.BlockSpan(block_id)
         _itemsize = int(self.dtype.itemsize)

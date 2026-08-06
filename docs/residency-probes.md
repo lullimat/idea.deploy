@@ -827,9 +827,51 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-**Still unverified:** CUDA. `id` is where cuFile could plausibly differ, since a
-discrete GPU makes staging a real PCIe crossing — the one configuration in which
-the direct path has something to remove.
+### CUDA measured, and it is a 4x pessimization
+
+On `id` (dual RTX 5060, kvikio-cu13 26.6.0):
+
+| | bandwidth |
+|---|---|
+| B1 staged | 6.15 GB/s |
+| B2 kvikio/cuFile | **1.46 GB/s** |
+| B2/B1 | **0.24x** |
+
+Not noise — the floor is ~6%, and this is a factor of four the wrong way. Without
+GPUDirect, KvikIO runs in **compatibility mode**: a POSIX read with a bounce
+buffer, which is the same work the staged path already does, plus ceremony.
+That RTX 5060s are consumer parts with no GDS-capable stack makes this the
+expected configuration rather than a surprise.
+
+**Acted on, not merely recorded.** `KvikIOStore.CompatMode()` now queries KvikIO
+(defensively — the accessor has moved across versions, and an unknown answer is
+reported as unknown rather than guessed) and **declines the direct path when
+compatibility mode is active**. The counters then read `0 direct / N staged`,
+which is the honest report: the mechanism is present and correctly not used.
+
+This is the clearest vindication of the direct/staged counters. Without them the
+Phase 3 CUDA row would read `34 direct / 0 staged` — engaged, correct, and
+quietly four times slower than doing nothing.
+
+### What B3 can and cannot resolve
+
+The overlap estimator's noise floor is **±0.15**, established the same way as
+the bandwidth floor: OpenCL has no direct lowering, so its two columns measure
+one quantity twice, and they came back 0.31 and 0.44. Only large differences are
+meaningful — Metal's ~1.0 against OpenCL's ~0.3 is real; anything closer is not.
+
+Two harness defects were found and fixed while measuring, both of which had been
+producing confident nonsense:
+
+- `_sync()` poked `tenet.Finish()`, which **does not exist on the CUDA Tenet**,
+  so the kernel leg timed 0.0 ms — an async launch with nothing waiting on it.
+  Every `IdpyArray*` has carried `Sync()` since Phase 2b; that is the portable
+  spelling, and the residency layer already used it.
+- The filler kernel was calibrated *inside* the overlap routine, which runs once
+  per route, so the two routes were timed against **different kernels** and the
+  comparison silently stopped being controlled. Calibration now happens once per
+  backend and the kernel is shared. A ratio outside `[-0.2, 1.2]` — impossible
+  by construction — is now reported as unresolved rather than printed.
 
 ---
 

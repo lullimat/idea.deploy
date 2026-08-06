@@ -214,15 +214,51 @@ def measure(lang, tmpdir):
             out['overlap'] = None
             out['overlap_staged'] = None
         else:
-            out['overlap'] = _overlap(tenet, _direct_f, _path, lattice)
-            out['overlap_staged'] = _overlap(tenet, _staged, _path, lattice)
+            _idea, _spin = _calibrate(tenet, lattice, _path, _staged)
+            out['overlap'] = _overlap(tenet, _direct_f, _path, lattice,
+                                      _idea, _spin)
+            out['overlap_staged'] = _overlap(tenet, _staged, _path, lattice,
+                                             _idea, _spin)
     finally:
         if hasattr(tenet, 'End'):
             tenet.End()
     return out
 
 
-def _overlap(tenet, store_factory, path, lattice):
+def _calibrate(tenet, lattice, path, store_factory, target_ms=20.0):
+    '''
+    Build the filler kernel once, sized to 'target_ms' on THIS machine.
+
+    Once, not per route: the same kernel has to time both routes or the two
+    overlap ratios are not comparable, which is the whole reason for measuring
+    them together. A fixed iteration count cannot serve both machines either --
+    it ran 14 ms on an M1 Max and 0.8 ms on an RTX 5060.
+    '''
+    _store = store_factory(path, lattice)
+    _cache = IdpyResidency.Cache(tenet=tenet, store=_store, n_slots=_N_SLOTS)
+    _cache.Acquire(0)
+    _cache.EndStep()
+    _slot = _cache.slots[0]
+
+    _block = 256
+    _grid = ((_BLOCK_ELEMS + _block - 1) // _block, 1, 1)
+
+    def _run(iters):
+        _idea = K_Spin(iters=iters)(tenet=tenet, grid=_grid,
+                                    block=(_block, 1, 1))
+        _idea.Deploy([_slot]); _slot.Sync()          # warm
+        _t = perf_counter(); _idea.Deploy([_slot]); _slot.Sync()
+        return _idea, perf_counter() - _t
+
+    _probe_idea, _t_probe = _run(512)
+    _iters = int(max(64, min(1 << 20,
+                             round(512 * (target_ms * 1e-3) / max(_t_probe, 1e-9)))))
+    _idea = K_Spin(iters=_iters)(tenet=tenet, grid=_grid, block=(_block, 1, 1))
+    _idea.Deploy([_slot]); _slot.Sync()
+    return _idea, _slot
+
+
+def _overlap(tenet, store_factory, path, lattice, idea, spin_slot):
     '''
     Load a block into one slot while a kernel spins on another.
 
@@ -235,17 +271,22 @@ def _overlap(tenet, store_factory, path, lattice):
     _cache = IdpyResidency.Cache(tenet=tenet, store=_store, n_slots=_N_SLOTS)
     _cache.Acquire(0)               # slot 0 resident, kernel target
     _cache.EndStep()
-    _victim = _cache.slots[0]
+    _victim = spin_slot          # calibration slot; a different cache
+    _idea = idea
 
     _block = 256
     _grid = ((_BLOCK_ELEMS + _block - 1) // _block, 1, 1)
-    _idea = K_Spin(iters=4096)(tenet=tenet, grid=_grid, block=(_block, 1, 1))
+
 
     def _sync():
-        if hasattr(tenet, 'Finish'):
-            tenet.Finish()
-        elif hasattr(tenet, 'finish'):
-            tenet.finish()
+        '''
+        Sync through the array primitive, not the tenet. The CUDA Tenet has
+        neither Finish nor finish, so poking it was a silent no-op there and the
+        kernel timed 0.0 ms -- an async launch with nothing waiting on it. Every
+        IdpyArray* has carried Sync() since Phase 2b; that is the portable
+        spelling and it is what the residency layer itself uses.
+        '''
+        _victim.Sync()
 
     def _kernel_only():
         _t = perf_counter(); _idea.Deploy([_victim]); _sync()
@@ -274,7 +315,6 @@ def _overlap(tenet, store_factory, path, lattice):
         _sync()
         return perf_counter() - _t
 
-    _kernel_only(); _load_only()                     # warm up
     _tk = min(_kernel_only() for _ in range(_REPEATS))
     _tc = min(_load_only() for _ in range(_REPEATS))
     _tb = min(_both() for _ in range(_REPEATS))
@@ -285,11 +325,19 @@ def _overlap(tenet, store_factory, path, lattice):
     the smaller leg is under a millisecond or under 5% of the larger.
     '''
     _small, _large = min(_tk, _tc), max(_tk, _tc)
-    _ratio = None
+    _ratio, _reason = None, None
     if _small > 1e-3 and _small > 0.05 * _large:
         _ratio = (_tk + _tc - _tb) / _small
+        # The estimator is bounded by construction: 0 serialized, 1 fully
+        # concurrent. A value outside that band means tB beat one leg measured
+        # alone, which is timing noise rather than physics -- report it as
+        # unresolved instead of dressing noise as a result.
+        if not (-0.2 <= _ratio <= 1.2):
+            _ratio, _reason = None, 'out of band'
+    else:
+        _reason = 'legs not comparable'
     return {'kernel_ms': _tk * 1e3, 'load_ms': _tc * 1e3,
-            'both_ms': _tb * 1e3, 'overlap': _ratio}
+            'both_ms': _tb * 1e3, 'overlap': _ratio, 'reason': _reason}
 
 
 def main():
@@ -326,9 +374,10 @@ def main():
                 print(f"    B3 overlap           n/a (serial backend: no "
                       f"concurrency to measure)")
             elif _ov['overlap'] is None:
-                print(f"    B3 overlap           n/a (ill-conditioned: "
-                      f"kernel {_ov['kernel_ms']:.1f} ms vs load "
-                      f"{_ov['load_ms']:.1f} ms)")
+                print(f"    B3 overlap           n/a "
+                      f"({_ov.get('reason') or 'unresolved'}: kernel "
+                      f"{_ov['kernel_ms']:.1f} ms, load "
+                      f"{_ov['load_ms']:.1f} ms, both {_ov['both_ms']:.1f} ms)")
             else:
                 print(f"    B3 overlap, direct   {_ov['overlap']:7.2f}"
                       f"   (kernel {_ov['kernel_ms']:.1f} ms, load "
