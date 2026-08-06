@@ -63,30 +63,52 @@ if idpy_os_found == "win32":
 Define some virtual environment variables
 '''
 import re
+'''
+These three files -- .idpy-env, py-env/cuda_path_found and LICENSE -- live at the
+REPOSITORY root, not inside the package. Reading them unconditionally at import
+time is what made `import idpy` impossible from anywhere but a source checkout:
+installed into site-packages, none of them is there and the import died with
+FileNotFoundError before any backend was consulted.
+
+They are optional now. Present (a source checkout, as on both development
+machines) they are used exactly as before, so behaviour is unchanged there.
+Absent, each falls back to something sensible:
+
+  .idpy-env / cuda_path_found -> nvcc is looked up on PATH, which is what a
+                                 system CUDA install provides anyway
+  LICENSE                     -> a short embedded notice
+
+This is the packaging prerequisite, and it is the substantive half of it:
+pyproject.toml describes what to install, but nothing can be installed while the
+package refuses to load outside its own repository.
+'''
 _VENV_ROOT_STR, _IDPY_ENV_F = "VENV_ROOT", ".idpy-env"
-_id_env_file = open(_idea_dot_deploy_path + "/" + _IDPY_ENV_F)
 _venv_root = None
-for _line in _id_env_file.readlines():
-    if re.search(_VENV_ROOT_STR, _line):
-        _venv_root = _line.split("/")[1].strip()
-        break
-_id_env_file.close()
-if _venv_root is None:
-    raise \
-        Exception(
-            "Could not find string ", _VENV_ROOT_STR, 
-            "in file", _idea_dot_deploy_path + "/" + _IDPY_ENV_F
-            )
-
-_idpy_env_path = _idea_dot_deploy_path + "/" + _venv_root + "/"
-_cuda_path_found = _idpy_env_path + "/" + "cuda_path_found"
+try:
+    with open(_idea_dot_deploy_path + "/" + _IDPY_ENV_F) as _id_env_file:
+        for _line in _id_env_file.readlines():
+            if re.search(_VENV_ROOT_STR, _line):
+                _venv_root = _line.split("/")[1].strip()
+                break
+except OSError:
+    _venv_root = None
 
 '''
-Reading system CUDA path
+Reading system CUDA path. 'nvcc' unqualified defers to PATH, which is how a
+system CUDA toolkit is normally found; idpy-init.sh writes the discovered prefix
+into cuda_path_found when it can do better.
 '''
-_file_swap = open(_cuda_path_found, "r")
-idpy_nvcc_path = _file_swap.readline().rstrip() + "/bin/nvcc"
-_file_swap.close()
+idpy_nvcc_path = "nvcc"
+if _venv_root is not None:
+    _idpy_env_path = _idea_dot_deploy_path + "/" + _venv_root + "/"
+    _cuda_path_found = _idpy_env_path + "/" + "cuda_path_found"
+    try:
+        with open(_cuda_path_found, "r") as _file_swap:
+            _prefix = _file_swap.readline().rstrip()
+        if _prefix:
+            idpy_nvcc_path = _prefix + "/bin/nvcc"
+    except OSError:
+        pass
 '''
 Language Types and metaTypes
 '''
@@ -346,6 +368,13 @@ def GridAndBlocks1D(_n_threads_min, _block_size = 128):
 Copyright string
 '''
 _license_path = _idea_dot_deploy_path + "/" + "LICENSE"
-_file_swap = open(_license_path, "r")
-idpy_copyright = _file_swap.read()
-_file_swap.close()
+try:
+    with open(_license_path, "r") as _file_swap:
+        idpy_copyright = _file_swap.read()
+except OSError:
+    # Installed rather than checked out: the full text ships with the
+    # distribution metadata, so a pointer is enough here.
+    idpy_copyright = (
+        "idea.deploy (idpy) -- Copyright (c) 2020-2026 Matteo Lulli. "
+        "MIT-style licence; see the LICENSE file in the distribution."
+    )
