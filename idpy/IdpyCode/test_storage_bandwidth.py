@@ -282,6 +282,11 @@ def measure(lang, tmpdir):
         page cache dropped first, so neither is reading RAM. Warm numbers are
         kept because they bound what the machinery can do when I/O is free.
         '''
+        # Read everything needed off the warm stores BEFORE releasing them --
+        # the release is what makes the cold phase honest, and nulling them
+        # while a later line still reads _s2.DirectPathName() is how the last
+        # attempt broke.
+        out['path'] = _s2.DirectPathName() or 'staged (no direct path)'
         _s1 = _s2 = None                 # release the warm stores' mappings
         gc.collect()
         _cold_ok = DropPageCache(_path)
@@ -302,7 +307,6 @@ def measure(lang, tmpdir):
         out['staged_GBs'] = _bytes / _t_staged / 1e9
         out['direct_GBs'] = _bytes / _t_direct / 1e9
         out['direct_reads'] = _d2
-        out['path'] = _s2.DirectPathName() or 'staged (no direct path)'
         out['speedup'] = out['direct_GBs'] / out['staged_GBs']
 
         # -- correctness: the two routes must agree, whatever their speed
