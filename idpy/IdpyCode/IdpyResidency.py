@@ -223,6 +223,7 @@ class KvikIOStore(MemMapStore):
         MemMapStore.__init__(self, path, n_elems, block_elems, dtype, mode=mode)
         self._cufile = None
         self._direct = IsModuleThere('kvikio')
+        self._compat = None
         '''
         Whether a direct read has actually SUCCEEDED, as opposed to whether
         kvikio merely imports. The two differ constantly: on a host with kvikio
@@ -233,6 +234,49 @@ class KvikIOStore(MemMapStore):
         a silently-degraded fast path look engaged.
         '''
         self._direct_used = False
+
+    def CompatMode(self):
+        '''
+        Is KvikIO running in compatibility mode -- i.e. POSIX reads dressed as
+        cuFile, with no GPUDirect underneath?
+
+        Why it is worth declining on: in compatibility mode cuFile is a POSIX
+        read through a bounce buffer, which is what the staged path already does
+        with less ceremony, so the direct route can only cost more.
+
+        This is a PRECAUTION, not a measured result -- and the distinction was
+        earned the hard way. An earlier version of this docstring cited a 4x
+        slowdown on a dual-RTX-5060 host as evidence of compat mode. It was not:
+        querying the flag on that machine returned False. The slowdown was very
+        likely an unfair comparison instead, warm page cache (RAM) against
+        GPUDirect (which bypasses the page cache and reads the drive). See
+        docs/residency-probes.md section 2k.
+
+        Returns True (compat), False (real GDS), or None (cannot tell). The
+        accessor has moved across KvikIO versions, so several spellings are
+        tried and an unknown answer is reported as unknown rather than guessed.
+        '''
+        try:
+            import kvikio.defaults as _d
+        except Exception:
+            return None
+        for _name in ('is_compat_mode_preferred', 'compat_mode'):
+            _attr = getattr(_d, _name, None)
+            if _attr is None:
+                continue
+            try:
+                _val = _attr() if callable(_attr) else _attr
+            except Exception:
+                continue
+            if isinstance(_val, bool):
+                return _val
+            # CompatMode enum: ON / OFF / AUTO
+            _text = str(getattr(_val, 'name', _val)).upper()
+            if 'ON' in _text or 'TRUE' in _text:
+                return True
+            if 'OFF' in _text or 'FALSE' in _text:
+                return False
+        return None
 
     def _CuFile(self):
         if self._cufile is None:
@@ -251,6 +295,18 @@ class KvikIOStore(MemMapStore):
             return False
         if getattr(view, 'lang', None) != CUDA_T:
             return False
+        if self._compat is None:
+            self._compat = self.CompatMode()
+            if self._compat is True:
+                '''
+                Decline: without GPUDirect there is nothing for the direct
+                route to win, and it carries extra ceremony. The counters then
+                show 0 direct / N staged, which is the honest report -- the
+                mechanism is present and correctly not used. Precautionary, not
+                measured; see CompatMode().
+                '''
+                self._direct = False
+                return False
 
         _start, _stop = self.BlockSpan(block_id)
         _itemsize = int(self.dtype.itemsize)

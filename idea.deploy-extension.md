@@ -161,9 +161,24 @@ Item 2 is the larger risk and should be scheduled before any Metal residency low
 
 **Consequence:** the outcome P4 was written to avoid is simply the actual outcome. Supporting the MoE kernel set means extending the metalanguage type system — core work on the crown-jewel asset in service of a demonstration. **Phase 5 is therefore gated off by default** (§5), and the primary residency test case moves to the lattice (§1). Reopening it requires a standalone decision to build a packed-layout type model *for its own sake*, justified by workloads beyond this one.
 
-### P1 (rewritten) — sustained streaming bandwidth under overlap
+### P1 (re-scoped twice) — sustained storage→device bandwidth under overlap
 
-*Original framing: per-layer Python planning latency, gating `SWIFT_T`. Dropped, because it was low-information — the document predicted a pass, and the non-goals already forbid `SWIFT_T` unless it fails. A probe that gates a door you have locked buys nothing.*
+*Framing 1, as originally written: per-layer Python planning latency, gating `SWIFT_T`. Dropped, because it was low-information — the document predicted a pass, and the non-goals already forbid `SWIFT_T` unless it fails. A probe that gates a door you have locked buys nothing.*
+
+*Framing 2: overlap rather than latency, but still expressed in MoE terms — "bounded parallel `pread`", "per-layer", "keep the working set warm".*
+
+*Framing 3 (2026-08-06), and the one that will actually be measured: the same question — does streaming sustain bandwidth, and does it overlap with compute? — asked of the machinery that now exists. Three things forced the re-scope: the lattice became the primary test case, so "per-layer" is the wrong unit; F4 gated Phase 5 off, so measuring the MoE loop would be measuring a hypothetical; and Phase 3 landed real storage→device paths, so framing 2's `pread` describes only the staged route.*
+
+> **The `SWIFT_T` gate this probe was built to guard has evaporated.** P1 existed
+> to decide whether Python could schedule fast enough, because failing would have
+> promoted Swift from a compiler choice to a language target. That decision can
+> no longer be reached from here, for two independent reasons: **H5** demonstrated
+> Swift-as-compiler working end to end (a `@_cdecl` library built by `HostModule`,
+> loaded and called), and the Metal storage row then used it in anger; and **F4**
+> gated off the very workload whose scheduling was in question. Recorded rather
+> than quietly dropped, so that closing P1 is not mistaken for having answered
+> the question it was originally written for. Planning latency is still worth
+> collecting — it is nearly free — but nothing now hinges on it.
 
 The real scheduling risk is not planning latency in isolation; it is **overlap**. Measure whether bounded parallel `pread` sustains enough bandwidth to keep the working set warm *while compute runs*, under the GIL, with F2's synchronization behaviour in the loop.
 

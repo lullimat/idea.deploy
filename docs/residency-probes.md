@@ -15,7 +15,7 @@ unchanged") is measured against.
 |----|----------|--------|--------|
 | F2 | can `IdpyMemory` express the residency op? | inspection | **no — settled** |
 | F4 | can `IDPY_T` express sub-byte packed types? | inspection | **no — settled** |
-| P1 | sustained streaming bandwidth under overlap | measurement | **not yet run** |
+| P1 | sustained storage->device bandwidth under overlap | measurement | **measured (§2k)**; CUDA pending |
 | P3 | is one dynamic shared buffer enough? | inspection + kernel design | **not yet run** |
 
 Two of the four original probes were answerable by reading the tree rather than
@@ -756,6 +756,161 @@ It also surfaced two invalid escape sequences (`'\ '`) in
 `idpy/IdpyCode/__init__.py` — accepted today with a `SyntaxWarning`, a
 `SyntaxError` in some future Python. Replaced with the identical two-character
 value spelled legally.
+
+---
+
+## 2k. P1 measured: the direct paths are correct, not faster (here)
+
+`test_storage_bandwidth.py`. 256 MiB file through a 32 MiB cache, 8 MiB blocks,
+min-of-3.
+
+| backend | B1 staged | B2 direct | B2/B1 | overlap staged | overlap direct |
+|---|---|---|---|---|---|
+| OpenCL | 6.17 GB/s | 5.79 (no direct path) | 0.94× | 0.37 | 0.16 |
+| **Metal** | 7.72 GB/s | **7.87** (MTLIOCommandQueue) | **1.02×** | 1.02 | 0.96 |
+| CTypes | 6.94 GB/s | 7.37 (no direct path) | 1.06× | — serial | — |
+
+### The OpenCL row is the noise floor, and it should be read first
+
+OpenCL has no direct lowering, so **both** its columns are the same staged path
+measured twice. They differ by **6% in bandwidth** and by **more than 2× in the
+overlap ratio** (0.16 vs 0.37). That is run-to-run variation on an identical
+quantity, and it calibrates everything else: bandwidth differences under ~10%
+are noise, and overlap differences under ~0.2 are not resolvable at three
+repeats.
+
+Recorded because without it, Metal's 1.02× would read as a small win and
+OpenCL's 0.16-vs-0.37 as a real effect. Neither is.
+
+### What that leaves
+
+**On this machine the direct path is correct and not faster.** Metal's
+`MTLIOCommandQueue` delivers the same bandwidth as the staged route (1.02×,
+inside the floor) and the same overlap (0.96 vs 1.02, both ≈ 1). That is the
+expected result and it is worth saying plainly rather than hunting for a win:
+Apple's unified memory means the staged path is *already* a host store into
+shared storage with no bus to cross, and Phase 2b's range-scoped waiting already
+lets it overlap with compute. There is nothing left for a DMA engine to remove
+when the source is a warm page cache and the destination is host-visible.
+
+Its value would appear where the staged path costs something real — a cold cache
+to bypass, or a discrete GPU where staging means a genuine PCIe crossing. Neither
+is true here.
+
+**One effect does clear the floor: OpenCL overlaps badly.** ~0.2–0.4 against
+Metal's ~1.0. `enqueue_copy` goes on a queue and partially serializes against
+the kernel, while Metal's host store runs on the CPU concurrently with the GPU.
+That is architectural, not noise.
+
+### The number that matters for streamed CFD
+
+**~7–8 GB/s through the cache machinery** — and this is a *warm page cache*, so
+it is not the drive. A memcpy from RAM on an M1 Max should run at tens of GB/s,
+so 7.7 GB/s is **the machinery, not the memory**: per-block Python bookkeeping
+and memmap page faults at 8 MiB granularity.
+
+Two consequences:
+
+1. The earlier streamed-CFD estimate assumed ~7 GB/s and happens to land right —
+   but for the wrong reason. That figure is a software ceiling, not a disk one.
+2. **On a fast drive you would be software-limited before you were disk-limited.**
+   Larger blocks would amortise the per-block overhead; that is the first thing
+   to try if the streaming case is ever pursued seriously.
+
+### The SWIFT_T gate this probe was built to guard has evaporated
+
+P1 existed to decide whether Python could schedule fast enough, because failing
+would have promoted Swift from a compiler choice to a language target. That
+decision can no longer be reached: **H5** demonstrated Swift-as-compiler end to
+end and the Metal storage row then used it in anger, and **F4** gated off the
+workload whose scheduling was in question. Closing P1 is therefore not the same
+as answering the question it was written for, and the record should not read as
+though it were.
+
+### CUDA: cuFile is 4.36x faster — the final, fair measurement
+
+Once the page cache is genuinely evicted (which took four attempts), on `id`:
+
+| backend | B0 cold = drive | B4 cold staged | B5 cold direct | **B5/B4** |
+|---|---|---|---|---|
+| **CUDA** | 1.60 GB/s | **0.36** | **1.59** (cuFile) | **4.36x** |
+| OpenCL | 1.68 | 1.29 | 1.26 (no direct path) | 0.98x |
+| CTypes | 1.71 | 1.24 | 1.24 (no direct path) | 1.00x |
+
+**GPUDirect reaches 1.59 of a 1.60 GB/s drive — essentially all of it.** The
+staged route on CUDA manages 0.36, so the direct path is worth **4.36x** on this
+hardware. Phase 3's CUDA row is a performance feature, not merely a portability
+one.
+
+The OpenCL and CTypes rows are the control: neither has a direct lowering, so
+both columns measure the same staged path twice and land within 2% of each
+other, at ~75% of drive speed.
+
+### Three wrong readings, one cause
+
+The same figure — B2/B1 = 0.24x — was recorded three times with three different
+explanations, and every one was an artefact of the page cache:
+
+1. *"cuFile is a 4x pessimization from compatibility mode."* Falsified by a
+   one-line diagnostic: `is_compat_mode_preferred() -> False`.
+2. *"The cold control fixes it."* It did not — `POSIX_FADV_DONTNEED` cannot evict
+   pages held by a live mapping, and `MemMapStore` keeps the file mapped.
+3. *"The ground-truth line will catch it."* It did not either — B0 itself read
+   12 GB/s, because `measure()` still held the warm stores' mappings alive while
+   B0 ran.
+
+Each time, cuFile was the only path performing I/O while everything else was
+served from RAM. The fix that finally worked was structural rather than
+attentional: measure the drive **first, before any store exists**, and have
+`RawColdBandwidth()` report warm and cold together with an explicit
+`NOT EVICTED` verdict when `cold >= 0.5 * warm`. The harness now refuses to
+present a cache figure as a drive figure, instead of relying on a reader to
+notice the contradiction.
+
+### One thing left unexplained
+
+CUDA's cold staged path reaches 0.36 GB/s where OpenCL and CTypes reach ~1.25
+through the same `MemMapStore`. The difference is downstream of the read, in
+`H2DSub` — plausibly the pageable `memcpy_htod` combined with 4 KiB memmap
+faults on cold pages — but that is a hypothesis, not a measurement, and this
+document has already carried three of those. Recorded as open.
+
+### Consequence for streamed CFD
+
+The corrected figures stand, since the direct path achieves drive speed:
+
+| method | as originally quoted | corrected |
+|---|---|---|
+| conservative-form CFD (18 planes state, 108 traffic) | 21x | **~92x** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64x | **~275x** |
+
+with the ~3x ratio between methods unchanged, since it depends on
+state-to-traffic rather than on the drive.
+
+What the fair comparison adds: **without the direct path, CUDA streaming would be
+~4x worse still** (0.36 GB/s rather than 1.59). So the storage lowering is not a
+refinement on this hardware — it is most of what makes streamed residency
+arithmetically arguable at all.
+
+### What B3 can and cannot resolve
+
+The overlap estimator's noise floor is **±0.15**, established the same way as
+the bandwidth floor: OpenCL has no direct lowering, so its two columns measure
+one quantity twice, and they came back 0.31 and 0.44. Only large differences are
+meaningful — Metal's ~1.0 against OpenCL's ~0.3 is real; anything closer is not.
+
+Two harness defects were found and fixed while measuring, both of which had been
+producing confident nonsense:
+
+- `_sync()` poked `tenet.Finish()`, which **does not exist on the CUDA Tenet**,
+  so the kernel leg timed 0.0 ms — an async launch with nothing waiting on it.
+  Every `IdpyArray*` has carried `Sync()` since Phase 2b; that is the portable
+  spelling, and the residency layer already used it.
+- The filler kernel was calibrated *inside* the overlap routine, which runs once
+  per route, so the two routes were timed against **different kernels** and the
+  comparison silently stopped being controlled. Calibration now happens once per
+  backend and the kernel is shared. A ratio outside `[-0.2, 1.2]` — impossible
+  by construction — is now reported as unresolved rather than printed.
 
 ---
 
