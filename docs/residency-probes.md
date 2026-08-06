@@ -15,8 +15,8 @@ unchanged") is measured against.
 |----|----------|--------|--------|
 | F2 | can `IdpyMemory` express the residency op? | inspection | **no — settled** |
 | F4 | can `IDPY_T` express sub-byte packed types? | inspection | **no — settled** |
-| P1 | sustained streaming bandwidth under overlap | measurement | **not yet run** |
-| P3 | is one dynamic shared buffer enough? | inspection + kernel design | **not yet run** |
+| P1 | sustained storage->device bandwidth under overlap | measurement | **measured (§2k)**; CUDA pending |
+| P3 | is one dynamic shared buffer enough? | built and measured | **yes — settled (§2l)** |
 
 Two of the four original probes were answerable by reading the tree rather than
 by measurement. Both came back negative. See §4 of `idea.deploy-extension.md`
@@ -641,6 +641,421 @@ and `V 1088`, `Q 9`, `DIM 2` untouched.
 reproducible until a kernel opts in.** Enabling it does change numerics on fp64
 devices, which is why it is a per-kernel choice rather than a global switch.
 Making the mixed case explicit per-literal is deferred to a second sweep.
+
+---
+
+## 2j. Phase 3: storage → device, CUDA lowering verified
+
+`BackingStore.ReadBlockInto(block_id, view)` fills a device slot directly and
+returns `False` to **decline**. Declining is not an error — it is how a store
+says it has no direct path on this configuration, and the cache falls back to
+the host route without caring why. The capability is therefore optional per
+*store* rather than per backend, and the fallback stays the default.
+
+`KvikIOStore` subclasses `MemMapStore` and reads through KvikIO (NVIDIA cuFile /
+GPUDirect Storage). It is the right first row not for speed but because
+**KvikIO degrades to a POSIX read when GPUDirect is absent**, so the path is
+exercised and stays correct without GDS hardware, a compatible filesystem or the
+nvidia-fs driver. Inheriting `MemMapStore` means the fallback is the same store
+answering differently, not a second implementation that could drift.
+
+### Verified on `id` (2026-08-06), kvikio-cu13 26.6.0
+
+| backend | P1 | P2 | P6 read path |
+|---|---|---|---|
+| **CUDA** | exact | 62/34 exact | **34 direct / 0 staged** — cuFile |
+| OpenCL | exact | 62/34 exact | 0 direct / 34 staged |
+| CTypes | exact | 62/34 exact | 0 direct / 34 staged |
+
+The direct storage→device path works: 34 of 34 block loads bypassed host memory
+entirely, with the sweep still exact against the whole-lattice reference. The
+risk carried into that run — whether KvikIO would accept an `IdpyArrayCUDA`
+**SubView**, whose `gpudata` is borrowed with a `base` rather than freshly
+allocated — resolved in favour of it working through
+`__cuda_array_interface__`.
+
+### The counters earned their place immediately
+
+`direct_reads` / `staged_reads` exist because a direct path that silently
+degraded to the host bounce would pass every correctness check unchanged — the
+same failure mode as an `async` copy that is secretly synchronous, of which this
+work has already produced two. P6 asserts `direct + staged == misses`.
+
+They also caught a reporting bug on their first real run. `DirectPathName()`
+returned `'kvikio/cuFile'` whenever kvikio was merely *importable*, so on a host
+with it installed the CTypes and OpenCL rows read
+
+    kvikio/cuFile: 0 direct / 34 staged
+
+naming a path that was never taken. The counters were right; the label lied.
+`DirectPathName()` is now keyed on a read having actually **succeeded**, so a
+store that has only ever taken the staged route says so. Exactly the class of
+label that would let a degraded fast path look engaged.
+
+### Metal row: MTLIOCommandQueue via a Swift shim
+
+The row that makes the storage claim **portable rather than merely present**.
+Metal's storage API has no Python binding, pymetallic does not wrap it, and
+Swift is the only language that can see it — so this is the case the whole
+`HostModule` design was aimed at. Nothing is generated per kernel: it is fixed
+host code, written once, which is why Swift stays a *compiler choice* and there
+is still no `SWIFT_T` in `idpy_langs_dict`.
+
+Three things had to be verified rather than assumed, and were, by probing before
+building:
+
+1. **Pointer bridging.** pymetallic exposes `_device_ptr` / `_buffer_ptr` as raw
+   pointers; Swift reconstitutes them with
+   `Unmanaged.fromOpaque(...).takeUnretainedValue()`. The probe created an
+   `MTLIOCommandQueue` from pymetallic's own device.
+2. **Sub-range targeting.** The load writes at a byte offset inside an existing
+   buffer, so it fills a `SubView` of the cache rather than a whole allocation.
+   This works *because* Phase 2b gave `IdpyArrayMETAL` an element offset against
+   its parent Buffer — without that bookkeeping there is nothing to aim at.
+   Verified in isolation first: reading the second block of a file into the
+   middle of a buffer left the head untouched and matched exactly.
+3. **The Swift spelling.** It is
+   `load(_:offset:size:sourceHandle:sourceHandleOffset:)`. `loadBuffer(...)` is
+   the Objective-C name and was obsoleted in Swift 3; the compiler says so
+   plainly.
+
+`CreateFileStore(path, array, block_elems, tenet=)` picks the lowering —
+KvikIO/cuFile on CUDA, `MTLIOCommandQueue` on Metal, plain memmap elsewhere.
+Every option subclasses `MemMapStore`, so an unmatched backend, a missing
+binding or a failed open all land on the same staged path.
+
+### Phase 3 status
+
+| backend | mechanism | verified |
+|---|---|---|
+| **CUDA** | KvikIO / cuFile | **34 direct / 0 staged**, P1 exact (`id`) |
+| **Metal** | `MTLIOCommandQueue` | **34 direct / 0 staged**, P1 exact (M1 Max) |
+| OpenCL | — declines, stages | 0 direct / 34 staged |
+| CTypes | — declines, stages | 0 direct / 34 staged |
+| AMD | rocm-xio | not started; needs hardware |
+
+Two backends now stream storage→device through **the same policy code** with
+entirely different mechanisms underneath — cuFile on one, a Swift-compiled
+Metal IO queue on the other. That is the design's central asymmetry carried all
+the way to storage: the policy is one program, the lowerings are not.
+
+### Layering lint
+
+`scripts/check_layering.py` enforces `STRATEGY.md`'s "core never imports
+physics" against the current layout via the §3 migration mapping. Static
+analysis over import statements — no environment, no packages, no GPU — so it
+runs as CI's first step in seconds, before dependencies install.
+
+Two violations are grandfathered in a `KNOWN` allowlist, both function-local in
+`idpy/Utils/IdpySymbolic.py`, so `idpy.Utils` still loads cleanly without
+physics. Unpicking them is Phase 0b refactoring; the point is that nothing *new*
+can be added. Verified by injection: a fresh core→physics import exits 1 naming
+file and line.
+
+It also surfaced two invalid escape sequences (`'\ '`) in
+`idpy/IdpyCode/__init__.py` — accepted today with a `SyntaxWarning`, a
+`SyntaxError` in some future Python. Replaced with the identical two-character
+value spelled legally.
+
+---
+
+## 2k. P1 measured: the direct paths are correct, not faster (here)
+
+`test_storage_bandwidth.py`. 256 MiB file through a 32 MiB cache, 8 MiB blocks,
+min-of-3.
+
+| backend | B1 staged | B2 direct | B2/B1 | overlap staged | overlap direct |
+|---|---|---|---|---|---|
+| OpenCL | 6.17 GB/s | 5.79 (no direct path) | 0.94× | 0.37 | 0.16 |
+| **Metal** | 7.72 GB/s | **7.87** (MTLIOCommandQueue) | **1.02×** | 1.02 | 0.96 |
+| CTypes | 6.94 GB/s | 7.37 (no direct path) | 1.06× | — serial | — |
+
+### The OpenCL row is the noise floor, and it should be read first
+
+OpenCL has no direct lowering, so **both** its columns are the same staged path
+measured twice. They differ by **6% in bandwidth** and by **more than 2× in the
+overlap ratio** (0.16 vs 0.37). That is run-to-run variation on an identical
+quantity, and it calibrates everything else: bandwidth differences under ~10%
+are noise, and overlap differences under ~0.2 are not resolvable at three
+repeats.
+
+Recorded because without it, Metal's 1.02× would read as a small win and
+OpenCL's 0.16-vs-0.37 as a real effect. Neither is.
+
+### What that leaves
+
+**On this machine the direct path is correct and not faster.** Metal's
+`MTLIOCommandQueue` delivers the same bandwidth as the staged route (1.02×,
+inside the floor) and the same overlap (0.96 vs 1.02, both ≈ 1). That is the
+expected result and it is worth saying plainly rather than hunting for a win:
+Apple's unified memory means the staged path is *already* a host store into
+shared storage with no bus to cross, and Phase 2b's range-scoped waiting already
+lets it overlap with compute. There is nothing left for a DMA engine to remove
+when the source is a warm page cache and the destination is host-visible.
+
+Its value would appear where the staged path costs something real — a cold cache
+to bypass, or a discrete GPU where staging means a genuine PCIe crossing. Neither
+is true here.
+
+**One effect does clear the floor: OpenCL overlaps badly.** ~0.2–0.4 against
+Metal's ~1.0. `enqueue_copy` goes on a queue and partially serializes against
+the kernel, while Metal's host store runs on the CPU concurrently with the GPU.
+That is architectural, not noise.
+
+### The number that matters for streamed CFD
+
+**~7–8 GB/s through the cache machinery** — and this is a *warm page cache*, so
+it is not the drive. A memcpy from RAM on an M1 Max should run at tens of GB/s,
+so 7.7 GB/s is **the machinery, not the memory**: per-block Python bookkeeping
+and memmap page faults at 8 MiB granularity.
+
+Two consequences:
+
+1. The earlier streamed-CFD estimate assumed ~7 GB/s and happens to land right —
+   but for the wrong reason. That figure is a software ceiling, not a disk one.
+2. **On a fast drive you would be software-limited before you were disk-limited.**
+   Larger blocks would amortise the per-block overhead; that is the first thing
+   to try if the streaming case is ever pursued seriously.
+
+### The SWIFT_T gate this probe was built to guard has evaporated
+
+P1 existed to decide whether Python could schedule fast enough, because failing
+would have promoted Swift from a compiler choice to a language target. That
+decision can no longer be reached: **H5** demonstrated Swift-as-compiler end to
+end and the Metal storage row then used it in anger, and **F4** gated off the
+workload whose scheduling was in question. Closing P1 is therefore not the same
+as answering the question it was written for, and the record should not read as
+though it were.
+
+### CUDA: cuFile is 1.26x at plateau — settled by a size sweep
+
+Cold, on `id`. Every point drops the page cache first, so every point reads the
+drive:
+
+| block | staged | cuFile | ratio |
+|---|---|---|---|
+| 256 KiB | 0.50 | **0.87** | 1.74x |
+| 1 MiB | 0.84 | **1.32** | 1.57x |
+| 4 MiB | 1.24 | **1.53** | 1.23x |
+| 16 MiB | 1.18 | **1.52** | 1.29x |
+| **64 MiB (plateau)** | **1.21** | **1.52** | **1.26x** |
+
+**cuFile is faster at every size**, plateauing at 1.52 GB/s against staged's
+1.21. It also exceeds B0's plain cold read (1.18–1.71 across runs, itself noisy),
+which is consistent: B0 is a POSIX read into userspace carrying its own copy,
+while GPUDirect skips the host. cuFile's 1.52, stable across three block sizes,
+is the better estimate of what the drive can deliver.
+
+The controls behave as they must: OpenCL and CTypes have no direct lowering, so
+their two columns track each other to within 1–9% across the whole sweep.
+
+### M1 Max: a different regime, and it favours Apple Silicon
+
+macOS has neither `posix_fadvise` nor `O_DIRECT`, and `purge` needs sudo, so the
+cold sweep cannot run there. `F_NOCACHE` does not evict pages that are already
+resident — but setting it on the **write** keeps them out of the cache in the
+first place, and reading back with it set then reaches the device. Verified:
+~4.3 GB/s against ~11 GB/s for a cached read of the same file.
+
+| | device read | vs `id` |
+|---|---|---|
+| **M1 Max internal SSD** | **~3.9 GB/s** (range 2.7–4.3, n=13) | **~2.6x faster** |
+| `id` NVMe (cuFile plateau) | 1.52 GB/s | — |
+
+The first figure recorded here was **4.32 GB/s** — the maximum of the range,
+taken from a single sample. Repeating the measurement across two rounds and
+three backends gave 2.66 to 4.32, a 1.6x spread. `DriveBandwidthNoCache` now
+repeats internally and prints a median with its range, because a single sample
+of a bandwidth figure has misled this document four separate times.
+
+The two machines therefore sit in different regimes. On `id` the drive
+(1.5 GB/s) is ~5x below the machinery ceiling, so storage dominates completely.
+On the M1 Max the drive (~3.9) and the machinery (6.3–7.8 warm) are within ~2x
+of each other, so both matter.
+
+**Consequence for streamed CFD on Apple Silicon**, using ~400 GB/s of device
+bandwidth:
+
+| method | on `id` (1.52 GB/s) | **on M1 Max (~3.9 GB/s)** |
+|---|---|---|
+| conservative-form CFD | ~98x | **~34x** |
+| D3Q27 LBM | ~295x | **~103x** |
+
+**Streamed residency is ~2.6x more viable on Apple Silicon than on the NVIDIA
+box** — the SSD is ~3x faster while GPU bandwidth is comparable. That is a point
+in favour of `STRATEGY.md`'s central thesis which had not been measured before,
+and it arrives from the direction the thesis did not claim: not FLOPS per dollar
+or unified memory, but storage bandwidth relative to compute.
+
+**One asymmetry worth recording:** Metal's warm `MTLIOCommandQueue` figure runs
+7.1–7.7 GB/s, roughly **twice** the device rate of ~3.9, so **`MTLIOCommandQueue` does not
+bypass the page cache the way cuFile does**. That conclusion strengthened on
+repetition rather than weakening: across runs the warm figure stays ~2x the
+device, well outside the spread of either. Apple's storage API is built around
+efficient streaming and decompression rather than DMA-that-skips-the-host, and
+the residency layer should not assume the two behave alike. The macOS sweep
+therefore stays warm and is labelled as such rather than presented beside the
+Linux cold numbers.
+
+### Why this answer is trustworthy where three earlier ones were not
+
+The same measurement previously produced **0.24x**, then **4.36x**, then
+**1.12x**. Each was a single block size — one point on a curve — reported as
+though it were the curve. The sweep was suggested by Matteo as standard practice
+in bandwidth studies, and it is what turned a number that kept moving into
+something that explains why it moved:
+
+- 0.24x was a **warm-vs-cold** comparison, not a size effect (staged reading RAM).
+- 4.36x and 1.12x were both **cold** and both at 8 MiB, differing only by
+  cold-I/O tail — the very variance a plateau averages out.
+
+What makes the plateau credible: it is consistent across 4, 16 and 64 MiB;
+both routes are measured on the same curve under the same conditions; and the
+two no-direct-path backends serve as controls that correctly show no difference.
+
+### The knee, which was asserted and is now measured
+
+Both routes rise steeply to ~4 MiB and flatten after. At 256 KiB the staged path
+delivers ~40% of its plateau. "Larger blocks are the first lever" was claimed
+earlier without evidence; the lever engages at **~4 MiB and is spent by 16**.
+`ResidentCache`'s 8 MiB default sits just past the knee — defensible, with
+perhaps a few percent available at 16 MiB.
+
+### Overlap does not survive real I/O on this machine
+
+B3 falls to ~0.0 for both routes cold, where warm runs showed 0.2–0.4. Once the
+load is genuine disk I/O (4–18 ms) it does not hide behind compute here. Metal's
+~1.0 stands apart and for a clear reason: a host store into unified memory runs
+on the CPU while the GPU works, which is a different mechanism from queuing a
+transfer.
+
+### Consequence for streamed CFD
+
+Using the measured cuFile plateau of **1.52 GB/s**:
+
+| method | at the assumed 7 GB/s | **measured** |
+|---|---|---|
+| conservative-form CFD (18 planes state, 108 traffic) | 21x | **~98x** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64x | **~295x** |
+
+The ~3x ratio between methods is unchanged, since it depends on state-to-traffic
+rather than on the drive. And the direct path is worth a real 1.26x of that —
+modest, consistent, and no longer a claim resting on one sample.
+
+### Three wrong readings, one cause
+
+The same figure — B2/B1 = 0.24x — was recorded three times with three different
+explanations, and every one was an artefact of the page cache:
+
+1. *"cuFile is a 4x pessimization from compatibility mode."* Falsified by a
+   one-line diagnostic: `is_compat_mode_preferred() -> False`.
+2. *"The cold control fixes it."* It did not — `POSIX_FADV_DONTNEED` cannot evict
+   pages held by a live mapping, and `MemMapStore` keeps the file mapped.
+3. *"The ground-truth line will catch it."* It did not either — B0 itself read
+   12 GB/s, because `measure()` still held the warm stores' mappings alive while
+   B0 ran.
+
+Each time, cuFile was the only path performing I/O while everything else was
+served from RAM. The fix that finally worked was structural rather than
+attentional: measure the drive **first, before any store exists**, and have
+`RawColdBandwidth()` report warm and cold together with an explicit
+`NOT EVICTED` verdict when `cold >= 0.5 * warm`. The harness now refuses to
+present a cache figure as a drive figure, instead of relying on a reader to
+notice the contradiction.
+
+### One thing left unexplained
+
+CUDA's cold staged path reaches 0.36 GB/s where OpenCL and CTypes reach ~1.25
+through the same `MemMapStore`. The difference is downstream of the read, in
+`H2DSub` — plausibly the pageable `memcpy_htod` combined with 4 KiB memmap
+faults on cold pages — but that is a hypothesis, not a measurement, and this
+document has already carried three of those. Recorded as open.
+
+### Consequence for streamed CFD
+
+The corrected figures stand, since the direct path achieves drive speed:
+
+| method | as originally quoted | corrected |
+|---|---|---|
+| conservative-form CFD (18 planes state, 108 traffic) | 21x | **~92x** |
+| D3Q27 LBM (27 planes state, 54 traffic) | 64x | **~275x** |
+
+with the ~3x ratio between methods unchanged, since it depends on
+state-to-traffic rather than on the drive.
+
+What the fair comparison adds: **without the direct path, CUDA streaming would be
+~4x worse still** (0.36 GB/s rather than 1.59). So the storage lowering is not a
+refinement on this hardware — it is most of what makes streamed residency
+arithmetically arguable at all.
+
+### What B3 can and cannot resolve
+
+The overlap estimator's noise floor is **±0.15**, established the same way as
+the bandwidth floor: OpenCL has no direct lowering, so its two columns measure
+one quantity twice, and they came back 0.31 and 0.44. Only large differences are
+meaningful — Metal's ~1.0 against OpenCL's ~0.3 is real; anything closer is not.
+
+Two harness defects were found and fixed while measuring, both of which had been
+producing confident nonsense:
+
+- `_sync()` poked `tenet.Finish()`, which **does not exist on the CUDA Tenet**,
+  so the kernel leg timed 0.0 ms — an async launch with nothing waiting on it.
+  Every `IdpyArray*` has carried `Sync()` since Phase 2b; that is the portable
+  spelling, and the residency layer already used it.
+- The filler kernel was calibrated *inside* the overlap routine, which runs once
+  per route, so the two routes were timed against **different kernels** and the
+  comparison silently stopped being controlled. Calibration now happens once per
+  backend and the kernel is shared. A ratio outside `[-0.2, 1.2]` — impossible
+  by construction — is now reported as unresolved rather than printed.
+
+---
+
+## 2l. P3 answered: one dynamic buffer is enough
+
+The last open probe. `SetDynamicSharedMemory` allows one runtime-sized buffer
+because CUDA exposes a single `extern __shared__` region, and the question was
+whether that lowest-common-denominator constraint blocks the lattice kernels or
+is merely an ergonomic wrinkle. If it blocked them, the constraint rather than
+the residency layer would have been the real obstacle.
+
+**It does not block them.** Answered by building the case that would break it: a
+two-field 3-point stencil with periodic halos,
+
+    out[i] = (a[i-1] + a[i] + a[i+1]) + 2*(b[i-1] + b[i] + b[i+1])
+
+which needs two tiles by construction — each field carries its own `BLOCK+2`
+halo window, and every output element reads slots written by other lanes.
+
+| check | OpenCL | Metal |
+|---|---|---|
+| T1 two logical tiles inside **one** dynamic buffer, manual offsets | exact | exact |
+| T2 two tiles from **static** shared memory | exact | exact |
+| T3 guard: declaring two dynamic buffers raises | — raises `NotImplementedError` |
+
+Two routes, both working. The dynamic case uses exactly the workaround the
+`SetDynamicSharedMemory` docstring prescribes — one buffer, indexed manually for
+multiple logical tiles — and the static case has no constraint to work around at
+all, since a compile-time declaration is ordinary and a kernel may have as many
+arrays as fit.
+
+Capacity is not close to binding either: two tiles at `BLOCK=64` are ~0.5 KiB
+against 48 KiB of CUDA shared memory and 32 KiB of Metal threadgroup memory. The
+constraint is on the *number of declarations*, not on space, and one declaration
+holds as many logical tiles as arithmetic can address.
+
+### The probe has teeth
+
+A negative control confirms it can fail: pointing both logical tiles at the same
+base — the mis-addressing the manual-offset workaround exists to get right —
+gives `max|out-ref| = 1532.25` rather than a quiet pass. The body is also
+identical text between T1 and T2 apart from the tile bases, which isolates the
+question to where the storage comes from rather than how it is addressed.
+
+**Consequence:** the LCD constraint stands as documented and costs nothing for
+lattice work. Phase 5 remains gated on F4, not on this.
+
+**Phase 0 is complete.** F2 and F4 settled by inspection, both negative; P1
+measured after correcting itself three times; P3 built and settled here.
 
 ---
 

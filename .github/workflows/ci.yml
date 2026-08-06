@@ -47,6 +47,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Layering invariant (core never imports physics)
+        # First, before dependencies: it is static analysis over import
+        # statements, so it needs no idpy environment and no packages at all.
+        # Running it here means a layering regression is reported in seconds
+        # rather than after a full install.
+        run: python3 scripts/check_layering.py
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'

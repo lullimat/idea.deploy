@@ -161,9 +161,24 @@ Item 2 is the larger risk and should be scheduled before any Metal residency low
 
 **Consequence:** the outcome P4 was written to avoid is simply the actual outcome. Supporting the MoE kernel set means extending the metalanguage type system — core work on the crown-jewel asset in service of a demonstration. **Phase 5 is therefore gated off by default** (§5), and the primary residency test case moves to the lattice (§1). Reopening it requires a standalone decision to build a packed-layout type model *for its own sake*, justified by workloads beyond this one.
 
-### P1 (rewritten) — sustained streaming bandwidth under overlap
+### P1 (re-scoped twice) — sustained storage→device bandwidth under overlap
 
-*Original framing: per-layer Python planning latency, gating `SWIFT_T`. Dropped, because it was low-information — the document predicted a pass, and the non-goals already forbid `SWIFT_T` unless it fails. A probe that gates a door you have locked buys nothing.*
+*Framing 1, as originally written: per-layer Python planning latency, gating `SWIFT_T`. Dropped, because it was low-information — the document predicted a pass, and the non-goals already forbid `SWIFT_T` unless it fails. A probe that gates a door you have locked buys nothing.*
+
+*Framing 2: overlap rather than latency, but still expressed in MoE terms — "bounded parallel `pread`", "per-layer", "keep the working set warm".*
+
+*Framing 3 (2026-08-06), and the one that will actually be measured: the same question — does streaming sustain bandwidth, and does it overlap with compute? — asked of the machinery that now exists. Three things forced the re-scope: the lattice became the primary test case, so "per-layer" is the wrong unit; F4 gated Phase 5 off, so measuring the MoE loop would be measuring a hypothetical; and Phase 3 landed real storage→device paths, so framing 2's `pread` describes only the staged route.*
+
+> **The `SWIFT_T` gate this probe was built to guard has evaporated.** P1 existed
+> to decide whether Python could schedule fast enough, because failing would have
+> promoted Swift from a compiler choice to a language target. That decision can
+> no longer be reached from here, for two independent reasons: **H5** demonstrated
+> Swift-as-compiler working end to end (a `@_cdecl` library built by `HostModule`,
+> loaded and called), and the Metal storage row then used it in anger; and **F4**
+> gated off the very workload whose scheduling was in question. Recorded rather
+> than quietly dropped, so that closing P1 is not mistaken for having answered
+> the question it was originally written for. Planning latency is still worth
+> collecting — it is nearly free — but nothing now hinges on it.
 
 The real scheduling risk is not planning latency in isolation; it is **overlap**. Measure whether bounded parallel `pread` sustains enough bandwidth to keep the working set warm *while compute runs*, under the GIL, with F2's synchronization behaviour in the loop.
 
@@ -175,11 +190,13 @@ Build a stub with no model: real cache-planning logic, real `pread` against a fi
 
 Failure mode if unmeasured: correct output at unusable rates. The memory claim survives and the demonstration dies.
 
-### P3 — is one shared buffer enough? *(the one surviving probe)*
+### P3 — is one shared buffer enough? **Answered: yes.**
 
 `SetDynamicSharedMemory` allows at most one dynamic shared buffer (CUDA LCD). Determine whether the target kernels need >1 threadgroup buffer. If yes, the LCD constraint — not the residency layer — is the real blocker, and this design needs revisiting.
 
-Note the scope change: with the lattice now the primary test case, **P3 should be evaluated against the lattice kernels first** (tiled stencil/halo work), not against MoE attention. The MoE answer only matters if F4 is ever reopened.
+Note the scope change: with the lattice now the primary test case, **P3 was evaluated against the lattice kernels** (tiled stencil/halo work), not against MoE attention. The MoE answer only matters if F4 is ever reopened.
+
+**Settled 2026-08-06 by building the case that would break it** — a two-field 3-point stencil with periodic halos, which needs two tiles by construction. Two logical tiles fit inside one dynamic buffer via manual offsets (exact on OpenCL and Metal), static shared memory carries no such constraint at all (also exact), and the guard against declaring two dynamic buffers raises as it should. Capacity is nowhere near binding: two tiles at `BLOCK=64` are ~0.5 KiB against 48 KiB CUDA / 32 KiB Metal. The constraint is on the *number of declarations*, not on space. See `docs/residency-probes.md` §2l.
 
 **Deliverable for Phase 0:** a short findings file, `docs/residency-probes.md`, recording F2 and F4 as settled, the P1 measurement, the P3 answer, and the resulting go/no-go per phase.
 
@@ -235,6 +252,6 @@ Closed deliberately. Reopen only with an explicit reason recorded in the PR.
 - Verify claims against the tree before acting on them; this file's line anchors are from `e49f997` and will drift.
 - **Before designing a probe, check whether the tree already answers it.** Two of the four Phase 0 probes were reading exercises misfiled as measurements, and both returned negative — meaning the design's two biggest risks were sitting in plain sight in the source while scheduled as future work. Measurement is for behaviour under load; inspection is for capability.
 - **When a probe is expected to pass and gates something already ruled out, it is not a probe.** That was the original P1. Ask what would actually change based on the outcome.
-- Phase 0 first, but it is now short: F2 and F4 are settled, so only P1 and P3 remain.
+- ~~Phase 0 first~~ **Phase 0 is complete.** F2 and F4 settled by inspection, both negative; P1 measured (§2k) after correcting itself three times; P3 built and settled (§2l).
 - Prefer small PRs with acceptance criteria over a long-running branch.
 - When a design choice looks like "add a new lang," check first whether it is actually a *binding* (fixed code, written once, host-side) rather than a *target* (generated per kernel object). That test resolved most of the scoping questions behind this document.
