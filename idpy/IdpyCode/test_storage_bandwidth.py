@@ -214,8 +214,16 @@ def _sweep_cache(cache, n_blocks):
 
 def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
                cold=False):
-    '''Minimum wall time over 'repeats' full sweeps, plus the store used.'''
-    _best, _store, _cache = None, None, None
+    '''
+    Wall time over 'repeats' full sweeps, plus the store used.
+
+    Returns the best time AND the full list. Min alone was not enough: the cold
+    CUDA staged leg read 0.36 GB/s in one run and ~1.4 in the next, a 4x spread
+    on the same quantity, and reporting only the minimum turned a sample into an
+    apparent result. Cold I/O has a long tail -- eviction cost, fault storms,
+    drive state -- so the spread is the measurement, not an imperfection in it.
+    '''
+    _best, _store, _cache, _all = None, None, None, []
     for _ in range(repeats):
         if cold:
             '''
@@ -242,9 +250,10 @@ def _time_load(tenet, store_factory, path, lattice, n_blocks, repeats,
         _t0 = perf_counter()
         _bytes = _sweep_cache(_cache, n_blocks)
         _dt = perf_counter() - _t0
+        _all.append(_dt)
         _best = _dt if _best is None else min(_best, _dt)
         _direct = _cache.stats['direct_reads']
-    return _best, _bytes, _store, _direct
+    return _best, _bytes, _store, _direct, _all
 
 
 def measure(lang, tmpdir):
@@ -268,13 +277,13 @@ def measure(lang, tmpdir):
         # -- B1: staged. MemMapStore has no direct path by construction.
         _staged = lambda p, a: IdpyResidency.MemMapStore(
             p, a.size, _BLOCK_ELEMS, a.dtype)
-        _t_staged, _bytes, _s1, _d1 = _time_load(
+        _t_staged, _bytes, _s1, _d1, _a1 = _time_load(
             tenet, _staged, _path, lattice, _N_BLOCKS, _REPEATS)
 
         # -- B2: whatever direct lowering this backend has, if any.
         _direct_f = lambda p, a: IdpyResidency.FileStoreClass(tenet)(
             p, a.size, _BLOCK_ELEMS, a.dtype)
-        _t_direct, _, _s2, _d2 = _time_load(
+        _t_direct, _, _s2, _d2, _a2 = _time_load(
             tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS)
 
         '''
@@ -291,10 +300,14 @@ def measure(lang, tmpdir):
         gc.collect()
         _cold_ok = DropPageCache(_path)
         if _cold_ok:
-            _t_cold_staged, _, _, _ = _time_load(
+            _t_cold_staged, _, _, _, _ac = _time_load(
                 tenet, _staged, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
-            _t_cold_direct, _, _, _dc = _time_load(
+            _t_cold_direct, _, _, _dc, _ad = _time_load(
                 tenet, _direct_f, _path, lattice, _N_BLOCKS, _REPEATS, cold=True)
+            out['cold_staged_spread'] = (_bytes / max(_ac) / 1e9,
+                                         _bytes / min(_ac) / 1e9)
+            out['cold_direct_spread'] = (_bytes / max(_ad) / 1e9,
+                                         _bytes / min(_ad) / 1e9)
             out['cold_staged_GBs'] = _bytes / _t_cold_staged / 1e9
             out['cold_direct_GBs'] = _bytes / _t_cold_direct / 1e9
             out['cold_direct_reads'] = _dc
@@ -500,9 +513,12 @@ def main():
                 print(f"    B4 cold staged       {r['cold_staged_GBs']:7.2f} GB/s")
                 print(f"    B5 cold direct       {r['cold_direct_GBs']:7.2f} GB/s"
                       f"   ({r['cold_direct_reads']} direct reads)")
+                _cs, _cd = r['cold_staged_spread'], r['cold_direct_spread']
+                print(f"       spread staged     {_cs[0]:.2f} - {_cs[1]:.2f} GB/s"
+                      f"   direct {_cd[0]:.2f} - {_cd[1]:.2f} GB/s")
                 print(f"    B5/B4                "
                       f"{r['cold_direct_GBs'] / r['cold_staged_GBs']:7.2f}x"
-                      f"   <-- the fair comparison")
+                      f"   (best-of; see spread -- cold I/O has a long tail)")
             _ovs = r.get('overlap_staged')
             if _ovs is not None and _ovs['overlap'] is not None:
                 print(f"    B3 overlap, staged   {_ovs['overlap']:7.2f}"

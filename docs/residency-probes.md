@@ -827,24 +827,45 @@ workload whose scheduling was in question. Closing P1 is therefore not the same
 as answering the question it was written for, and the record should not read as
 though it were.
 
-### CUDA: cuFile is 4.36x faster — the final, fair measurement
+### CUDA: direct vs staged is **unresolved**, not 4.36x
 
-Once the page cache is genuinely evicted (which took four attempts), on `id`:
+Two runs of the same measurement on the same machine:
 
-| backend | B0 cold = drive | B4 cold staged | B5 cold direct | **B5/B4** |
+| run | B0 cold = drive | B4 cold staged | B5 cold direct | B5/B4 |
 |---|---|---|---|---|
-| **CUDA** | 1.60 GB/s | **0.36** | **1.59** (cuFile) | **4.36x** |
-| OpenCL | 1.68 | 1.29 | 1.26 (no direct path) | 0.98x |
-| CTypes | 1.71 | 1.24 | 1.24 (no direct path) | 1.00x |
+| first | 1.60 GB/s | **0.36** | 1.59 | **4.36x** |
+| second | 1.34 GB/s | ~1.4 | ~1.5 | **1.12x** |
 
-**GPUDirect reaches 1.59 of a 1.60 GB/s drive — essentially all of it.** The
-staged route on CUDA manages 0.36, so the direct path is worth **4.36x** on this
-hardware. Phase 3's CUDA row is a performance feature, not merely a portability
-one.
+A **4x spread on the same quantity**. The 4.36x rested entirely on a single
+cold-staged reading of 0.36 GB/s that has not reproduced, and it was recorded as
+a result — including in merged PR #9 — on the strength of one sample.
 
-The OpenCL and CTypes rows are the control: neither has a direct lowering, so
-both columns measure the same staged path twice and land within 2% of each
-other, at ~75% of drive speed.
+**What is stable across runs:** the drive at ~1.3–1.7 GB/s, and both routes
+landing near it. The OpenCL and CTypes controls (no direct lowering, so both
+columns measure one path twice) read 0.97x and 1.01x, consistent with parity.
+
+**What is not established:** that the direct path is faster on this hardware.
+The honest statement is that when both paths genuinely read the drive they
+perform comparably, and any difference is below what this harness can resolve.
+
+The cause is that cold I/O has a long tail — eviction cost, fault storms, drive
+state — and reporting `min` over three repeats turns a sample into an apparent
+result. `_time_load` now returns the full list and the harness prints the
+**spread** for both cold legs, so a 4x range is visible as a range instead of
+collapsing to its most flattering end.
+
+### Consequence for the earlier claims
+
+- *"cuFile is worth 4.36x"* — **withdrawn**. Unsupported by the second run.
+- *"Without the direct path CUDA streaming would be ~4x worse"* — **withdrawn**,
+  it followed from the same number.
+- The streamed-CFD figures **stand**: they depend on the drive rate (~1.5 GB/s),
+  which is stable, not on the direct/staged ratio. ~92x for the
+  conservative-form method and ~275x for D3Q27, with the ~3x ratio between them
+  unchanged since it depends on state-to-traffic.
+- Phase 3's storage lowerings remain justified as **portability and
+  correctness**, which is what they were originally claimed to be before this
+  probe briefly promoted them.
 
 ### Three wrong readings, one cause
 
