@@ -47,6 +47,13 @@ The framework is in research use: it produced the numerical results in the
 peer-reviewed papers listed below, across lattice Boltzmann multiphase flow,
 lattice pressure tensors, and spin-network evaluation.
 
+### Architecture
+
+Three diagrams — the lowering from one kernel source to four backends, the three
+points at which code enters a build, and the residency layer where the backend
+differences stop mattering — are in
+[`docs/architecture.md`](docs/architecture.md).
+
 ### Installation for use as a library
 
 ```bash
