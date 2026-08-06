@@ -78,6 +78,7 @@ Run directly:
     python -m idpy.IdpyCode.test_storage_bandwidth
 '''
 
+import fcntl
 import gc
 import os
 import tempfile
@@ -186,6 +187,60 @@ def _PlainRead(path, chunk=1 << 22):
                 break
             _n += len(_b)
     return _n / (perf_counter() - _t) / 1e9
+
+
+_F_NOCACHE = 48          # macOS fcntl; no O_DIRECT and no posix_fadvise
+
+
+def DriveBandwidthNoCache(tmpdir, mib=256, chunk=1 << 22):
+    '''
+    Drive read bandwidth on macOS, which has neither posix_fadvise nor O_DIRECT.
+
+    'purge' needs sudo, and F_NOCACHE on a read does not evict pages that are
+    already resident -- it only changes future caching policy. The way through
+    is to keep the pages out of the cache in the first place: write the scratch
+    file with F_NOCACHE set, then read it back with F_NOCACHE set. Verified to
+    give ~5 GB/s against ~11 GB/s for a cached read on the same file, so it is
+    genuinely reaching the device.
+
+    A separate scratch file rather than the test file, because the sweep's
+    staged path reads through numpy.memmap and repopulates the cache on first
+    touch. This measures the DEVICE; the sweep on macOS stays warm and is
+    labelled as such.
+    '''
+    if not hasattr(fcntl, 'fcntl'):
+        return None
+    _path = os.path.join(tmpdir, 'drive_probe.bin')
+    _blob = os.urandom(1 << 22)
+    try:
+        _fd = os.open(_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+        try:
+            fcntl.fcntl(_fd, _F_NOCACHE, 1)
+            for _ in range(max(1, mib // 4)):
+                os.write(_fd, _blob)
+            os.fsync(_fd)
+        finally:
+            os.close(_fd)
+
+        _fd = os.open(_path, os.O_RDONLY)
+        try:
+            fcntl.fcntl(_fd, _F_NOCACHE, 1)
+            _t, _n = perf_counter(), 0
+            while True:
+                _b = os.read(_fd, chunk)
+                if not _b:
+                    break
+                _n += len(_b)
+        finally:
+            os.close(_fd)
+        return _n / (perf_counter() - _t) / 1e9
+    except OSError:
+        return None
+    finally:
+        try:
+            os.remove(_path)
+        except OSError:
+            pass
 
 
 def RawColdBandwidth(path, chunk=1 << 22):
@@ -358,6 +413,10 @@ def measure(lang, tmpdir):
         with open(_path, 'rb') as _fh:
             os.fsync(_fh.fileno())
         out['raw'] = RawColdBandwidth(_path)
+        if out['raw'] is None:
+            # No posix_fadvise (macOS): measure the device directly instead, and
+            # keep the sweep labelled warm rather than pretending otherwise.
+            out['drive_nocache'] = DriveBandwidthNoCache(tmpdir)
 
         # -- B1: staged. MemMapStore has no direct path by construction.
         _staged = lambda p, a: IdpyResidency.MemMapStore(
@@ -568,6 +627,10 @@ def main():
                   f"   ({r['direct_reads']} direct reads)")
             print(f"    B2/B1                {r['speedup']:7.2f}x   "
                   f"(warm cache: B1 reads RAM, so this is NOT a fair race)")
+            _dn = r.get('drive_nocache')
+            if _dn is not None:
+                print(f"    B0 drive (F_NOCACHE) {_dn:7.2f} GB/s"
+                      f"   <-- the device; the sweep below stays WARM here")
             _raw = r.get('raw')
             if _raw is not None:
                 print(f"    B0 plain read        warm {_raw['warm']:6.2f} / "

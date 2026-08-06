@@ -849,6 +849,46 @@ is the better estimate of what the drive can deliver.
 The controls behave as they must: OpenCL and CTypes have no direct lowering, so
 their two columns track each other to within 1–9% across the whole sweep.
 
+### M1 Max: a different regime, and it favours Apple Silicon
+
+macOS has neither `posix_fadvise` nor `O_DIRECT`, and `purge` needs sudo, so the
+cold sweep cannot run there. `F_NOCACHE` does not evict pages that are already
+resident — but setting it on the **write** keeps them out of the cache in the
+first place, and reading back with it set then reaches the device. Verified:
+~4.3 GB/s against ~11 GB/s for a cached read of the same file.
+
+| | device read | vs `id` |
+|---|---|---|
+| **M1 Max internal SSD** | **4.32 GB/s** | **~3x faster** |
+| `id` NVMe (cuFile plateau) | 1.52 GB/s | — |
+
+The two machines therefore sit in different regimes. On `id` the drive
+(1.5 GB/s) is ~5x below the machinery ceiling, so storage dominates completely.
+On the M1 Max the drive (4.3) and the machinery (6.3 warm) are within ~1.5x of
+each other, so both matter.
+
+**Consequence for streamed CFD on Apple Silicon**, using ~400 GB/s of device
+bandwidth:
+
+| method | on `id` (1.52 GB/s) | **on M1 Max (4.32 GB/s)** |
+|---|---|---|
+| conservative-form CFD | ~98x | **~31x** |
+| D3Q27 LBM | ~295x | **~93x** |
+
+**Streamed residency is ~3x more viable on Apple Silicon than on the NVIDIA
+box** — the SSD is ~3x faster while GPU bandwidth is comparable. That is a point
+in favour of `STRATEGY.md`'s central thesis which had not been measured before,
+and it arrives from the direction the thesis did not claim: not FLOPS per dollar
+or unified memory, but storage bandwidth relative to compute.
+
+**One asymmetry worth recording:** Metal's warm `MTLIOCommandQueue` figure
+(6.99 GB/s) *exceeds* the device rate (4.32), so **`MTLIOCommandQueue` does not
+bypass the page cache the way cuFile does**. Apple's storage API is built around
+efficient streaming and decompression rather than DMA-that-skips-the-host, and
+the residency layer should not assume the two behave alike. The macOS sweep
+therefore stays warm and is labelled as such rather than presented beside the
+Linux cold numbers.
+
 ### Why this answer is trustworthy where three earlier ones were not
 
 The same measurement previously produced **0.24x**, then **4.36x**, then
