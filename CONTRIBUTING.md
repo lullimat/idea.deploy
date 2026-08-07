@@ -4,6 +4,8 @@ Thanks for looking. This document covers how to get a working environment, how
 to run the tests properly, and the conventions that exist because ignoring them
 has caused real problems.
 
+Participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
 ## Getting a development environment
 
 ```bash
