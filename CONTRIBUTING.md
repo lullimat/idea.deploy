@@ -125,8 +125,16 @@ Two things it gets right that are easy to get wrong:
   code -- which surfaces as an `ImportError` naming a different repository's
   file, and reads exactly like drift in the paper under test.
 
-Papers that select `CUDA_T` cannot be smoked without pycuda; say so rather than
-recording them as failures.
+A paper whose default backend is absent is **retried on one this machine has**,
+and the backend used is reported in the result line. These notebooks detect
+what is available and then discard the answer with a hardcoded `preferred_lang`,
+so the backend is a default, not a requirement. Force one with `--lang OCL_T`.
+
+This matters more than convenience: a paper that stops at "no pycuda here" has
+told you nothing about whether it constructs, and hides everything after that
+cell. Both breakages found so far were behind that wall -- one of them
+`text.latex.preview`, a matplotlib rcParam removed upstream, which has nothing
+to do with idpy at all.
 
 ## Conventions that exist for a reason
 

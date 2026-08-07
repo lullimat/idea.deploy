@@ -31,6 +31,15 @@ Usage:
     python3 scripts/smoke_papers.py arXiv-2505.23647    # one paper
     python3 scripts/smoke_papers.py --dir /path/to/repo # an existing checkout
     python3 scripts/smoke_papers.py --budget 90         # slower machines
+    python3 scripts/smoke_papers.py --lang OCL_T        # force the backend
+
+A paper whose default backend is missing has told you nothing about whether it
+still constructs, so one is retried on a backend this machine has. The notebooks
+detect what is available and then override it with a hardcoded `preferred_lang`,
+which makes the backend a default rather than a requirement. Without the retry,
+"no pycuda here" gets filed as though it were drift -- and it masks whatever the
+next cell would have said. Both real breakages found so far were behind that
+wall.
 
 Exit 0 when every notebook attempted either constructs or reaches compute.
 Exit 1 on any error, or when nothing was attempted at all.
@@ -72,7 +81,52 @@ def registry_papers(root):
     return out
 
 
-def run_notebook(path, root, budget):
+LANG_TOKENS = ('CUDA_T', 'OCL_T', 'METAL_T', 'CTYPES_T')
+_PREFERRED = re.compile(
+    r'(\bpreferred_lang\b[^=\n]*=\s*)(' + '|'.join(LANG_TOKENS) + r')\b')
+
+
+def available_langs(root):
+    """Language tokens this machine can actually run, best first."""
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from idpy.IdpyCode import idpy_langs_sys          # noqa: PLC0415
+    import idpy.IdpyCode as ic                        # noqa: PLC0415
+    out = []
+    for tok in ('CUDA_T', 'OCL_T', 'METAL_T', 'CTYPES_T'):
+        val = getattr(ic, tok, None)
+        if val is not None and idpy_langs_sys.get(val):
+            out.append(tok)
+    return out
+
+
+def _backend_absent(detail):
+    """Is this failure 'the machine lacks a binding' rather than drift?"""
+    if not detail:
+        return False
+    d = detail.lower()
+    return ('is not found in your python environment' in d
+            or any(f"no module named '{m}'" in d
+                   for m in ('pycuda', 'pyopencl', 'pymetallic')))
+
+
+def substitute_lang(src, lang):
+    """
+    Retarget a notebook's backend by rewriting `preferred_lang`.
+
+    These notebooks already detect what is available -- `if idpy_langs_sys[CUDA_T]`
+    and so on -- and then discard the answer with `lang = preferred_lang`, which
+    is hardcoded in an earlier cell. So the backend is a default, not a
+    requirement, and changing it is how the papers are meant to be portable.
+
+    Only `preferred_lang` is rewritten. The detection block also contains
+    `lang = CUDA_T` inside its own guard, and rewriting that would corrupt the
+    if/elif chain rather than retarget it.
+    """
+    return _PREFERRED.sub(lambda m: m.group(1) + lang, src)
+
+
+def run_notebook(path, root, budget, lang=None):
     """
     (status, cell_index, n_cells, detail) for one notebook.
 
@@ -106,6 +160,8 @@ def run_notebook(path, root, budget):
             # constructor call.
             src = '\n'.join(l for l in src.splitlines()
                             if not l.lstrip().startswith(('%', '!', '?')))
+            if lang:
+                src = substitute_lang(src, lang)
             if not src.strip():
                 continue
             signal.alarm(budget)
@@ -131,7 +187,7 @@ def run_notebook(path, root, budget):
         os.chdir(cwd)
 
 
-def run_isolated(path, root, budget):
+def run_isolated(path, root, budget, lang=None):
     """
     run_notebook in a fresh interpreter, and that isolation is mandatory.
 
@@ -147,7 +203,8 @@ def run_isolated(path, root, budget):
     """
     r = subprocess.run(
         [sys.executable, str(pathlib.Path(__file__).resolve()),
-         '--run-one', str(path), '--budget', str(budget)],
+         '--run-one', str(path), '--budget', str(budget)]
+        + (['--lang', lang] if lang else []),
         capture_output=True, text=True)
     line = (r.stdout or '').strip().splitlines()
     if not line:
@@ -177,13 +234,17 @@ def main(argv):
                     help=f'seconds per cell before calling it compute '
                          f'(default {DEFAULT_BUDGET})')
     ap.add_argument('--keep', action='store_true', help='keep the clones')
+    ap.add_argument('--lang', choices=LANG_TOKENS,
+                    help='force the backend by rewriting preferred_lang; '
+                         'without it, a paper whose default backend is absent '
+                         'is retried on one this machine has')
     ap.add_argument('--run-one', help=argparse.SUPPRESS)
     args = ap.parse_args(argv[1:])
 
     if args.run_one:
         # The isolated child: one notebook, one interpreter, JSON on stdout.
         status, at, total, detail = run_notebook(
-            args.run_one, root, args.budget)
+            args.run_one, root, args.budget, args.lang)
         print(json.dumps({'status': status, 'at': at, 'total': total,
                           'detail': detail}))
         return 0
@@ -233,7 +294,23 @@ def main(argv):
             continue
         for nb in nbs:
             attempted += 1
-            status, at, total, detail = run_isolated(nb, root, args.budget)
+            used_lang = args.lang
+            status, at, total, detail = run_isolated(
+                nb, root, args.budget, used_lang)
+
+            # A paper whose default backend is absent has told us nothing about
+            # whether it still constructs. These notebooks detect what is
+            # available and then override it with a hardcoded `preferred_lang`,
+            # so the backend is a default rather than a requirement: retry on
+            # one this machine has, and say so. Reporting the first failure
+            # instead would file "no pycuda here" as though it were drift.
+            if status == 'ERROR' and not args.lang and _backend_absent(detail):
+                for alt in [l for l in available_langs(root) if l != 'CUDA_T']:
+                    status, at, total, detail = run_isolated(
+                        nb, root, args.budget, alt)
+                    used_lang = alt
+                    if status != 'ERROR' or not _backend_absent(detail):
+                        break
             tag = {'REACHED_COMPUTE': 'ok  ', 'COMPLETED': 'ok  '}.get(
                 status, 'FAIL')
             where = f"cell {at}/{total}"
@@ -245,7 +322,8 @@ def main(argv):
             # in different directories, and reporting both as the same name
             # makes one look like a duplicate result of the other.
             rel = nb.relative_to(d)
-            print(f"  [{tag}] {label}/{rel}  {where}")
+            on = f"  [{used_lang}]" if used_lang else ""
+            print(f"  [{tag}] {label}/{rel}  {where}{on}")
             if status == 'ERROR':
                 for line in (detail or '').split('||'):
                     print(f"           {line}")

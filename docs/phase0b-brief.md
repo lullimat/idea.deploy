@@ -242,12 +242,18 @@ For each repository, in this order:
    breakage from pre-existing breakage.
 2. **Tag the published state.** The author pushes the tags; propose a scheme and
    let them choose. These are their published artifacts.
-3. **Fix any drift found in step 1.** One is known:
-   `arXiv-2009.12522/arXiv-2009.12522v1/…ipynb` fails with
-   `Missing sympy expression for the pseudo-potential, parameter 'psi_sym'`.
-   Note it is in an **archived v1** directory — an archive edited to work against
-   current code is no longer an archive of anything. Raise that one rather than
-   silently fixing it.
+3. **Fix the drift found in step 1.** Two are known, and neither needed CUDA
+   hardware to find:
+
+   | notebook | failure | kind |
+   |---|---|---|
+   | `arXiv-2009.12522/arXiv-2009.12522v1/…` | `Missing … 'psi_sym'` | idpy API drift |
+   | `arXiv-2105.08772/MesoscopicTolmanLength` | `text.latex.preview` rcParam | matplotlib, removed upstream |
+
+   The first is in an **archived v1** directory — an archive edited to work
+   against current code is no longer an archive of anything. Raise that one
+   rather than silently fixing it. The second is ordinary dependency rot and
+   should just be fixed.
 4. **Adapt to the new packaging**: new import paths, `pip install` in place of
    the `sys.path.append("../../")` cell, and `install.sh` pointing at a tag
    rather than `refs/heads/master`. Add the dependency declaration none of the
@@ -256,9 +262,23 @@ For each repository, in this order:
    `python3 scripts/smoke_papers.py --dir /path/to/repo`. That is the acceptance
    test for the branch — a concrete pass, not a judgement call.
 
-Two repositories select `CUDA_T` and cannot be smoked without pycuda
-(`arXiv-2009.12522`, `arXiv-2105.08772`). The development machine is an M1 Max.
-Write the commands out for the author to run on their two-RTX-5060 machine.
+**The backend is a default, not a requirement.** Two repositories set
+`preferred_lang = CUDA_T`, but every notebook already detects what is available
+and then discards the answer by overriding it. `smoke_papers.py` retries on a
+backend the machine has and reports which one it used, so **no CUDA hardware is
+needed to smoke any paper**. Force one with `--lang OCL_T`.
+
+Both breakages found so far were *behind* that wall: the CUDA failure stopped
+execution before the cell that actually fails. One of them,
+`text.latex.preview`, is a matplotlib rcParam removed upstream and has nothing
+to do with idpy.
+
+**Fix this in the paper repositories as part of the migration.** A hardcoded
+`preferred_lang` in a framework whose central claim is backend portability is
+the wrong default: honour the detection block already present, or read an
+environment variable, so the notebook runs wherever it lands. Running on real
+CUDA hardware remains worth doing before release, but it is a confirmation step
+rather than a prerequisite for finding drift.
 
 ## Checkpoints that need the author
 
@@ -310,7 +330,8 @@ Stop and ask; do not proceed on an assumption.
 3. Tags pushed by the author on all seven paper repositories.
 4. Seven paper branches, each smoking green against the restructured idpy, each
    declaring its dependency, none using `sys.path.append("../../")`.
-5. The two CUDA papers verified on hardware by the author.
+5. The CUDA-preferring papers confirmed on real CUDA hardware by the author —
+   a confirmation step, not the way drift is found.
 6. A coordinated release: idea.deploy merges and tags **`v0.2.0`**, the seven
    paper branches merge, and each pins to `idpy==0.2.0`.
 7. A PR stating plainly what was verified on which hardware, and what was not.
