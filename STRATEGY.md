@@ -307,7 +307,7 @@ No import path changes; nothing in `papers/` is affected.
       manual on the development machines.
 - [x] Rewrite README with a "Statement of Need"
 - [x] `CONTRIBUTING.md`
-- [ ] `CODE_OF_CONDUCT.md`
+- [x] `CODE_OF_CONDUCT.md` — Contributor Covenant 2.1
 - [x] Architecture diagram — `docs/architecture.md`
 
 The blocker was not `pyproject.toml`. **`idpy` could not be imported outside a
