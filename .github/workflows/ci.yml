@@ -93,6 +93,21 @@ jobs:
           print({idpy_langs_human_dict[k]: v for k, v in idpy_langs_sys.items()})
           "
 
+      - name: Consumer surface (papers and collabs still resolve)
+        # Against the frozen fixtures, not the directories: papers/ and collabs/
+        # are almost entirely untracked -- collabs/ is 1 tracked file out of 80 --
+        # so a CI checkout cannot see the consumers at all. The fixtures carry
+        # the surface (counts and module paths only, never a consumer path) so
+        # this is answerable here.
+        #
+        # Both, because they catch different things: a shim that forwards a
+        # module but drops a symbol passes the first and fails the second. That
+        # is the exact failure mode the Phase 0b restructure can introduce, and
+        # the reason these run on every push rather than only during 0b.
+        run: |
+          python scripts/check_consumers.py --check-surface
+          python scripts/check_consumers.py --check-symbols
+
       - name: Core unit tests
         run: python -m idpy.test
 
