@@ -300,16 +300,25 @@ OCaml is treated as a **compiled-kernel backend**, parallel to
 
 No import path changes; nothing in `papers/` is affected.
 
-- [ ] `pyproject.toml` on the **current layout**, with optional dependency
-      extras (`cuda`, `opencl`, `metal`, `physics`, `mpi`)
+- [x] `pyproject.toml` on the **current layout**, with optional dependency
+      extras (`cuda`, `opencl`, `metal`, `physics`, `mpi`, `storage`)
 - [x] GitHub Actions CI — CTypes on Linux and macOS, plus OpenCL on Linux via
       POCL, which also makes the LBM suite runnable there. CUDA and Metal stay
       manual on the development machines.
-- [ ] Rewrite README with a "Statement of Need"
-- [ ] `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`
-- [ ] Architecture diagram
+- [x] Rewrite README with a "Statement of Need"
+- [x] `CONTRIBUTING.md`
+- [ ] `CODE_OF_CONDUCT.md`
+- [x] Architecture diagram — `docs/architecture.md`
 
-**Milestone:** `pip install idpy` works, CI green. **Tag v0.1.0.**
+The blocker was not `pyproject.toml`. **`idpy` could not be imported outside a
+source checkout at all**: it read `.idpy-env`, `py-env/cuda_path_found` and
+`LICENSE` at import time and raised `FileNotFoundError` before any backend was
+consulted. Unnoticed because every existing user works in a checkout — the same
+shape as the LBM suite that ran zero tests and exited 0.
+
+**Milestone: reached** — `pip install idpy` works, verified in a fresh
+virtualenv from a clean clone, CI green on both runners. **Tag v0.1.0 still
+pending**, and it is the prerequisite for 0c's tag-pinning below.
 
 #### Phase 0b — restructure (breaks import paths)
 
@@ -327,14 +336,28 @@ untouched and the shims retire on our schedule. "Update every paper repository"
 is not a requirement of this phase, and treating it as one is what made 0b look
 prohibitive.
 
-**Cheap way to preserve restructurability meanwhile:** the architectural
-invariant already almost holds — as of 2026-08-06 there are exactly **two**
-core→physics imports, both function-local, both in
-`idpy/Utils/IdpySymbolic.py` (lines 1182 and 1240, importing
-`idpy.IdpyStencils.IdpyConvolution`), so `idpy.Utils` already loads cleanly
-without physics. A small CI lint would hold that line for free and keep 0b
-mechanical rather than archaeological. Deferring the restructure is reasonable;
-letting the layering rot while deferring is what would make it expensive.
+**The shim surface is now measured rather than guessed.** `scripts/check_consumers.py`
+freezes what 0b must not break into two committed fixtures — 47 modules and
+**277 (module, symbol) pairs, with zero star imports**. Both are checkable from
+a fresh clone, which matters because the consumers are mostly untracked
+(`collabs/` is 1 tracked file out of 80). Two fixtures rather than one because a
+shim that forwards a module but drops a symbol passes the module check and fails
+the symbol check.
+
+That measurement says 0b is **mechanical, not architectural**: 277 re-exports
+with no star imports, generatable from the fixture rather than hand-written.
+Working brief in `docs/phase0b-brief.md`, including why the shims must use lazy
+`__getattr__` rather than eager re-export.
+
+**Restructurability has been preserved meanwhile:** the architectural invariant
+already almost holds — as of 2026-08-06 there are exactly **two** core→physics
+imports, both function-local, both in `idpy/Utils/IdpySymbolic.py` (lines 1182
+and 1240, importing `idpy.IdpyStencils.IdpyConvolution`), so `idpy.Utils`
+already loads cleanly without physics. `scripts/check_layering.py` now holds
+that line in CI, grandfathering the single `(file, module)` pair those two
+imports collapse to and refusing any new one. Deferring the restructure is
+reasonable; letting the layering rot while deferring is what would have made it
+expensive.
 
 #### Phase 0c — versioning the reproducibility promise
 
@@ -347,15 +370,32 @@ unbounded obligation: every future change must preserve every past notebook,
 forever, against a moving `master`. That, rather than any particular
 restructure, is what makes structural change feel expensive.
 
+- [x] Check that every module and symbol the consumers import still resolves —
+      `scripts/check_consumers.py`, with the surface frozen into
+      `scripts/consumer-surface.txt` and `scripts/consumer-symbols.txt` so it is
+      verifiable from a clone that does not contain the consumers
+- [ ] Tag each of the six paper repositories at its **published** state, before
+      any import rewrite. Five of six currently have **no tags at all**, so
+      there is no reachable published state for them — rewrite `main` and the
+      version a paper cites is findable only by SHA
 - [ ] Pin each paper repository to a **tagged** idea.deploy release, so
       "reproducible" means "works against `v0.2.0`" — checkable — instead of
       "works against whatever master is today", which is not
 - [ ] Periodic (not per-push) smoke job that constructs the simulations from
       each paper notebook and checks they still build
 
-The smoke job is the part that turns the promise into something with teeth: it
-reports that a paper has broken *before a reader finds out*. Periodic rather
-than per-push because these are slow.
+The import check is the cheap 90% and runs anywhere in seconds. The smoke job is
+what turns the promise into something with teeth: it reports that a paper has
+broken *before a reader finds out*, and it catches the class the import check
+cannot — API drift, where the module resolves and the constructor has grown a
+required parameter. Periodic rather than per-push because these are slow.
+
+The import check has already earned its place: it found **three symbols that had
+silently stopped resolving** — `idpy.Utils.IdpyHardware` (moved to
+`idpy.IdpyCode`), `idpy.LBM.Equilibria.Equilibria` (renamed
+`HermiteEquilibria`), and a removed `IdpyUnroll` helper. All six consumers are
+in `collabs/`; no published paper is affected. They are grandfathered, visible
+on every run, and nothing new may join them silently.
 
 Worth recording that the notebooks were checked on 2026-08-06 and are **fine** —
 they pass the parameters `SetupRoot` requires. It was the repository's own
