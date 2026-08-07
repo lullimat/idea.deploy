@@ -430,10 +430,14 @@ def load_surface(path):
 
 def main(argv):
     root = pathlib.Path(__file__).resolve().parent.parent
-    # Running a script puts scripts/ on sys.path, not the repo root, so `import
-    # idpy` would fail for reasons that have nothing to do with the consumers.
-    # Every module would report ModuleNotFoundError and the run would look like
-    # a total breakage.
+    # Kept for the tutorials/ and collabs/ helper modules, which are read from
+    # the repository root. It no longer makes idpy importable: as of Phase 0b
+    # the package lives under src/, so `import idpy` resolves to the installed
+    # distribution or to nothing at all. That is deliberate -- this script
+    # checks what a consumer would get, and a consumer gets the installed
+    # package. Run it in an environment where idpy is installed; otherwise
+    # every module reports ModuleNotFoundError and the run looks like a total
+    # breakage rather than a missing install.
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     args = [a for a in argv[1:] if not a.startswith('-')]

@@ -14,4 +14,11 @@
 docs/planning/
 docs/planning-safe/
 
+# Build artefacts. setuptools writes src/idpy.egg-info/ on every editable
+# install; it is generated, machine-specific and was never meant to be tracked.
+*.egg-info/
+build/
+dist/
+.venv/
+
 !.gitignore
