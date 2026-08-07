@@ -127,12 +127,15 @@ LANG_TOKENS = ('CUDA_T', 'OCL_T', 'METAL_T', 'CTYPES_T')
 # were the paper's fault. A retry that quietly fails to retry is worse than no
 # retry, because the result still looks like a measurement.
 #
-# `\w+_lang` and not `\w*lang`: the detection block these notebooks already
+# `\w*_lang` and not `\w*lang`: the detection block these notebooks already
 # carry assigns bare `lang = CUDA_T` inside its own if/elif arms, and
 # rewriting those would corrupt the chain rather than retarget it. The
-# trailing `lang = preferred_lang` is what actually decides the backend.
+# trailing `lang = preferred_lang` is what actually decides the backend. The
+# underscore is required and a prefix is not: one repository names the
+# variable plain `_lang`, which `\w+_lang` would have silently missed --
+# the same class of near-miss as matching only `preferred_lang` did.
 _PREFERRED = re.compile(
-    r'(\b\w+_lang\b[^=\n]*=\s*)(' + '|'.join(LANG_TOKENS) + r')\b')
+    r'(\b\w*_lang\b[^=\n]*=\s*)(' + '|'.join(LANG_TOKENS) + r')\b')
 
 
 def available_langs(root):
@@ -304,9 +307,32 @@ def run_isolated(path, root, budget, lang=None):
             payload.get('detail'))
 
 
+# An archived snapshot of an earlier arXiv version, e.g. arXiv-2009.12522v1/
+# sitting inside arXiv-2009.12522/.
+_ARCHIVED_DIR = re.compile(r'^arXiv-\d+\.\d+v\d+$')
+
+
 def notebooks_in(d):
-    return sorted(p for p in pathlib.Path(d).rglob('*.ipynb')
-                  if '.git' not in p.parts and '.ipynb_checkpoints' not in p.parts)
+    """
+    (notebooks to smoke, archived notebooks skipped).
+
+    Archived version directories are not smoked, and the reason is the point
+    of having them: an archive edited to work against current code is no
+    longer an archive of anything. They record what was submitted, so drift
+    inside one is expected rather than actionable, and reporting it every run
+    trains the reader to ignore the output.
+
+    They are returned rather than dropped. A check that silently narrows what
+    it looks at reads as "everything passed" when it means "I stopped
+    looking", so the caller prints what was skipped.
+    """
+    live, archived = [], []
+    for p in sorted(pathlib.Path(d).rglob('*.ipynb')):
+        if '.git' in p.parts or '.ipynb_checkpoints' in p.parts:
+            continue
+        (archived if any(_ARCHIVED_DIR.match(part) for part in p.parts)
+         else live).append(p)
+    return live, archived
 
 
 def main(argv):
@@ -324,6 +350,9 @@ def main(argv):
                     help='force the backend by rewriting preferred_lang; '
                          'without it, a paper whose default backend is absent '
                          'is retried on one this machine has')
+    ap.add_argument('--archived', action='store_true',
+                    help='also smoke archived arXiv version directories, '
+                         'which are skipped by default')
     ap.add_argument('--run-one', help=argparse.SUPPRESS)
     args = ap.parse_args(argv[1:])
 
@@ -372,9 +401,12 @@ def main(argv):
         print("nothing was attempted, which is not a pass")
         return 1
 
-    failures, attempted = [], 0
+    failures, attempted, skipped = [], 0, []
     for label, d in targets:
-        nbs = notebooks_in(d)
+        nbs, archived = notebooks_in(d)
+        if args.archived:
+            nbs, archived = sorted(nbs + archived), []
+        skipped += [(label, p.relative_to(d)) for p in archived]
         if not nbs:
             print(f"  [no notebook] {label}")
             continue
@@ -421,6 +453,16 @@ def main(argv):
         subprocess.run(['rm', '-rf', tmp])
 
     print()
+    # Say what was not looked at, every run. A narrowed scope that goes
+    # unstated reads as a wider pass than it is.
+    if skipped:
+        print(f"{len(skipped)} archived notebook(s) skipped "
+              f"(--archived to include):")
+        for label, rel in skipped:
+            print(f"  {label}/{rel}")
+        print("An archive edited to work against current code is no longer an "
+              "archive; drift inside one is expected, not actionable.\n")
+
     if failures:
         print(f"{len(failures)} of {attempted} notebook(s) do not construct.\n"
               "A paper that does not construct cannot be pinned to a release "
@@ -429,6 +471,9 @@ def main(argv):
         return 1
     print(f"all {attempted} notebook(s) construct against this tree.")
     print("Construction only -- results are not reproduced here, by design.")
+    print("This is a prefix check: a notebook that reaches compute is not "
+          "executed past that cell,\nso later cells are unverified. See "
+          "CONTRIBUTING.md.")
     return 0
 
 
