@@ -1,0 +1,55 @@
+# Consumer surface: idpy modules imported by papers/, collabs/ and
+# tutorials/, frozen from a tree where those checkouts are present.
+# Regenerate with: python3 scripts/check_consumers.py --freeze
+# Verify anywhere with: python3 scripts/check_consumers.py --check-surface
+#
+# Phase 0b must keep every one of these importable, via shims if the
+# module has moved. The counts say which breakages would hurt most.
+
+idpy	10
+idpy.CTypes.CTypes	4
+idpy.CUDA.CUDA	33
+idpy.IdpyCode	275
+idpy.IdpyCode.IdpyCode	73
+idpy.IdpyCode.IdpySims	40
+idpy.IdpyCode.IdpyThread	29
+idpy.IdpyCode.IdpyUnroll	24
+idpy.IdpyStencils.IdpyConvolution	13
+idpy.IdpyStencils.IdpyStencils	130
+idpy.LBM.Collisions	8
+idpy.LBM.DQ	8
+idpy.LBM.Equilibria	11
+idpy.LBM.Fluctuations	1
+idpy.LBM.Forcings	9
+idpy.LBM.IDShanChenForce	2
+idpy.LBM.LBM	138
+idpy.LBM.LBMKernels	6
+idpy.LBM.LBMKernelsMeta	4
+idpy.LBM.LBMLoopChecks	1
+idpy.LBM.MultiPhase	26
+idpy.LBM.MultiPhaseKernels	4
+idpy.LBM.MultiPhaseKernelsMeta	7
+idpy.LBM.MultiPhaseLoopChecks	58
+idpy.LBM.SCFInterfaceTuningStencil	3
+idpy.LBM.SCFStencils	212
+idpy.LBM.SCThermo	189
+idpy.OpenCL.OpenCL	33
+idpy.PRNGS.CRNGS	16
+idpy.SpinNetworks.Evaluations	6
+idpy.SpinNetworks.Honeycombs	6
+idpy.SpinNetworks.PerezNouiProjector	5
+idpy.Utils	4
+idpy.Utils.CTypesTypes	1
+idpy.Utils.Combinatorics	66
+idpy.Utils.CustomTypes	36
+idpy.Utils.DictHandle	15
+idpy.Utils.Geometry	45
+idpy.Utils.Graphs	1
+idpy.Utils.Hermite	31
+idpy.Utils.IdpySymbolic	117
+idpy.Utils.ManageData	167
+idpy.Utils.NpTypes	52
+idpy.Utils.Plots	84
+idpy.Utils.Sequences	64
+idpy.Utils.SimpleTiming	95
+idpy.Utils.Statements	56

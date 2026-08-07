@@ -128,5 +128,5 @@ back without caring why.
 | physics | `LBM`, `IdpyStencils`, `SpinNetworks`, `PRNGS` |
 
 Enforced by `scripts/check_layering.py`, which runs as CI's first step — static
-analysis over import statements, so it needs no environment and no GPU. Two
-violations are grandfathered in a `KNOWN` allowlist; nothing new may be added.
+analysis over import statements, so it needs no environment and no GPU. One
+violation is grandfathered in a `KNOWN` allowlist; nothing new may be added.

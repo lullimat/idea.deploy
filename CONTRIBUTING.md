@@ -55,7 +55,7 @@ hardware. If you change anything touching those paths, say so in the PR and
 state whether it was run on real hardware or is codegen-only.
 
 The layering lint (`scripts/check_layering.py`) runs first, before dependencies,
-and enforces that `idpy` core never imports `idpy` physics. Two violations are
+and enforces that `idpy` core never imports `idpy` physics. One violation is
 grandfathered in a `KNOWN` allowlist; nothing new may be added.
 
 ## Conventions that exist for a reason
