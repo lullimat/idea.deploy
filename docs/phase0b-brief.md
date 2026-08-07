@@ -1,5 +1,17 @@
 # Phase 0b working brief — the `src/` restructure
 
+> **Status: active, and dated by design.** This describes a transition, not a
+> steady state, so it stops being true the moment the transition completes.
+>
+> **When Phase 0b merges, replace this file with a retrospective** — what was
+> actually done, what the plan below got wrong, and what that cost. Do not leave
+> it standing as a description of planned work; `docs/residency-probes.md` is the
+> model, and it keeps its falsified conclusions visible on purpose.
+>
+> The rules here that are *not* transitional — the consumer-surface checks and
+> the aggregates-never-paths rule — live in `CONTRIBUTING.md`, which is where
+> they survive this file's deletion.
+
 A working brief for whoever implements Phase 0b, human or agent. It exists as a
 repository document rather than a handover message so that it arrives with the
 clone, stays under version control, and can be corrected when it turns out to be
@@ -42,14 +54,13 @@ against it. Changing import paths under a running simulation is the failure this
 separation exists to prevent. Your clone contains none of that material, because
 it is all gitignored. Keep it that way.
 
-**Publish aggregates, never paths.** This is a public repository and its history
-is permanent — a later cleanup commit does not unpublish anything, since forks,
-existing clones and cached views keep whatever was pushed. The consumer
-directories hold unpublished research and named collaborations, so anything that
-lands in a commit, a fixture or a PR body must be **counts and module paths
-only**. Never a consumer file path, notebook name or collaboration name. Both
-fixtures are already built this way; keep any output you commit to the same
-standard, and be careful when quoting tool output that includes paths.
+**Publish aggregates, never paths.** Counts and module paths yes; consumer file
+paths, notebook names and collaboration names never. This repository's history is
+public and permanent, and the consumer directories hold unpublished research. Be
+careful when quoting tool output — `check_consumers.py`'s failure branch prints
+`used by: <path>` by design, and Phase 0b is the work that will trigger it. The
+rule is stated in full in `CONTRIBUTING.md`, which is where it survives this
+file's deletion.
 
 ## The shim surface is already measured
 

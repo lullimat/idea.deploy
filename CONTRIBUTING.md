@@ -58,6 +58,44 @@ The layering lint (`scripts/check_layering.py`) runs first, before dependencies,
 and enforces that `idpy` core never imports `idpy` physics. One violation is
 grandfathered in a `KNOWN` allowlist; nothing new may be added.
 
+## The consumer surface
+
+`papers/` and `collabs/` import `idpy` by module path, and for a long time
+nothing checked that those paths still resolved. Two things make that dangerous:
+a rename breaks every consumer at once, and **the consumers are mostly
+untracked** — `collabs/` is 1 tracked file out of 80, `papers/` 2 out of 19,
+because the `arXiv-*` checkouts are separate gitignored repositories. A fresh
+clone cannot see what it must not break, and neither can CI.
+
+So the surface is frozen into two committed fixtures and checked anywhere:
+
+```bash
+python3 scripts/check_consumers.py --check-surface   # 47 modules
+python3 scripts/check_consumers.py --check-symbols   # 277 (module, symbol) pairs
+```
+
+**Run both.** They catch different things: a shim that forwards the module but
+drops a symbol passes the first and fails the second. That is how three
+pre-existing breakages went unnoticed; they are grandfathered with a leading `!`
+in `scripts/consumer-symbols.txt`, on the same principle as the layering lint's
+`KNOWN` allowlist — visible every run, failing none, and nothing new may join
+them silently.
+
+**Do not regenerate a fixture unless `papers/` and `collabs/` are populated.**
+`--freeze` and `--freeze-symbols` refuse an *empty* surface but cannot detect a
+*partial* one, so running them in a fresh clone would silently shrink the thing
+they protect.
+
+**Publish aggregates, never paths.** Those directories hold unpublished research
+and named collaborations, and this repository's history is public and permanent
+— a later cleanup commit unpublishes nothing, since forks, existing clones and
+cached views keep whatever was pushed. Anything entering a commit, a fixture or
+a PR body must be **counts and module paths only**: never a consumer file path,
+notebook name or collaboration name. Both fixtures are built this way. Take care
+when quoting tool output, which is not: the failure branch of
+`check_consumers.py` prints `used by: <path>` by design, because whoever is
+fixing a break needs to know who broke.
+
 ## Conventions that exist for a reason
 
 **Branch per piece of work, named for what it does.** PRs stay scoped to one
@@ -97,10 +135,18 @@ different backends. Declare `constants_types={'X': 'FType'}` or pass
 ## Design documents
 
 - `STRATEGY.md` — roadmap, phases, positioning
+- `docs/architecture.md` — the three diagrams that are not obvious from the
+  source tree: four lowerings of one kernel, the three insertion points, and the
+  residency layer
 - `docs/residency-probes.md` — the findings record for the residency layer,
   including several conclusions that were recorded, falsified, and corrected.
   Kept that way on purpose: the wrong turns show which class of error produced
   them.
+- `docs/phase0b-brief.md` — the working brief for the `src/` restructure.
+  **Dated by design**: it describes a transition, so it is replaced by a
+  retrospective when Phase 0b merges rather than left standing as a description
+  of planned work. Anything in it that outlives the restructure belongs here
+  instead.
 
 Read the relevant section before re-litigating a decision. Several have been
 settled twice because the first answer was wrong, and the reasoning is written
