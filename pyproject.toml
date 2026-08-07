@@ -1,0 +1,81 @@
+# Packaging for idpy, on the CURRENT layout.
+#
+# Deliberately not the src/ restructure. STRATEGY.md Phase 0 originally bundled
+# "make it installable" with "move everything into src/idpy/{core,physics}", and
+# splitting them was the point of Phase 0a: installability changes no import
+# paths, so nothing in papers/ is affected, while the move changes every one.
+# JOSS asks for installability, documentation, tests and a contribution guide --
+# none of which require the move.
+#
+# The substantive prerequisite was not this file. idpy read three
+# repository-root files at import time (.idpy-env, py-env/cuda_path_found,
+# LICENSE), so `import idpy` failed anywhere but a source checkout. Those are
+# optional now; see idpy/IdpyCode/__init__.py.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idpy"
+version = "0.1.0"
+description = "Transparent, portable GPU computing for physics: one kernel source, lowered to CUDA, OpenCL, Metal and CPU"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Matteo Lulli", email = "matteo.lulli@gmail.com" }]
+keywords = [
+    "gpu", "cuda", "opencl", "metal", "lattice-boltzmann",
+    "computational-physics", "reproducibility", "heterogeneous-computing",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+# The floor is what an import of idpy plus the CPU backend actually reaches,
+# derived by walking every import in idpy/ and removing the standard library and
+# the GPU bindings. The bindings are deliberately NOT here: every one of them is
+# guarded by IsModuleThere and reports its backend as absent when missing, so a
+# default install works on any machine and the extras add hardware support.
+dependencies = [
+    "numpy",
+    "scipy",
+    "sympy",
+    "matplotlib",
+    "h5py",
+    "psutil",
+    "py-cpuinfo",
+    "dill",
+    "multiprocess",
+    "ipython",
+]
+
+[project.optional-dependencies]
+cuda = ["pycuda"]
+opencl = ["pyopencl"]
+# pymetallic is installed from a pinned revision with an idpy patch by
+# scripts/install-pymetallic.sh, not from an index, so it is named here for
+# documentation rather than resolution.
+metal = []
+physics = ["scikit-learn", "networkx", "einsteinpy"]
+mpi = ["mpi4py"]
+storage = ["kvikio-cu12"]      # GPUDirect on CUDA; see docs/residency-probes.md
+
+[project.urls]
+Homepage = "https://github.com/lullimat/idea.deploy"
+Repository = "https://github.com/lullimat/idea.deploy"
+
+[tool.setuptools.packages.find]
+# Explicit rather than automatic: the repository root also holds papers/,
+# collabs/, tutorials/ and py-env/, none of which are importable packages.
+include = ["idpy*"]
+exclude = ["idpy.OCaml*"]
+
+[tool.setuptools.package-data]
+"idpy" = ["**/*.cl", "**/*.cu", "**/*.metal", "**/*.swift"]

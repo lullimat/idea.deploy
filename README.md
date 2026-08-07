@@ -14,6 +14,60 @@ git pull
 
 The repository will keep evolving (hopefully for the best!) as time passes. The main spirit is to make public what has been used to obtain the numerical results published both on the public archive arxiv.org and on peer-reviewed journals. The software and the other contents will be steadily updated, so that the main criteria is not to provide the "definitive" code version but the code version that actually made the published results possible. As the code-base grows and evolves backwards compatibility will be assured.
 
+## Statement of Need
+
+Computational physicists who want to use GPUs face a choice between frameworks
+that hide the computation and frameworks that lock them to one vendor. JAX and
+PyTorch compile through opaque backends and do not target Metal compute; CuPy
+and Numba are CUDA-only; Taichi introduces its own language. For a researcher
+whose contribution *is* the kernel — a collision operator, a pressure tensor, a
+spin-network contraction — none of these keep the physics visible, and all of
+them tie a published result to the hardware that produced it.
+
+**idpy** takes the opposite position. A kernel is written once in a small
+metalanguage and lowered to CUDA, OpenCL, Metal or plain C, with the generated
+source available for inspection at every step. There is no hidden JIT and no
+graph rewriting: what executes is what you can read. Device memory, kernel
+dispatch and synchronization are reached through one interface — the `Tenet` —
+so the same simulation runs on an NVIDIA cluster, an Apple laptop or a CPU-only
+machine without editing the physics.
+
+Two consequences motivate the design:
+
+- **Reproducibility as a workflow, not a promise.** Each published paper has a
+  repository of notebooks that runs against this framework, so a result can be
+  re-derived rather than described. Cross-backend agreement is a first-class
+  test rather than an aspiration.
+- **Access.** Unified-memory commodity hardware — Apple Silicon in particular —
+  offers GPU compute at a price and power budget available to researchers
+  without cluster allocations. That only helps if the software runs there, which
+  is why Metal is a first-class backend rather than a port.
+
+The framework is in research use: it produced the numerical results in the
+peer-reviewed papers listed below, across lattice Boltzmann multiphase flow,
+lattice pressure tensors, and spin-network evaluation.
+
+### Architecture
+
+Three diagrams — the lowering from one kernel source to four backends, the three
+points at which code enters a build, and the residency layer where the backend
+differences stop mattering — are in
+[`docs/architecture.md`](docs/architecture.md).
+
+### Installation for use as a library
+
+```bash
+pip install idpy                 # CPU (CTypes) backend, works anywhere
+pip install idpy[cuda]           # + PyCUDA
+pip install idpy[opencl]         # + PyOpenCL
+```
+
+GPU bindings are optional by design: each is probed at import and its backend
+reports itself absent when missing, so a default install runs on any machine.
+Metal support additionally needs a Swift toolchain — see the Apple Silicon
+section below. For reproducing a published paper, prefer the full environment
+built by `idpy-init.sh`, described next.
+
 For reproducing the papers results please look below in the **Installation** Section and in **Typical usage for reproducing the results reported in a paper** Subsection.
 
 ## Available Peer-Reviewed Papers
