@@ -36,12 +36,20 @@ way, so the worktree's shared-history advantage buys nothing, and a fully
 separate `.git` cannot disturb the primary repository's state at all.
 
 **Never touch the author's primary tree.** Under `papers/` there are twelve
-separate gitignored git checkouts, and every one of them is dirty — 1 to 23
-uncommitted modified files of unpublished research, with no backup. `collabs/`
-is 1 tracked file out of 80, and the author runs live simulations there.
-Changing import paths under a running simulation is the failure this separation
-exists to prevent. Your clone contains none of that material, because it is all
-gitignored. Keep it that way.
+separate gitignored git checkouts carrying uncommitted work that exists nowhere
+else, and `collabs/` is 1 tracked file out of 80, with live simulations running
+against it. Changing import paths under a running simulation is the failure this
+separation exists to prevent. Your clone contains none of that material, because
+it is all gitignored. Keep it that way.
+
+**Publish aggregates, never paths.** This is a public repository and its history
+is permanent — a later cleanup commit does not unpublish anything, since forks,
+existing clones and cached views keep whatever was pushed. The consumer
+directories hold unpublished research and named collaborations, so anything that
+lands in a commit, a fixture or a PR body must be **counts and module paths
+only**. Never a consumer file path, notebook name or collaboration name. Both
+fixtures are already built this way; keep any output you commit to the same
+standard, and be careful when quoting tool output that includes paths.
 
 ## The shim surface is already measured
 
