@@ -170,9 +170,50 @@ def plan():
     return rows
 
 
-def render(old, new, symbols):
-    """The text of one shim module."""
+def render(old, new, is_package, symbols):
+    """
+    The text of one shim module.
+
+    Packages and leaf modules get different __getattr__ rules, and the
+    difference is not cosmetic.
+
+    A *package* shim answers only the names the fixture records. It has real
+    submodules underneath it, and `from pkg import sub` consults __getattr__
+    before the import system: a package shim that answered every name would
+    return its own object instead of the module, silently. It would also make
+    the result depend on import order -- getattr(idpy.core.utils, 'ManageData')
+    succeeds or fails according to whether something imported that submodule
+    first, so the same code would sometimes get the shim (with its warning) and
+    sometimes the real module (without).
+
+    A *leaf* shim forwards anything its target has. Nothing lives underneath
+    it, so there is no submodule to shadow and no ordering to depend on, and
+    strictness there buys nothing while costing real compatibility: the
+    fixtures record `from idpy... import name`, and by design do not cover
+    dotted access like `IdpyMemory.OnDevice` -- which is how
+    arXiv-2112.02574 reaches OnDevice, and which a strict leaf shim broke.
+
+    _MOVED stays on both: for a package it is the rule, for a leaf it is the
+    subset the fixtures actively verify.
+    """
     listed = '\n'.join(f"    {s!r}," for s in symbols) or "    # nothing recorded"
+    if is_package:
+        lookup = '''    # Strict, because this shim is a package. See __getattr__ in
+    # scripts/gen_shims.py for why answering every name would shadow the real
+    # submodules underneath, silently and with nothing raised to notice.
+    if name not in _MOVED:
+        raise AttributeError(f"module {_OLD!r} has no attribute {name!r}")
+    return getattr(_target, name)'''
+    else:
+        lookup = '''    # Permissive, because this shim is a leaf: nothing lives underneath it, so
+    # there is no submodule to shadow. The fixtures cover `from ... import
+    # name` and by design not dotted access, so forwarding only the recorded
+    # names would break `IdpyMemory.OnDevice` and everything shaped like it.
+    try:
+        return getattr(_target, name)
+    except AttributeError:
+        raise AttributeError(
+            f"module {_OLD!r} has no attribute {name!r}") from None'''
     return f'''{BANNER}"""
 {old} -> {new}
 
@@ -186,7 +227,7 @@ from importlib import import_module as _import_module
 _OLD = {old!r}
 _NEW = {new!r}
 
-# Exactly the names the frozen fixture records at this path, and no others.
+# What scripts/consumer-symbols.txt records at this path.
 _MOVED = frozenset((
 {listed}
 ))
@@ -227,17 +268,11 @@ _target = _import_module(_NEW)
 
 
 def __getattr__(name):
-    # Raising for unknown names is what keeps real submodules reachable:
-    # `from pkg import sub` consults __getattr__ first, so a shim that answers
-    # everything returns its own object instead of the module, silently and
-    # with no error to notice.
-    if name not in _MOVED:
-        raise AttributeError(f"module {{_OLD!r}} has no attribute {{name!r}}")
-    return getattr(_target, name)
+{lookup}
 
 
 def __dir__():
-    return sorted(_MOVED)
+    return sorted(set(_MOVED) | set(dir(_target)))
 '''
 
 
@@ -257,7 +292,7 @@ def main(argv):
     stale = []
     for old, new, is_package, symbols in rows:
         path = paths_for(old, is_package)
-        text = render(old, new, symbols)
+        text = render(old, new, is_package, symbols)
         if args.check:
             if not path.is_file() or path.read_text() != text:
                 stale.append(path.relative_to(REPO))

@@ -264,6 +264,12 @@ then
     echo "Pip installing requirements"
     pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
     pip install -r ${VENV_ROOT}/requirements.txt ${PIP_SERVER_OPTION}
+    ## Install idpy itself. Required as of Phase 0b: the package moved to
+    ## src/idpy, so the repository root is no longer importable and this
+    ## script's own test step -- along with every notebook run from the
+    ## checkout -- would fail at `import idpy` without it. Editable, because
+    ## this environment is for developing the tree it was built from.
+    pip install -e . ${PIP_SERVER_OPTION}
     ## Install pycuda if cuda is found
     if ((CUDA_F))
     then
@@ -312,9 +318,11 @@ then
 fi
 
 echo
-echo "Running idpy/test.py to check the installation"
+echo "Running the idpy.test suite to check the installation"
 
-TEST_RES=$(python -m unittest -v idpy/test.py 1>${IDPY_TEST_STDOUT} 2>${IDPY_TEST_STDERR} && echo 1 || echo 0)
+## Dotted module name, not a path: as of Phase 0b the package lives at
+## src/idpy and is reached through the install above, not through the cwd.
+TEST_RES=$(python -m unittest -v idpy.test 1>${IDPY_TEST_STDOUT} 2>${IDPY_TEST_STDERR} && echo 1 || echo 0)
 echo "Python tests have..."
 if((TEST_RES == 1))
 then

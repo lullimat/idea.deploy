@@ -12,7 +12,7 @@ from importlib import import_module as _import_module
 _OLD = 'idpy.Utils.Statements'
 _NEW = 'idpy.core.utils.Statements'
 
-# Exactly the names the frozen fixture records at this path, and no others.
+# What scripts/consumer-symbols.txt records at this path.
 _MOVED = frozenset((
     'AllTrue',
     'OneTrue',
@@ -54,14 +54,16 @@ _target = _import_module(_NEW)
 
 
 def __getattr__(name):
-    # Raising for unknown names is what keeps real submodules reachable:
-    # `from pkg import sub` consults __getattr__ first, so a shim that answers
-    # everything returns its own object instead of the module, silently and
-    # with no error to notice.
-    if name not in _MOVED:
-        raise AttributeError(f"module {_OLD!r} has no attribute {name!r}")
-    return getattr(_target, name)
+    # Permissive, because this shim is a leaf: nothing lives underneath it, so
+    # there is no submodule to shadow. The fixtures cover `from ... import
+    # name` and by design not dotted access, so forwarding only the recorded
+    # names would break `IdpyMemory.OnDevice` and everything shaped like it.
+    try:
+        return getattr(_target, name)
+    except AttributeError:
+        raise AttributeError(
+            f"module {_OLD!r} has no attribute {name!r}") from None
 
 
 def __dir__():
-    return sorted(_MOVED)
+    return sorted(set(_MOVED) | set(dir(_target)))

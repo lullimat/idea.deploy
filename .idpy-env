@@ -78,6 +78,7 @@ case "${UNAME_OUT}" in
     *)          IDEP_OS="UNKNOWN:${UNAME_OUT}"
 esac
 
-IDPY=${PWD}/idpy/
+# Phase 0b: the package moved to src/idpy/.
+IDPY=${PWD}/src/idpy/
 IDPY_TEST_STDOUT=${IDPY}/idpy_tests_stdout
 IDPY_TEST_STDERR=${IDPY}/idpy_tests_stderr
