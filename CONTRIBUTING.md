@@ -98,6 +98,46 @@ when quoting tool output, which is not: the failure branch of
 `check_consumers.py` prints `used by: <path>` by design, because whoever is
 fixing a break needs to know who broke.
 
+## Do the paper notebooks still work?
+
+Import resolution is the fast 90%, and it is not enough. It cannot catch API
+drift -- where the module resolves, the symbol exists, and the constructor has
+grown a required parameter since the notebook was written. That is how
+`Missing 'tau'` sat in `idpy/LBM/test.py` for years while the suite looked green.
+
+```bash
+python3 scripts/smoke_papers.py --list          # the inventory, from papers/idpy-papers.py
+python3 scripts/smoke_papers.py                 # clone all, smoke all
+python3 scripts/smoke_papers.py arXiv-2505.23647
+```
+
+Each notebook is executed cell by cell until it errors or a cell exceeds a
+wall-clock budget. **Reaching compute is the successful outcome** -- this tests
+that the objects can be built, not that the results reproduce. Reproducing them
+is hours of GPU time and belongs to the reader.
+
+Two things it gets right that are easy to get wrong:
+
+- **The inventory comes from `papers/idpy-papers.py`, not from `papers/` on
+  disk.** They differ: one development machine has six of the seven checked out.
+- **Each notebook runs in its own interpreter.** Several paper repositories
+  carry local modules with the same names (`TolmanSimulations.py`,
+  `LBM_proxy.py`) and different contents. In one process, `sys.modules` caches
+  whichever loaded first and every later paper silently gets another paper's
+  code -- which surfaces as an `ImportError` naming a different repository's
+  file, and reads exactly like drift in the paper under test.
+
+A paper whose default backend is absent is **retried on one this machine has**,
+and the backend used is reported in the result line. These notebooks detect
+what is available and then discard the answer with a hardcoded `preferred_lang`,
+so the backend is a default, not a requirement. Force one with `--lang OCL_T`.
+
+This matters more than convenience: a paper that stops at "no pycuda here" has
+told you nothing about whether it constructs, and hides everything after that
+cell. Both breakages found so far were behind that wall -- one of them
+`text.latex.preview`, a matplotlib rcParam removed upstream, which has nothing
+to do with idpy at all.
+
 ## Conventions that exist for a reason
 
 **Branch per piece of work, named for what it does.** PRs stay scoped to one

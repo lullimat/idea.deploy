@@ -374,10 +374,17 @@ restructure, is what makes structural change feel expensive.
       `scripts/check_consumers.py`, with the surface frozen into
       `scripts/consumer-surface.txt` and `scripts/consumer-symbols.txt` so it is
       verifiable from a clone that does not contain the consumers
-- [ ] Tag each of the six paper repositories at its **published** state, before
-      any import rewrite. Five of six currently have **no tags at all**, so
-      there is no reachable published state for them — rewrite `main` and the
-      version a paper cites is findable only by SHA
+- [x] Smoke check that the paper notebooks still **construct** —
+      `scripts/smoke_papers.py`, which executes each notebook cell by cell until
+      it errors or reaches real compute. This catches what the import check
+      cannot: API drift, where the module resolves and the constructor has grown
+      a required parameter. It found one, in an archived v1 notebook
+- [ ] Tag each of the **seven** paper repositories at its published state,
+      before any import rewrite. Five of seven currently have **no tags at
+      all**, so there is no reachable published state for them — rewrite `main`
+      and the version a paper cites is findable only by SHA. The inventory comes
+      from `papers/idpy-papers.py`, not from what happens to be cloned on a
+      development machine: a survey of one machine found six
 - [ ] Pin each paper repository to a **tagged** idea.deploy release, so
       "reproducible" means "works against `v0.2.0`" — checkable — instead of
       "works against whatever master is today", which is not
