@@ -96,6 +96,38 @@ when quoting tool output, which is not: the failure branch of
 `check_consumers.py` prints `used by: <path>` by design, because whoever is
 fixing a break needs to know who broke.
 
+## Do the paper notebooks still work?
+
+Import resolution is the fast 90%, and it is not enough. It cannot catch API
+drift -- where the module resolves, the symbol exists, and the constructor has
+grown a required parameter since the notebook was written. That is how
+`Missing 'tau'` sat in `idpy/LBM/test.py` for years while the suite looked green.
+
+```bash
+python3 scripts/smoke_papers.py --list          # the inventory, from papers/idpy-papers.py
+python3 scripts/smoke_papers.py                 # clone all, smoke all
+python3 scripts/smoke_papers.py arXiv-2505.23647
+```
+
+Each notebook is executed cell by cell until it errors or a cell exceeds a
+wall-clock budget. **Reaching compute is the successful outcome** -- this tests
+that the objects can be built, not that the results reproduce. Reproducing them
+is hours of GPU time and belongs to the reader.
+
+Two things it gets right that are easy to get wrong:
+
+- **The inventory comes from `papers/idpy-papers.py`, not from `papers/` on
+  disk.** They differ: one development machine has six of the seven checked out.
+- **Each notebook runs in its own interpreter.** Several paper repositories
+  carry local modules with the same names (`TolmanSimulations.py`,
+  `LBM_proxy.py`) and different contents. In one process, `sys.modules` caches
+  whichever loaded first and every later paper silently gets another paper's
+  code -- which surfaces as an `ImportError` naming a different repository's
+  file, and reads exactly like drift in the paper under test.
+
+Papers that select `CUDA_T` cannot be smoked without pycuda; say so rather than
+recording them as failures.
+
 ## Conventions that exist for a reason
 
 **Branch per piece of work, named for what it does.** PRs stay scoped to one

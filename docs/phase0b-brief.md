@@ -136,8 +136,8 @@ first access, which has no cycle.
 Emit a `DeprecationWarning` naming the new path. **Do not remove the old paths in
 this phase.**
 
-Shims are what make this tractable: with them, the six paper repositories need
-no changes and nothing merges in lockstep. Without them, six external repos must
+Shims are what make this tractable: with them, the seven paper repositories need
+no changes and nothing merges in lockstep. Without them, seven external repos must
 branch and merge simultaneously with this one, and nothing can land until
 everything is verified at once. With shims the papers become the *acceptance
 test for the shims*, which is the job you actually want them doing.
@@ -147,25 +147,28 @@ one is a commit to fix before continuing, not after.
 
 ## Tag the paper repositories before anything is rewritten
 
-Six distinct repositories, twelve checkout directories:
+Seven repositories, per `papers/idpy-papers.py` -- which is the inventory,
+not whatever is cloned on a development machine. A survey of one machine
+found six, because `arXiv-2112.02574` was not checked out there:
 
 | repo | also cloned as |
 |---|---|
 | `lullimat/arXiv-2009.12522` | `doi-10.1103-PhysRevE.103.063309`, `*_safe` |
 | `lullimat/arXiv-2105.08772` | `doi-10.1103-PhysRevE.105.015301`, `*-safe` |
+| `lullimat/arXiv-2112.02574` | — (not cloned on the development machine) |
 | `lullimat/arXiv-2212.07848` | `*-safe` |
 | `lullimat/arXiv-2310.03632` | `*-safe` |
-| `lullimat/arXiv-2503.05743` | — |
-| `lullimat/arXiv-2505.23647` | — (**the only one with any tags**) |
+| `lullimat/arXiv-2503.05743` | — (**tagged**) |
+| `lullimat/arXiv-2505.23647` | — (**tagged**) |
 
-**Five of six have no tags at all.** There is therefore no reachable published
+**Five of seven have no tags at all.** There is therefore no reachable published
 state for them: rewrite imports on `main`/`master` and the version a paper cites
 becomes findable only by commit SHA. This is Phase 0c work pulled forward,
 because 0b is what makes it urgent.
 
 ## Verify against fresh paper clones
 
-Clone each of the six into your own scratch directory — never the author's
+Clone each of the seven into your own scratch directory — never the author's
 `papers/`. Point `check_consumers.py` at your clones. Then pick two or three
 notebooks that actually *construct* a simulation and run them far enough to reach
 a first kernel dispatch.
@@ -218,10 +221,11 @@ Stop and ask; do not proceed on an assumption:
 
 ## Done looks like
 
-1. Tags pushed by the author on all six paper repositories.
+1. Tags pushed by the author on all seven paper repositories.
 2. `src/idpy/{core,physics}` in place, generated shims for every old path.
 3. `--check-surface`, `--check-symbols` and `check_layering.py` all green, CI
    green, the three grandfathered breakages still marked and still reported.
-4. Fresh clones of all six paper repositories importing successfully, with at
-   least two notebooks run to first dispatch.
+4. Fresh clones of all seven paper repositories importing successfully, and
+   `scripts/smoke_papers.py` green on every notebook that this machine can
+   reach (two select CUDA and need the other machine).
 5. A PR stating plainly what was verified on which hardware, and what was not.
