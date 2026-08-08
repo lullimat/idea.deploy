@@ -72,8 +72,13 @@ Homepage = "https://github.com/lullimat/idea.deploy"
 Repository = "https://github.com/lullimat/idea.deploy"
 
 [tool.setuptools.packages.find]
-# Explicit rather than automatic: the repository root also holds papers/,
-# collabs/, tutorials/ and py-env/, none of which are importable packages.
+# src/ layout as of Phase 0b. The where= is what makes the restructure safe
+# rather than merely tidy: with the package under src/, the repository root is
+# no longer importable, so `import idpy` can only ever resolve to the installed
+# distribution. Under the old flat layout it silently resolved to ./idpy for
+# anything run from the checkout, and a packaging mistake was invisible to
+# every test run at home while breaking every user who pip-installed.
+where = ["src"]
 include = ["idpy*"]
 exclude = ["idpy.OCaml*"]
 

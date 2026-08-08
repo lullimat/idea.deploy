@@ -15,6 +15,15 @@
 # frozen -- drift that predates the restructure. Those are reported but do
 # not fail the check; anything else that breaks does.
 
+# Entries with a count of 0 were added BY HAND, not by --freeze-symbols. The
+# fixtures record `from idpy... import name`, which is the dominant form but
+# not the only one: a module imported by name and then used with dotted access
+# (`from idpy.IdpyCode import IdpyMemory` ... `IdpyMemory.Zeros(...)`) leaves
+# no `from ... import Zeros` for the freeze to see. Phase 0b found these the
+# hard way -- a shim that forwarded only the recorded names broke a paper that
+# had passed a moment earlier. A re-freeze will not remove them, since it only
+# ever adds what it observes; leave them.
+
 idpy.CTypes.CTypes	CTypes	4
 idpy.CTypes.CTypes	Tenet	1
 idpy.CUDA.CUDA	CUDA	30
@@ -42,6 +51,11 @@ idpy.IdpyCode.IdpyCode	IdpyKernel	62
 idpy.IdpyCode.IdpyCode	IdpyLoop	48
 idpy.IdpyCode.IdpyCode	IdpyLoopProfile	6
 idpy.IdpyCode.IdpyCode	IdpyMethod	5
+idpy.IdpyCode.IdpyMemory	Max	0
+idpy.IdpyCode.IdpyMemory	Min	0
+idpy.IdpyCode.IdpyMemory	OnDevice	0
+idpy.IdpyCode.IdpyMemory	Sum	0
+idpy.IdpyCode.IdpyMemory	Zeros	0
 idpy.IdpyCode.IdpySims	IdpySims	40
 idpy.IdpyCode.IdpyThread	IDThreadFunc	29
 idpy.IdpyCode.IdpyThread	IdpyThread	29

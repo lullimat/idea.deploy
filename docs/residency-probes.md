@@ -7,6 +7,13 @@ unchanged") is measured against.
 **Tree:** `master` @ `e49f997` **Date:** 2026-08-05
 **Machine:** Apple M1 Max, macOS. Backends live: OpenCL, CTypes, Metal. **No CUDA.**
 
+> **Module paths below are pre-Phase-0b and are left as they were run.** This is
+> a findings record, and rewriting the commands would misrepresent what was
+> executed against which tree. To re-run anything here, translate:
+> `idpy.IdpyCode.X` → `idpy.core.X`, `idpy.Utils.X` → `idpy.core.utils.X`,
+> `idpy.LBM.X` → `idpy.physics.lbm.X`. The old spellings do still work through
+> the compatibility shims, so the commands are stale rather than broken.
+
 ---
 
 ## 1. Probe status
