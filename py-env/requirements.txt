@@ -1,3 +1,14 @@
+# The full research-workstation stack, installed by idpy-init.sh.
+#
+# NOT idpy's own dependencies. Those live in pyproject.toml and are what
+# `pip install idpy` resolves; this file adds everything a working environment
+# wants on top -- Jupyter, opencv, plotly, kaleido, python-sat and friends.
+# idpy-init.sh installs both: this file, then `pip install -e .`.
+#
+# Some packages are named in both places today. That is duplication rather
+# than disagreement, and consolidating it means changing what gets installed,
+# so it is left alone here on purpose.
+
 appdirs
 pytools
 scipy
@@ -18,8 +29,12 @@ kaleido
 py-cpuinfo
 einsteinpy
 jupyter
-jupyter_contrib_nbextensions
-jupyter_nbextensions_configurator
+# jupyter_contrib_nbextensions and jupyter_nbextensions_configurator were here.
+# Both are classic-notebook-era and unmaintained: the first imports
+# pkg_resources (removed in setuptools 81), the second imports
+# notebook.nbextensions (removed in notebook 7). They installed without
+# complaint and then failed at every use. Their features -- table of contents,
+# code folding -- are built into JupyterLab 4 and notebook 7.
 jupyterlab
 jupyterlab-fasta
 jupyterlab-geojson
@@ -31,6 +46,7 @@ ipyparallel
 ipympl
 nbconvert
 python-sat[pblib,aiger]
-networkx[all]
+# networkx[all]: no such extra as of networkx 3.6, which warned on every run.
+networkx
 multiprocess
 opencv-python

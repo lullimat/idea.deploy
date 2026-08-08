@@ -129,8 +129,23 @@ then
     PY_PATH=$(which python3)
     echo "Found ${PY_PATH}"
 fi
-# Set site-packages path
-VENV_SITE_PKG=${VENV_LIB}/${ID_PYTHON}/site-packages/
+# Ask the interpreter whether a binding is importable.
+#
+# This used to be `ls ${VENV_SITE_PKG} | grep ${DIR_PYOPENCL}`, but
+# DIR_PYOPENCL and DIR_PYCUDA are defined nowhere in this repository. grep was
+# therefore invoked with no pattern, printed its usage message to the terminal
+# on every run, and always reported "not found" -- so the "Found!" branch was
+# unreachable and the binding was reinstalled every time.
+#
+# Importing is also the question actually being asked. A directory in
+# site-packages whose name happens to match is not the same as a binding that
+# loads, and for pycuda in particular a broken build is exactly the case worth
+# detecting.
+#
+# ${VENV_BIN}/python by explicit path: this runs before `source activate`.
+IsImportable () {
+    ${VENV_BIN}/python -c "import ${1}" >/dev/null 2>&1 && echo 1 || echo 0
+}
 
 ## Check if virtual environment is installed
 echo -n "Checking Python virtual environment..."
@@ -156,7 +171,7 @@ fi
 
 ## Check if pyopencl is installed
 echo -n "Looking for local pyopencl build..."
-PYOPENCL_F=$(ls ${VENV_SITE_PKG} | grep ${DIR_PYOPENCL} 1>/dev/null && echo 1 || echo 0)
+PYOPENCL_F=$(IsImportable pyopencl)
 if((PYOPENCL_F))
 then
     echo "Found!"
@@ -215,14 +230,14 @@ then
     fi
 else
     echo "Not Found"
-    echo > ${VENV_ROOT}/cuda_path_found
+    echo > ${ID_CUDA_PATH_FOUND}
 fi
 
 ## Check if pycuda is installed
 if((CUDA_F))
 then
     echo -n "Looking for local pycuda build..."
-    PYCUDA_F=$(ls ${VENV_SITE_PKG} | grep ${DIR_PYCUDA} 1>/dev/null && echo 1 || echo 0)
+    PYCUDA_F=$(IsImportable pycuda)
     if((PYCUDA_F))
     then
 	echo "Found!"
@@ -264,14 +279,10 @@ then
     echo "Pip installing requirements"
     pip install --upgrade pip setuptools wheel ${PIP_SERVER_OPTION}
     pip install -r ${VENV_ROOT}/requirements.txt ${PIP_SERVER_OPTION}
-    ## Install idpy itself. Required as of Phase 0b: the package moved to
-    ## src/idpy, so the repository root is no longer importable and this
-    ## script's own test step -- along with every notebook run from the
-    ## checkout -- would fail at `import idpy` without it. Editable, because
-    ## this environment is for developing the tree it was built from.
-    pip install -e . ${PIP_SERVER_OPTION}
-    ## Install pycuda if cuda is found
-    if ((CUDA_F))
+    ## Install pycuda if cuda is found and it is not already importable.
+    ## PYCUDA_F was computed but never consulted while its probe was broken;
+    ## && short-circuits, so an unset PYCUDA_F (no CUDA) is harmless.
+    if ((CUDA_F && PYCUDA_F == 0))
     then
     	pip install pycuda ${PIP_SERVER_OPTION}
     fi
@@ -286,30 +297,45 @@ then
     else
 	    echo "No MPI installation found (which mpicc did not return a path)"
     fi
-    ## Jupyter nbextension
-    jupyter contrib nbextension install --user
-    jupyter nbextensions_configurator enable --user
-    ## Jupyter Folding Options
-    jupyter nbextension enable codefolding/main
-    ## Jupyter Sections Management
-    jupyter nbextension enable toc2/main
-    ## Further step to avoid toc and fodling disappear
-    ## https://github.com/jupyter/help/issues/186
-    jupyter nbextension enable --py widgetsnbextension
-    ## Adding ipyparallel
-    jupyter serverextension enable --py ipyparallel
-    jupyter nbextension install --py ipyparallel
-    jupyter nbextension enable --py ipyparallel
-
-    pip install --upgrade jupyterlab
-    jupyter labextension install @jupyter-widgets/jupyterlab-manager
-    jupyter labextension install jupyter-matplotlib
-    jupyter nbextension enable --py widgetsnbextension
-    
-    ## Adding virtual environemtn to jupyter
-    ${ID_PYTHON} -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
+    ## The classic-notebook extension setup that stood here is gone, and the
+    ## features it installed are not.
+    ##
+    ## Eleven `jupyter contrib nbextension` / `jupyter nbextension` /
+    ## `jupyter serverextension` / `jupyter labextension install` calls used to
+    ## run here. Every one of them now fails: jupyter_contrib_nbextensions
+    ## wants pkg_resources (removed in setuptools 81) and notebook.nbextensions
+    ## (removed in notebook 7), the nbextension and serverextension
+    ## subcommands no longer exist, and `labextension install` is a deprecated
+    ## source build that demands nodejs >= 20.
+    ##
+    ## What they provided ships by default now, so nothing was lost:
+    ##   toc2/main         -> table of contents, built into JupyterLab 4 and
+    ##                        notebook 7 (the papers' READMEs still describe
+    ##                        reading the notebooks with it)
+    ##   codefolding/main  -> built into the CodeMirror 6 editor
+    ##   widgetsnbextension,
+    ##   jupyter-matplotlib -> prebuilt extensions, installed by pip alone
+    ##                        (ipywidgets and ipympl are in requirements.txt)
+    ##
+    ## Adding the virtual environment to jupyter. `python`, not ${ID_PYTHON}:
+    ## the venv is active here, whereas ID_PYTHON is a bare command name
+    ## resolved against PATH.
+    python -m ipykernel install --name idpy-env --display-name "idea.deploy" --user
     ## --env ${CUDA_EXPORT}
 fi
+
+## Install idpy itself, on a new AND an existing virtual environment.
+##
+## This sits outside the block above deliberately. It used to be inside it, so
+## it ran only when the venv was created -- which means a machine whose
+## py-env/idpy-env predates the Phase 0b restructure, re-running this script
+## after pulling it, would get every dependency and not idpy, and then fail at
+## `import idpy` for no visible reason. Under the old flat layout that worked
+## by accident, because the repository root was importable from the cwd.
+##
+## Editable, because this environment exists to develop the tree it was built
+## from, and idempotent, so running it on a fresh venv costs nothing.
+pip install -e . ${PIP_SERVER_OPTION}
 
 ## Build/install local pymetallic for Metal (new and existing venvs)
 if ((METAL_F))
@@ -333,14 +359,29 @@ fi
 echo
 echo
 ## ALIASES
+##
+## Both blocks below are outside the "new virtual environment" guard, so they
+## run on every invocation. They used to append unconditionally: a second run
+## wrote all seven aliases again and added a second `source` line to .bashrc,
+## a third run a third, and so on.
+##
+## Truncate and rewrite rather than test-and-append -- idempotent by
+## construction, and it picks up any alias whose definition has changed in
+## .idpy-env since the last run.
+: > ${VENV_ALIASES}
 for((ALIAS_I=0; ALIAS_I<${#IDPY_ALIASES[@]}; ALIAS_I++))
 do
 	echo "${IDPY_ALIASES[ALIAS_I]}" >> ${VENV_ALIASES}
 done
-## Appending lines at the end of the .bashrc to source the aliases
-echo "${ID_BASHRC_BANNER}" >> ${HOME}/.bashrc
-echo "${ID_BASHRC_ALIASES_OPT}" >> ${HOME}/.bashrc
-echo "${ID_BASHRC_SOURCE_ALIASES}" >> ${HOME}/.bashrc
+## Appending lines at the end of the .bashrc to source the aliases, once.
+## .bashrc belongs to the user and may hold anything, so this one is
+## test-and-append: the banner is the marker.
+if ! grep -qF "${ID_BASHRC_BANNER}" "${HOME}/.bashrc" 2>/dev/null
+then
+    echo "${ID_BASHRC_BANNER}" >> ${HOME}/.bashrc
+    echo "${ID_BASHRC_ALIASES_OPT}" >> ${HOME}/.bashrc
+    echo "${ID_BASHRC_SOURCE_ALIASES}" >> ${HOME}/.bashrc
+fi
 
 echo "For using the alias in the present shell: source ${HOME}/.bashrc"
 
