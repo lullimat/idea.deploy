@@ -9,13 +9,17 @@
 # than disagreement, and consolidating it means changing what gets installed,
 # so it is left alone here on purpose.
 
-appdirs
+# appdirs and pybind11==2.9.2 used to be here, and both belonged to building
+# pycuda and pyopencl from source. Neither is built here any more -- both come
+# as wheels -- and under PEP 517 build isolation a build would take its
+# requirements from the package's own metadata rather than from this file, so
+# the pin could never have helped and could only have constrained the
+# environment. appdirs was superseded by platformdirs, which pytools installs.
 pytools
 scipy
 numpy
 sympy
 matplotlib
-pybind11==2.9.2
 mako
 dill
 h5py

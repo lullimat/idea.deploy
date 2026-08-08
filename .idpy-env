@@ -1,10 +1,14 @@
 # VENV variables
 VENV_ROOT=${PWD}/py-env
 VENV=${VENV_ROOT}/idpy-env
-VENV_SRC=${VENV}/src/
 VENV_BIN=${VENV}/bin/
-VENV_LIB=${VENV}/lib/
 VENV_ALIASES=${VENV}/idpy-aliases.sh
+# VENV_SRC and VENV_LIB used to live here and are gone. Both belonged to an
+# era when pycuda and pyopencl were checked out and compiled into the virtual
+# environment; they are ordinary pip installs now, so there is no source tree
+# to point at. VENV_SRC had no readers at all, and VENV_LIB's only reader was
+# a site-packages path used by a directory-name probe that has been replaced
+# by asking the interpreter whether the module imports.
 
 ID_BASHRC_BANNER="# idea.deploy: the 2 lines below are for importing the aliases"
 ID_BASHRC_ALIASES_OPT="shopt -s expand_aliases"

@@ -170,13 +170,13 @@ then
 fi
 
 ## Check if pyopencl is installed
-echo -n "Looking for local pyopencl build..."
+echo -n "Checking pyopencl..."
 PYOPENCL_F=$(IsImportable pyopencl)
 if((PYOPENCL_F))
 then
     echo "Found!"
 else
-    echo "Not Found...need to build!"
+    echo "Not found; pip will install it"
 fi
 
 #####################
@@ -236,13 +236,13 @@ fi
 ## Check if pycuda is installed
 if((CUDA_F))
 then
-    echo -n "Looking for local pycuda build..."
+    echo -n "Checking pycuda..."
     PYCUDA_F=$(IsImportable pycuda)
     if((PYCUDA_F))
     then
 	echo "Found!"
     else
-	echo "Not Found...need to build!"
+	echo "Not found; pip will install it"
     fi
 fi
 
