@@ -40,11 +40,16 @@ jupyter
 # complaint and then failed at every use. Their features -- table of contents,
 # code folding -- are built into JupyterLab 4 and notebook 7.
 jupyterlab
-jupyterlab-fasta
+# jupyterlab-fasta and jupyterlab-vega3 were here. Both are mime renderers
+# from jupyterlab/jupyter-renderers, and neither renders anything this project
+# produces: "fasta" is the biological sequence format, and vega3 renders Vega 3
+# and Vega-Lite 2, superseded several major versions ago. Removed for
+# relevance, not compatibility -- both declare
+# rendermime-interfaces ^3.0.0 || ^3.8.0 and so do still load under
+# JupyterLab 4, as do the three kept below.
 jupyterlab-geojson
 jupyterlab-katex
 jupyterlab-mathjax2
-jupyterlab-vega3
 ipykernel
 ipyparallel
 ipympl
