@@ -11,43 +11,67 @@ Participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 ```bash
 git clone https://github.com/lullimat/idea.deploy.git
 cd idea.deploy
-bash idpy-init.sh          # builds py-env/idpy-env, compiles PyCUDA/PyOpenCL where possible
+python3 -m venv .venv
+.venv/bin/pip install -e ".[physics]"
 ```
 
-The interpreter is then `./py-env/idpy-env/bin/python`. Everything below assumes
-you run tests through it, from the repository root.
+The interpreter is then `.venv/bin/python`. Everything below assumes you run
+tests through it, from the repository root.
 
-For use as a library rather than development, `pip install idpy` works on the
-current layout and needs none of the above.
+**Installing is not optional any more.** The package lives at `src/idpy/`, so
+the repository root holds nothing importable: `import idpy` resolves to the
+installed distribution or it fails. That is the point of the `src/` layout —
+under the old flat layout `import idpy` silently picked up `./idpy` for
+anything run from the checkout, so a packaging mistake was invisible at home
+and broke everyone who installed from an index.
+
+`bash idpy-init.sh` still exists and still works. It builds a ~2 GB
+`py-env/idpy-env` and compiles PyCUDA and PyOpenCL from source, which you need
+only if you are provisioning those backends from nothing; Phase 0a made the
+package pip-installable precisely so that ordinary development does not. For
+Metal, `bash scripts/install-pymetallic.sh` — pymetallic comes from a pinned
+revision carrying an idpy patch, not from an index.
+
+For use as a library rather than development, `pip install idpy`.
 
 ## Running the tests
 
 There are two kinds, and they behave differently.
 
-**`unittest` suites** — `idpy/test.py`, `idpy/LBM/test.py`, `idpy/Metal/*`:
+**`unittest` suites** — `src/idpy/test.py`, `src/idpy/physics/lbm/test.py`,
+`src/idpy/core/backends/metal/*`:
 
 ```bash
 python -m idpy.test
-python -m unittest idpy.LBM.test        # NOT python -m idpy.LBM.test
+python -m unittest idpy.physics.lbm.test   # NOT python -m idpy.physics.lbm.test
 ```
 
-> `idpy/LBM/test.py` defines `TestCase` classes but has no `unittest.main()` and
-> no `__main__` guard. Running it as a module executes **zero tests and exits 0**.
-> It looked green for years while erroring at construction. Always use
-> `python -m unittest` for it.
+> `src/idpy/physics/lbm/test.py` defines `TestCase` classes but has no
+> `unittest.main()` and no `__main__` guard. Running it as a module executes
+> **zero tests and exits 0**. It looked green for years while erroring at
+> construction. Always use `python -m unittest` for it.
 
 **Print-style suites** — `test_shared`, `test_residency`, `test_residency_policy`,
 `test_linkage`, `test_constants`, `test_shared_tiles`, `test_hostmodule`,
 `test_storage_bandwidth`, `test_overlap`:
 
 ```bash
-python -m idpy.IdpyCode.test_residency
+python -m idpy.core.test_residency
 ```
 
 These print one line per check, skip backends that are absent, and **exit
-non-zero on failure** (see `idpy/Utils/TestExit.py`). A script that verified
-nothing says so explicitly rather than exiting 0 quietly — "0 checks ran" must
-never look like "all checks passed".
+non-zero on failure** (see `src/idpy/core/utils/TestExit.py`). A script that
+verified nothing says so explicitly rather than exiting 0 quietly — "0 checks
+ran" must never look like "all checks passed".
+
+That rule is not theoretical, and the checkers are not exempt from it.
+`scripts/check_layering.py` used to walk `idpy/<area>/`; when Phase 0b moved
+everything under `src/`, those directories stopped existing, its `rglob`
+returned nothing and it printed `layering OK` and exited 0 having read zero
+files — staying green through the single commit most capable of breaking the
+invariant it exists to protect. It now reports how many files it scanned and
+fails when that is zero. **A check that cannot find its subject must fail, not
+pass.**
 
 ## What CI covers, and what it cannot
 
@@ -57,8 +81,10 @@ hardware. If you change anything touching those paths, say so in the PR and
 state whether it was run on real hardware or is codegen-only.
 
 The layering lint (`scripts/check_layering.py`) runs first, before dependencies,
-and enforces that `idpy` core never imports `idpy` physics. One violation is
-grandfathered in a `KNOWN` allowlist; nothing new may be added.
+and enforces that `src/idpy/core/` never imports `idpy.physics`. It checks the
+legacy spellings too — `from idpy.LBM...` inside core still resolves through the
+compatibility shims and would violate the invariant while looking like neither.
+One violation is grandfathered in a `KNOWN` allowlist; nothing new may be added.
 
 ## The consumer surface
 
@@ -97,6 +123,59 @@ notebook name or collaboration name. Both fixtures are built this way. Take care
 when quoting tool output, which is not: the failure branch of
 `check_consumers.py` prints `used by: <path>` by design, because whoever is
 fixing a break needs to know who broke.
+
+## The compatibility shims
+
+Phase 0b moved every module. `collabs/` — roughly eighty directories, unpinned,
+tracking `master`, with live simulations running against them — was not
+migrated, so every old dotted path still resolves:
+
+```bash
+python3 scripts/gen_shims.py          # regenerate src/idpy/<old paths>/
+python3 scripts/gen_shims.py --check  # CI runs this
+```
+
+**Generated from `scripts/consumer-symbols.txt`, never hand-written.** That
+fixture is `module <TAB> symbol <TAB> count`, which is already a shim
+specification. Fifty-four hand-maintained modules would drift from it the first
+time anything moved; a generator plus the fixture cannot, and `--check` in CI
+means the two cannot silently disagree.
+
+Four properties, each established by testing rather than by reasoning:
+
+- **`FutureWarning`, not `DeprecationWarning`.** Python's default filter is
+  `default::DeprecationWarning:__main__`, so a `DeprecationWarning` surfaces
+  only when it fires from `__main__`. A collab reaching an old path through one
+  of its own helper `.py` modules would be told *nothing at all*. idpy's users
+  are researchers in notebooks, which is the case Python's own guidance points
+  at `FutureWarning` for.
+- **`__getattr__` raises `AttributeError` for names it does not know.** A shim
+  that answers *every* name shadows real submodules: `from pkg import sub`
+  consults `__getattr__` first and would return the shim's object instead of the
+  module, silently and with nothing raised to notice.
+- **The target module is imported eagerly.** Resolving it lazily defers
+  `ModuleNotFoundError('pycuda')` from import to attribute access, where it
+  escapes `hasattr()` — which catches only `AttributeError` — and takes
+  `check_consumers.py` down with it. Eager import reproduces exactly what the
+  old module did on a machine without the binding.
+- **The grandfathered breakages stay broken.** A shim that quietly resolved one
+  would erase the record while looking like an improvement.
+
+### When the shims get removed
+
+**Not on a version schedule.** A date or a version number is a promise made
+without knowing whether anything still depends on them:
+
+> Shims are removed when a re-freeze of `consumer-symbols.txt` from a populated
+> tree contains no old-path entries. Not before, and not on a schedule.
+
+If a re-freeze still lists `idpy.LBM.LBM`, something still uses it. When it does
+not, they are *provably* dead rather than presumed dead.
+
+The shims are for `collabs/`. They are **not** what keeps the papers working:
+those never install idpy — they `sys.path.append("../../")` into a checkout —
+so a shim inside the installed package cannot reach them. The papers were
+migrated to the new paths instead.
 
 ## Do the paper notebooks still work?
 

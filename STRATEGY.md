@@ -133,10 +133,10 @@ This one rule enforces the layer separation. Enforced via CI lint.
 
 | Current location             | New location                        | Layer   |
 |------------------------------|-------------------------------------|---------|
-| `idpy/CUDA`                  | `src/idpy/core/backends/cuda.py`    | core    |
-| `idpy/OpenCL`                | `src/idpy/core/backends/opencl.py`  | core    |
-| `idpy/CTypes`                | `src/idpy/core/backends/ctypes_backend.py` | core |
-| `idpy/Metal`                 | `src/idpy/core/backends/metal.py`   | core    |
+| `idpy/CUDA`                  | `src/idpy/core/backends/cuda/`      | core    |
+| `idpy/OpenCL`                | `src/idpy/core/backends/opencl/`    | core    |
+| `idpy/CTypes`                | `src/idpy/core/backends/ctypes_backend/` | core |
+| `idpy/Metal`                 | `src/idpy/core/backends/metal/`     | core    |
 | `idpy/IdpyCode`              | `src/idpy/core/`                    | core    |
 | `idpy/Utils`                 | `src/idpy/core/utils/`              | core    |
 | `idpy/LBM`                   | `src/idpy/physics/lbm/`             | physics |
@@ -145,6 +145,18 @@ This one rule enforces the layer separation. Enforced via CI lint.
 | `idpy/PRNGS`                 | `src/idpy/physics/prngs/`           | physics |
 | `papers/`                    | stays at repo root (or `src/idpy/papers/`) | supporting |
 | `tutorials/`                 | stays at repo root                  | supporting |
+
+> **Corrected during Phase 0b (2026-08-07).** The four backend rows above said
+> `cuda.py`, `opencl.py`, `ctypes_backend.py`, `metal.py` — one module each.
+> That cannot be built. Each backend directory holds two things with opposite
+> import costs: an `__init__.py` defining only the language token (`CUDA_T =
+> "pycuda"`), and an implementation that does `import pycuda`. `idpy.core`
+> needs all four tokens *eagerly* to build `idpy_langs_sys`, and takes the four
+> implementations only behind an `AreModulesThere` guard. Collapsing them into
+> one module puts `import pycuda` on the eager path, so `import idpy.core`
+> fails on any machine lacking a GPU binding — CI, and most laptops. Each
+> backend is therefore a package:
+> `core/backends/<name>/{__init__.py, backend.py}`.
 
 ### Optional dependency extras
 
@@ -322,19 +334,40 @@ pending**, and it is the prerequisite for 0c's tag-pinning below.
 
 #### Phase 0b — restructure (breaks import paths)
 
-- [ ] Restructure into `src/idpy/core/` and `src/idpy/physics/`
+- [x] Restructure into `src/idpy/core/` and `src/idpy/physics/`
+- [x] Eliminate `sys.path` hacks — the package no longer appends anything to
+      `sys.path`, and the repository root is located by searching upward for
+      `.idpy-env` rather than by counting directory levels
 - [ ] Define backend protocol (`core/backends/base.py`)
-- [ ] Eliminate `sys.path` hacks — package-relative imports throughout
 - [ ] Backend conformance test suite
 - [ ] Fix the remaining known bugs (OpenCL aggregation, CUDA guard, CTypes
       metadata, remove `TenetNew`)
 
-**Compatibility shims are the mechanism, not paper-repo edits.** When the move
-happens, `idpy/LBM/LBM.py` and friends become two-line re-exports at the new
-locations with a `DeprecationWarning`. Published notebooks keep working
-untouched and the shims retire on our schedule. "Update every paper repository"
-is not a requirement of this phase, and treating it as one is what made 0b look
-prohibitive.
+> **Corrected during Phase 0b (2026-08-07).** This section used to say
+> *"Compatibility shims are the mechanism, **not** paper-repo edits ... 'Update
+> every paper repository' is not a requirement of this phase."* That is wrong,
+> and it is the single most expensive error this document has contained.
+>
+> **The paper repositories do not install idpy.** Every one of them does
+> `sys.path.append("../../")` in the notebook and curls
+> `idpy-bootstrap.sh` from `refs/heads/master` in `install.sh`. They assume
+> they sit at `idea.deploy/papers/<repo>/` and reach up into a checkout. After
+> the move, `../../` is the repository root and `idpy` is at `src/idpy` —
+> `import idpy` fails **at the `sys.path` line**, before any import path
+> matters. Shims live inside the installed package and are unreachable to a
+> consumer that never installs it.
+>
+> So the seven papers are **migrated**, not shimmed, and 0b is a coordinated
+> release rather than an independent one. The shims are for `collabs/` — about
+> eighty unpinned directories tracking `master` — which is a different consumer
+> with a different mechanism. Do not conflate them.
+
+**Shims are generated, and warn with `FutureWarning`.** `scripts/gen_shims.py`
+builds all 54 from `consumer-symbols.txt`; CI runs `--check` so the fixture and
+the shim tree cannot silently disagree. `FutureWarning` rather than
+`DeprecationWarning` because Python's default filter is
+`default::DeprecationWarning:__main__`: a collab reaching an old path through
+one of its own helper modules would otherwise be told nothing at all.
 
 **The shim surface is now measured rather than guessed.** `scripts/check_consumers.py`
 freezes what 0b must not break into two committed fixtures — 47 modules and

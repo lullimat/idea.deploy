@@ -53,12 +53,36 @@ was checked at all, which must never look like a pass.
 """
 
 import ast
+import contextlib
 import importlib
 import importlib.util
 import json
 import pathlib
 import re
 import sys
+import warnings
+
+
+@contextlib.contextmanager
+def _quiet_shims():
+    """
+    Silence the shims' FutureWarning while this script imports old paths.
+
+    Every module in both fixtures is, by construction, a pre-0b path served by
+    a compatibility shim, and every shim warns on import. So this script emits
+    one warning per module it checks -- 47 of them, dozens of lines each,
+    ahead of the report they precede. That is noise rather than signal: the
+    warning exists to tell a *consumer* it is using an old path, and this
+    script's entire job is to use every old path on purpose.
+
+    Nothing is hidden. A module that stopped being a shim would stop warning,
+    and that is what `gen_shims.py --check` detects; the [ok]/[skip]/FAIL
+    verdicts below are unaffected either way.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore', category=FutureWarning, message=r'.*has moved to.*')
+        yield
 
 AREAS = ('papers', 'collabs', 'tutorials')
 
@@ -316,16 +340,17 @@ def _unreachable(counts):
     missing, unavailable, stars = [], {}, 0
     modules = sorted({m for m, _ in counts})
     loaded = {}
-    for module in modules:
-        try:
-            loaded[module] = importlib.import_module(module)
-        except ModuleNotFoundError as exc:
-            if exc.name and not exc.name.startswith('idpy'):
-                unavailable[module] = exc.name
-            else:
+    with _quiet_shims():
+        for module in modules:
+            try:
+                loaded[module] = importlib.import_module(module)
+            except ModuleNotFoundError as exc:
+                if exc.name and not exc.name.startswith('idpy'):
+                    unavailable[module] = exc.name
+                else:
+                    loaded[module] = None
+            except Exception:                              # noqa: BLE001
                 loaded[module] = None
-        except Exception:                                  # noqa: BLE001
-            loaded[module] = None
 
     for (module, symbol), n in sorted(counts.items()):
         if module in unavailable:
@@ -430,10 +455,14 @@ def load_surface(path):
 
 def main(argv):
     root = pathlib.Path(__file__).resolve().parent.parent
-    # Running a script puts scripts/ on sys.path, not the repo root, so `import
-    # idpy` would fail for reasons that have nothing to do with the consumers.
-    # Every module would report ModuleNotFoundError and the run would look like
-    # a total breakage.
+    # Kept for the tutorials/ and collabs/ helper modules, which are read from
+    # the repository root. It no longer makes idpy importable: as of Phase 0b
+    # the package lives under src/, so `import idpy` resolves to the installed
+    # distribution or to nothing at all. That is deliberate -- this script
+    # checks what a consumer would get, and a consumer gets the installed
+    # package. Run it in an environment where idpy is installed; otherwise
+    # every module reports ModuleNotFoundError and the run looks like a total
+    # breakage rather than a missing install.
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     args = [a for a in argv[1:] if not a.startswith('-')]
@@ -518,24 +547,25 @@ def report(usage, counts, _=None):
     """
     broken, unavailable = [], []
     for module in sorted(usage):
-        try:
-            if importlib.util.find_spec(module) is None:
-                broken.append((module, ModuleNotFoundError(
-                    f"no module named {module!r} in this tree"),
-                    sorted(usage[module])))
-                continue
-        except (ImportError, ValueError) as exc:
-            broken.append((module, exc, sorted(usage[module])))
-            continue
-        try:
-            importlib.import_module(module)
-        except ModuleNotFoundError as exc:
-            if exc.name and not exc.name.startswith('idpy'):
-                unavailable.append((module, exc.name))
-            else:
-                broken.append((module, exc, sorted(usage[module])))
-        except Exception as exc:                       # noqa: BLE001
-            broken.append((module, exc, sorted(usage[module])))
+      with _quiet_shims():
+          try:
+              if importlib.util.find_spec(module) is None:
+                  broken.append((module, ModuleNotFoundError(
+                      f"no module named {module!r} in this tree"),
+                      sorted(usage[module])))
+                  continue
+          except (ImportError, ValueError) as exc:
+              broken.append((module, exc, sorted(usage[module])))
+              continue
+          try:
+              importlib.import_module(module)
+          except ModuleNotFoundError as exc:
+              if exc.name and not exc.name.startswith('idpy'):
+                  unavailable.append((module, exc.name))
+              else:
+                  broken.append((module, exc, sorted(usage[module])))
+          except Exception as exc:                       # noqa: BLE001
+              broken.append((module, exc, sorted(usage[module])))
 
     width = max(len(m) for m in usage)
     skipped = {m: dep for m, dep in unavailable}

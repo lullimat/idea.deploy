@@ -41,6 +41,21 @@ which makes the backend a default rather than a requirement. Without the retry,
 next cell would have said. Both real breakages found so far were behind that
 wall.
 
+The retry has to be right, and three ways of getting it wrong were found by
+running it (Phase 0b, 2026-08-07). Each produced a confident FAIL line against
+a paper that was fine, which is worse than no result at all:
+
+  - it rewrote `preferred_lang` only, so a repository using `set_lang` ran on
+    its original backend and was reported as broken for lacking it;
+  - it substituted a token the notebook had never imported, inventing a
+    NameError at the cell it had just edited;
+  - it read the wall-clock budget expiring inside a ctypes call as an error,
+    because ctypes reshapes the timeout into ArgumentError on the way out.
+
+The lesson generalises past this script: a harness that adapts the thing it is
+measuring must be able to say when its own adaptation failed. Silence there is
+indistinguishable from a finding.
+
 Exit 0 when every notebook attempted either constructs or reaches compute.
 Exit 1 on any error, or when nothing was attempted at all.
 """
@@ -65,7 +80,26 @@ class _Timeout(Exception):
     pass
 
 
+# Whether SIGALRM fired during the cell currently being executed.
+#
+# Raising _Timeout from the handler is not enough on its own, because the
+# exception does not always survive the frame it was raised into. When the
+# budget expires inside a ctypes FFI call -- which is exactly where a CTypes
+# simulation spends its time -- ctypes catches whatever Python exception
+# surfaces in the argument-conversion path and re-raises it as
+# `ctypes.ArgumentError: argument 16: _Timeout:`. That reads as a broken
+# constructor call and got reported as API drift in a paper that had in fact
+# reached compute, which is the successful outcome.
+#
+# The flag is the ground truth: if the alarm fired while this cell was
+# running, the cell was still running when the budget expired, whatever the
+# exception was reshaped into on the way out.
+_alarm_fired = False
+
+
 def _alarm(signum, frame):
+    global _alarm_fired
+    _alarm_fired = True
     raise _Timeout()
 
 
@@ -82,16 +116,34 @@ def registry_papers(root):
 
 
 LANG_TOKENS = ('CUDA_T', 'OCL_T', 'METAL_T', 'CTYPES_T')
+
+# Any `<something>_lang ... = <TOKEN>` assignment, not only `preferred_lang`.
+#
+# The name is not a convention across the seven repositories: one of them
+# writes `set_lang, set_device, set_kind = OCL_T, 0, 'gpu'`. Matching only
+# `preferred_lang` meant the substitution silently did nothing there, the
+# notebook ran on OpenCL anyway, and a machine without pyopencl reported
+# "Selected lang = OCL_T but the 'pyopencl' module is not found" as though it
+# were the paper's fault. A retry that quietly fails to retry is worse than no
+# retry, because the result still looks like a measurement.
+#
+# `\w*_lang` and not `\w*lang`: the detection block these notebooks already
+# carry assigns bare `lang = CUDA_T` inside its own if/elif arms, and
+# rewriting those would corrupt the chain rather than retarget it. The
+# trailing `lang = preferred_lang` is what actually decides the backend. The
+# underscore is required and a prefix is not: one repository names the
+# variable plain `_lang`, which `\w+_lang` would have silently missed --
+# the same class of near-miss as matching only `preferred_lang` did.
 _PREFERRED = re.compile(
-    r'(\bpreferred_lang\b[^=\n]*=\s*)(' + '|'.join(LANG_TOKENS) + r')\b')
+    r'(\b\w*_lang\b[^=\n]*=\s*)(' + '|'.join(LANG_TOKENS) + r')\b')
 
 
 def available_langs(root):
     """Language tokens this machine can actually run, best first."""
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from idpy.IdpyCode import idpy_langs_sys          # noqa: PLC0415
-    import idpy.IdpyCode as ic                        # noqa: PLC0415
+    from idpy.core import idpy_langs_sys              # noqa: PLC0415
+    import idpy.core as ic                            # noqa: PLC0415
     out = []
     for tok in ('CUDA_T', 'OCL_T', 'METAL_T', 'CTYPES_T'):
         val = getattr(ic, tok, None)
@@ -112,16 +164,22 @@ def _backend_absent(detail):
 
 def substitute_lang(src, lang):
     """
-    Retarget a notebook's backend by rewriting `preferred_lang`.
+    Retarget a notebook's backend by rewriting its `*_lang` assignment.
 
     These notebooks already detect what is available -- `if idpy_langs_sys[CUDA_T]`
     and so on -- and then discard the answer with `lang = preferred_lang`, which
     is hardcoded in an earlier cell. So the backend is a default, not a
     requirement, and changing it is how the papers are meant to be portable.
 
-    Only `preferred_lang` is rewritten. The detection block also contains
-    `lang = CUDA_T` inside its own guard, and rewriting that would corrupt the
-    if/elif chain rather than retarget it.
+    Any `<name>_lang` is rewritten, because the name is not consistent across
+    the seven repositories -- `preferred_lang` in most, `set_lang` in one. Bare
+    `lang` is left alone: the detection block assigns it inside its own if/elif
+    arms, and rewriting those would corrupt the chain rather than retarget it.
+
+    Rewriting the token is not sufficient by itself; see run_notebook, which
+    seeds the four tokens into the namespace. A notebook imports only the ones
+    it uses, so substituting a name it never imported would raise NameError
+    from the very line the retry replaced.
     """
     return _PREFERRED.sub(lambda m: m.group(1) + lang, src)
 
@@ -132,6 +190,7 @@ def run_notebook(path, root, budget, lang=None):
 
     status is REACHED_COMPUTE (good), COMPLETED (good), or ERROR.
     """
+    global _alarm_fired
     doc = json.loads(pathlib.Path(path).read_text(errors='ignore'))
     here = pathlib.Path(path).resolve().parent
 
@@ -150,6 +209,26 @@ def run_notebook(path, root, budget, lang=None):
     os.chdir(here)
 
     ns = {'__name__': '__main__', 'get_ipython': lambda: None}
+
+    # Seed the backend tokens when we are retargeting the backend.
+    #
+    # substitute_lang rewrites the right-hand side of a `*_lang = <TOKEN>`
+    # assignment, but a notebook only imports the tokens it happens to use:
+    # arXiv-2009.12522v1 does `from idpy.core import CUDA_T, OCL_T` and never
+    # mentions CTYPES_T. Substituting a name the notebook never imported turns
+    # the retry itself into `NameError: name 'CTYPES_T' is not defined` -- a
+    # failure invented by the harness, reported at the very cell it replaced,
+    # and hiding whatever the notebook would really have said next.
+    #
+    # Only the four tokens, and only when substituting. They are plain strings
+    # ("pycuda", "ctypes", ...) and the notebook's own import rebinds them to
+    # the same values wherever it does import them.
+    if lang:
+        from idpy.core import (CUDA_T, OCL_T, METAL_T,     # noqa: PLC0415
+                               CTYPES_T)
+        ns.update(CUDA_T=CUDA_T, OCL_T=OCL_T,
+                  METAL_T=METAL_T, CTYPES_T=CTYPES_T)
+
     signal.signal(signal.SIGALRM, _alarm)
     cells = [c for c in doc.get('cells', []) if c.get('cell_type') == 'code']
     try:
@@ -164,6 +243,7 @@ def run_notebook(path, root, budget, lang=None):
                 src = substitute_lang(src, lang)
             if not src.strip():
                 continue
+            _alarm_fired = False
             signal.alarm(budget)
             try:
                 with contextlib.redirect_stdout(io.StringIO()), \
@@ -178,6 +258,15 @@ def run_notebook(path, root, budget, lang=None):
                 continue
             except BaseException as exc:                   # noqa: BLE001
                 signal.alarm(0)
+                # The budget expired inside this cell, so the cell was still
+                # running: reached compute, whatever the exception was reshaped
+                # into on its way out. ctypes rewrites a _Timeout raised during
+                # argument conversion into ctypes.ArgumentError, which is
+                # indistinguishable from a genuinely bad constructor call by
+                # type alone -- and it reported one paper as broken when it had
+                # simply started simulating.
+                if _alarm_fired:
+                    return ('REACHED_COMPUTE', i, len(cells), None)
                 tail = traceback.format_exc().strip().splitlines()[-3:]
                 return ('ERROR', i, len(cells),
                         f"{type(exc).__name__}: {exc}||" + '||'.join(tail))
@@ -218,9 +307,32 @@ def run_isolated(path, root, budget, lang=None):
             payload.get('detail'))
 
 
+# An archived snapshot of an earlier arXiv version, e.g. arXiv-2009.12522v1/
+# sitting inside arXiv-2009.12522/.
+_ARCHIVED_DIR = re.compile(r'^arXiv-\d+\.\d+v\d+$')
+
+
 def notebooks_in(d):
-    return sorted(p for p in pathlib.Path(d).rglob('*.ipynb')
-                  if '.git' not in p.parts and '.ipynb_checkpoints' not in p.parts)
+    """
+    (notebooks to smoke, archived notebooks skipped).
+
+    Archived version directories are not smoked, and the reason is the point
+    of having them: an archive edited to work against current code is no
+    longer an archive of anything. They record what was submitted, so drift
+    inside one is expected rather than actionable, and reporting it every run
+    trains the reader to ignore the output.
+
+    They are returned rather than dropped. A check that silently narrows what
+    it looks at reads as "everything passed" when it means "I stopped
+    looking", so the caller prints what was skipped.
+    """
+    live, archived = [], []
+    for p in sorted(pathlib.Path(d).rglob('*.ipynb')):
+        if '.git' in p.parts or '.ipynb_checkpoints' in p.parts:
+            continue
+        (archived if any(_ARCHIVED_DIR.match(part) for part in p.parts)
+         else live).append(p)
+    return live, archived
 
 
 def main(argv):
@@ -238,6 +350,9 @@ def main(argv):
                     help='force the backend by rewriting preferred_lang; '
                          'without it, a paper whose default backend is absent '
                          'is retried on one this machine has')
+    ap.add_argument('--archived', action='store_true',
+                    help='also smoke archived arXiv version directories, '
+                         'which are skipped by default')
     ap.add_argument('--run-one', help=argparse.SUPPRESS)
     args = ap.parse_args(argv[1:])
 
@@ -286,9 +401,12 @@ def main(argv):
         print("nothing was attempted, which is not a pass")
         return 1
 
-    failures, attempted = [], 0
+    failures, attempted, skipped = [], 0, []
     for label, d in targets:
-        nbs = notebooks_in(d)
+        nbs, archived = notebooks_in(d)
+        if args.archived:
+            nbs, archived = sorted(nbs + archived), []
+        skipped += [(label, p.relative_to(d)) for p in archived]
         if not nbs:
             print(f"  [no notebook] {label}")
             continue
@@ -335,6 +453,16 @@ def main(argv):
         subprocess.run(['rm', '-rf', tmp])
 
     print()
+    # Say what was not looked at, every run. A narrowed scope that goes
+    # unstated reads as a wider pass than it is.
+    if skipped:
+        print(f"{len(skipped)} archived notebook(s) skipped "
+              f"(--archived to include):")
+        for label, rel in skipped:
+            print(f"  {label}/{rel}")
+        print("An archive edited to work against current code is no longer an "
+              "archive; drift inside one is expected, not actionable.\n")
+
     if failures:
         print(f"{len(failures)} of {attempted} notebook(s) do not construct.\n"
               "A paper that does not construct cannot be pinned to a release "
@@ -343,6 +471,9 @@ def main(argv):
         return 1
     print(f"all {attempted} notebook(s) construct against this tree.")
     print("Construction only -- results are not reproduced here, by design.")
+    print("This is a prefix check: a notebook that reaches compute is not "
+          "executed past that cell,\nso later cells are unverified. See "
+          "CONTRIBUTING.md.")
     return 0
 
 

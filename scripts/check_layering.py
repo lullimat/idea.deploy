@@ -4,39 +4,49 @@ Enforce the architectural invariant: idpy core never imports idpy physics.
 
     STRATEGY.md: "`idpy.core` never imports from `idpy.physics`. Ever."
 
-The restructure that creates those package names (Phase 0b) has not happened
-yet, so this checks the invariant against the *current* layout using the
-migration mapping in STRATEGY.md §3. Checking it now is the point: the
-restructure is only cheap while the layering is already clean, and layering rots
-silently. Every accidental core->physics import added between now and then is
-one more thing to unpick later, at a moment when everything else is also moving.
+Phase 0b built those package names, so this now checks the invariant directly
+against src/idpy/core/ rather than against a mapping of the old flat layout.
 
-There are two known violations, listed in KNOWN below. They are deliberately
-grandfathered rather than fixed here -- unpicking them is refactoring work that
-belongs with Phase 0b -- but nothing *new* can be added. The allowlist is the
-debt, written down where it will be seen.
+The scanned-file count is not decoration. Before the restructure this script
+walked root/idpy/<area>; the moment Phase 0b moved everything under src/, those
+directories stopped existing, rglob returned nothing, and the script printed
+"layering OK" and exited 0 having examined zero files. It stayed green through
+the single commit most capable of breaking the invariant it protects. A run
+that checked nothing must fail, on the same principle CONTRIBUTING.md states
+for the print-style suites: "0 checks ran" must never look like "all checks
+passed".
+
+One known violation is listed in KNOWN below. It is a function-local import, so
+idpy.core.utils still *loads* cleanly without physics -- the dependency is a
+runtime one rather than an import-time one, which is why the restructure stayed
+mechanical despite it. It is grandfathered rather than fixed here; nothing new
+may join it.
 
 Static analysis only: this walks import statements without importing anything,
 so it needs no idpy environment, no GPU and no third-party packages, and can run
 as the first step of CI before dependencies are installed.
 
-Exit 0 clean, 1 on a new violation.
+Exit 0 clean, 1 on a new violation or on an empty scan.
 """
 
 import ast
 import pathlib
 import sys
 
-# STRATEGY.md §3 migration mapping, in current-layout terms.
-CORE = ('IdpyCode', 'CUDA', 'OpenCL', 'CTypes', 'Metal', 'Utils')
-PHYSICS = {'LBM', 'IdpyStencils', 'SpinNetworks', 'PRNGS'}
+# The layers, as they now exist on disk.
+CORE = pathlib.Path('src') / 'idpy' / 'core'
+PHYSICS_ROOT = 'idpy.physics'
 
-# Grandfathered, to be removed by Phase 0b. Both are function-local imports, so
-# idpy.Utils still *loads* cleanly without physics -- the cycle is a runtime
-# dependency rather than an import-time one, which is why the restructure stays
-# mechanical despite them.
+# The old dotted paths still resolve through the generated compatibility shims,
+# so `from idpy.LBM...` inside core would violate the invariant just as surely
+# as the new spelling while looking like neither. Both are checked.
+PHYSICS_LEGACY = {'LBM', 'IdpyStencils', 'SpinNetworks', 'PRNGS'}
+
+# Grandfathered. Phase 0b was the mechanical move; inverting this dependency is
+# refactoring work and belongs with the backend-protocol pass, not with a
+# restructure whose whole claim is that it changed no behaviour.
 KNOWN = {
-    ('idpy/Utils/IdpySymbolic.py', 'idpy.IdpyStencils.IdpyConvolution'),
+    ('src/idpy/core/utils/IdpySymbolic.py', 'idpy.physics.stencils.IdpyConvolution'),
 }
 
 
@@ -53,34 +63,47 @@ def imported_modules(tree):
                 yield node.lineno, node.module
 
 
+def crosses_layer(module):
+    """Does this dotted import name reach into the physics layer?"""
+    if module == PHYSICS_ROOT or module.startswith(PHYSICS_ROOT + '.'):
+        return True
+    parts = module.split('.')
+    return len(parts) > 1 and parts[0] == 'idpy' and parts[1] in PHYSICS_LEGACY
+
+
 def violations(root):
-    found = []
-    for area in CORE:
-        for path in sorted((root / 'idpy' / area).rglob('*.py')):
-            if path.name.endswith('~'):
-                continue
-            try:
-                tree = ast.parse(path.read_text(errors='ignore'))
-            except SyntaxError:
-                # A file that does not parse is not this check's problem; the
-                # test suites will fail on it far more informatively.
-                continue
-            rel = path.relative_to(root).as_posix()
-            for lineno, module in imported_modules(tree):
-                parts = module.split('.')
-                if len(parts) > 1 and parts[0] == 'idpy' and parts[1] in PHYSICS:
-                    if (rel, module) in KNOWN:
-                        continue
-                    found.append((rel, lineno, module))
-    return found
+    """(found, n_scanned) -- the count is what makes an empty scan detectable."""
+    found, scanned = [], 0
+    for path in sorted((root / CORE).rglob('*.py')):
+        if path.name.endswith('~'):
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors='ignore'))
+        except SyntaxError:
+            # A file that does not parse is not this check's problem; the
+            # test suites will fail on it far more informatively.
+            continue
+        scanned += 1
+        rel = path.relative_to(root).as_posix()
+        for lineno, module in imported_modules(tree):
+            if crosses_layer(module) and (rel, module) not in KNOWN:
+                found.append((rel, lineno, module))
+    return found, scanned
 
 
 def main():
     root = pathlib.Path(__file__).resolve().parent.parent
-    found = violations(root)
+    found, scanned = violations(root)
+
+    if not scanned:
+        print(f"no Python files under {CORE.as_posix()}/ -- nothing was "
+              f"checked, which is not a pass.\n"
+              f"The core layer has moved or been renamed; update CORE in this "
+              f"script to point at it.")
+        return 1
 
     if not found:
-        print(f"layering OK: no new core -> physics imports "
+        print(f"layering OK: no new core -> physics imports in {scanned} file(s) "
               f"({len(KNOWN)} grandfathered)")
         return 0
 

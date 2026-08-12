@@ -1,0 +1,414 @@
+__author__ = "Matteo Lulli"
+__copyright__ = "Copyright (c) 2020-2022 Matteo Lulli (lullimat/idea.deploy), matteo.lulli@gmail.com"
+__credits__ = ["Matteo Lulli"]
+__license__ = """
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+__version__ = "0.1"
+__maintainer__ = "Matteo Lulli"
+__email__ = "matteo.lulli@gmail.com"
+__status__ = "Development"
+
+# https://stackoverflow.com/questions/50499/how-do-i-get-the-path-and-name-of-the-file-that-is-currently-executing/50905#50905
+
+import inspect, os, sys
+
+_module_abs_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+
+'''
+Locate the repository root, if there is one.
+
+This used to be arithmetic on the module path -- two levels up from
+idpy/IdpyCode/ is the checkout. The src/ layout moved this module one level
+deeper (src/idpy/core/), so the same arithmetic now lands on src/ and silently
+finds nothing. Counting levels is what broke; a marker file cannot drift the
+same way, because it is the thing being looked for rather than a guess about
+where it sits.
+
+.idpy-env is the marker: tracked, at the root, and already the file whose
+contents are wanted. None is the correct and common answer -- an installed
+package in site-packages has no repository above it, which is exactly the case
+Phase 0a made survivable. Everything below treats it as optional.
+
+The sys.path.append that stood here is gone. It existed "to avoid relative
+imports" back when idpy was importable only as a source checkout; under the
+src/ layout it appended src/idpy itself, which would put core, physics and
+every shim package on sys.path as bare top-level names. The package is
+pip-installed now, so nothing needs it.
+'''
+def _find_repo_root(start, marker='.idpy-env'):
+    _here = os.path.abspath(start)
+    while True:
+        if os.path.exists(os.path.join(_here, marker)):
+            return _here
+        _parent = os.path.dirname(_here)
+        if _parent == _here:
+            return None
+        _here = _parent
+
+_idea_dot_deploy_path = _find_repo_root(_module_abs_path)
+
+from idpy import idpy_os_found
+
+if False:
+    idpy_os_found = None
+    if platform == "linux" or platform == "linux2":
+        idpy_os_found = "linux"
+    elif platform == "darwin":
+        idpy_os_found = "darwin"
+    elif platform == "win32":
+        idpy_os_found == "win32"
+
+idpy_opencl_macro_spacing = None
+if idpy_os_found == "linux":
+    idpy_opencl_macro_spacing = '\t'
+if idpy_os_found == "darwin":
+    # '\\ ', spelled explicitly: a bare '\ ' is an invalid escape sequence,
+    # which Python currently accepts with a SyntaxWarning and will one day
+    # reject outright. The value is identical -- backslash followed by space,
+    # which is how a space is escaped inside an OpenCL -D flag.
+    idpy_opencl_macro_spacing = '\\ '
+if idpy_os_found == "win32":
+    idpy_opencl_macro_spacing = '\\ '
+
+'''
+Define some virtual environment variables
+'''
+import re
+'''
+These three files -- .idpy-env, py-env/cuda_path_found and LICENSE -- live at the
+REPOSITORY root, not inside the package. Reading them unconditionally at import
+time is what made `import idpy` impossible from anywhere but a source checkout:
+installed into site-packages, none of them is there and the import died with
+FileNotFoundError before any backend was consulted.
+
+They are optional now. Present (a source checkout, as on both development
+machines) they are used exactly as before, so behaviour is unchanged there.
+Absent, each falls back to something sensible:
+
+  .idpy-env / cuda_path_found -> nvcc is looked up on PATH, which is what a
+                                 system CUDA install provides anyway
+  LICENSE                     -> a short embedded notice
+
+This is the packaging prerequisite, and it is the substantive half of it:
+pyproject.toml describes what to install, but nothing can be installed while the
+package refuses to load outside its own repository.
+'''
+_VENV_ROOT_STR, _IDPY_ENV_F = "VENV_ROOT", ".idpy-env"
+_venv_root = None
+try:
+    # TypeError, not just OSError: with no repository above us
+    # _idea_dot_deploy_path is None, and None + "/" raises before open() is
+    # ever reached. Catching only OSError here would turn "installed from
+    # PyPI" into an import-time crash -- the exact failure Phase 0a removed.
+    with open(_idea_dot_deploy_path + "/" + _IDPY_ENV_F) as _id_env_file:
+        for _line in _id_env_file.readlines():
+            if re.search(_VENV_ROOT_STR, _line):
+                _venv_root = _line.split("/")[1].strip()
+                break
+except (OSError, TypeError):
+    _venv_root = None
+
+'''
+Reading system CUDA path. 'nvcc' unqualified defers to PATH, which is how a
+system CUDA toolkit is normally found; idpy-init.sh writes the discovered prefix
+into cuda_path_found when it can do better.
+'''
+idpy_nvcc_path = "nvcc"
+if _venv_root is not None:
+    _idpy_env_path = _idea_dot_deploy_path + "/" + _venv_root + "/"
+    _cuda_path_found = _idpy_env_path + "/" + "cuda_path_found"
+    try:
+        with open(_cuda_path_found, "r") as _file_swap:
+            _prefix = _file_swap.readline().rstrip()
+        if _prefix:
+            idpy_nvcc_path = _prefix + "/bin/nvcc"
+    except OSError:
+        pass
+'''
+Language Types and metaTypes
+'''
+
+from idpy.core.backends.opencl import OCL_T
+from idpy.core.backends.cuda import CUDA_T
+from idpy.core.backends.ctypes_backend import CTYPES_T
+from idpy.core.backends.metal import METAL_T
+
+IDPY_T = "idpy"
+
+idpy_langs_dict = {'CUDA_T': CUDA_T, 'OCL_T': OCL_T, 'CTYPES_T': CTYPES_T, 'METAL_T': METAL_T}
+
+idpy_langs_human_dict = {CUDA_T: "CUDA", OCL_T: "OpenCL", CTYPES_T: "ctypes", METAL_T: "Metal"}
+idpy_langs_dict_sym = {CUDA_T: "CUDA_T", OCL_T: "OCL_T", CTYPES_T: "CTYPES_T", METAL_T: "METAL_T"}
+idpy_langs_list = list(idpy_langs_dict.values())
+
+from idpy.core.utils.IsModuleThere import AreModulesThere
+idpy_langs_sys = AreModulesThere(modules_list = idpy_langs_list)
+
+'''
+Compilers warnings
+'''
+os.environ['PYOPENCL_COMPILER_OUTPUT'] = '1'
+
+'''
+Tenet types
+'''
+idpy_tenet_types = {}
+if idpy_langs_sys[CUDA_T]:
+    from idpy.core.backends.cuda.backend import CUDA
+    from idpy.core.backends.cuda.backend import Tenet as CUTenet
+    idpy_tenet_types[CUDA_T] = CUTenet
+
+if idpy_langs_sys[OCL_T]:
+    import pyopencl as cl
+    from idpy.core.backends.opencl.backend import OpenCL
+    from idpy.core.backends.opencl.backend import Tenet as CLTenet
+    idpy_tenet_types[OCL_T] = CLTenet
+
+if idpy_langs_sys[CTYPES_T]:
+    from idpy.core.backends.ctypes_backend.backend import CTypes
+    from idpy.core.backends.ctypes_backend.backend import Tenet as CTTenet
+    idpy_tenet_types[CTYPES_T] = CTTenet
+
+if idpy_langs_sys[METAL_T]:
+    from idpy.core.backends.metal.backend import Metal
+    from idpy.core.backends.metal.backend import Tenet as MTTenet
+    idpy_tenet_types[METAL_T] = MTTenet    
+
+
+'''
+Methods: GetTenet
+'''
+def GetTenet(params_dict):
+    '''
+    GetTenet:
+    it looks general enough to be further abstracted
+    ''' 
+    if 'lang' in params_dict and params_dict['lang'] == CUDA_T:
+        if idpy_langs_sys[CUDA_T]:
+            cu = CUDA()
+            device = 0 if 'device' not in params_dict else params_dict['device']
+            cu.SetDevice(device)
+            print("CUDA: ", cu.GetDeviceName())
+            return cu.GetTenet()
+        else:
+            raise Exception("Selected lang = CUDA_T but the module pycuda is not found in your python environment!")
+
+    if 'lang' in params_dict and params_dict['lang'] == OCL_T:
+        if idpy_langs_sys[OCL_T]:
+            ocl = OpenCL()
+            cl_type = 'gpu' if 'cl_kind' not in params_dict else params_dict['cl_kind']
+            cl_type = cl_type if cl_type in ocl.devices else 'cpu'
+            device = 0 if 'device' not in params_dict else params_dict['device']
+            
+            ocl.SetDevice(kind = cl_type, device = device)
+            
+            print("OpenCL: ", ocl.GetDeviceName())
+            return ocl.GetTenet()
+        else:
+            raise Exception("Selected lang = OCL_T but the 'pyopencl' module is not found in your python environment!")
+        
+    if 'lang' in params_dict and params_dict['lang'] == CTYPES_T:
+        if idpy_langs_sys[CTYPES_T]:
+            c_types = CTypes()
+            print("CTypes: ", c_types.GetDeviceName())
+            return c_types.GetTenet()
+        else:
+            raise Exception("Selected lang = CTYPES_T but the 'ctypes' module is not found in your python environment!")
+
+    if 'lang' in params_dict and params_dict['lang'] == METAL_T:
+        if idpy_langs_sys[METAL_T]:
+            metal = Metal()
+            device = 0 if 'device' not in params_dict else params_dict['device']
+            metal.SetDevice(device)
+            print("Metal: ", metal.GetDeviceName())
+            return metal.GetTenet()
+        else:
+            raise Exception("Selected lang = METAL_T but the 'pymetallic' module is not found in your python environment!")
+
+'''
+Method CheckOCLFP
+what about unsigned 64 bits integers?
+The question was good...see CRNGS
+'''
+from idpy.core.utils.CustomTypes import CustomTypes
+def CheckOCLFP(tenet, custom_types):
+    if idpy_langs_sys[OCL_T] and isinstance(tenet, idpy_tenet_types[OCL_T]):
+        if tenet.device.get_info(cl.device_info.DOUBLE_FP_CONFIG) == 0:
+            print("\nThe device",
+                  tenet.device.get_info(cl.device_info.NAME),
+                  "does not support 64 bits floating-point variables")
+            print("Changing all custom types from 64-bits to 32-bits")
+            _swap_dict = {}
+            for key, value in custom_types.Push().items():
+                if value == 'double':
+                    value = 'float'
+
+                if value == 'unsigned long':
+                    value = 'unsigned int'
+                    
+                _swap_dict[key] = value
+                
+            return CustomTypes(_swap_dict)
+        else:
+            return custom_types
+    else:
+        return custom_types
+
+"""
+Possibly insert it back in 'CheckOCLFP'
+"""
+def SwitchToFP32(custom_types):
+    print("Changing all custom types from 64-bits to 32-bits")
+    _swap_dict = {}
+    for key, value in custom_types.Push().items():
+        if value == 'double':
+            value = 'float'
+
+        if value == 'unsigned long':
+            value = 'unsigned int'
+            
+        _swap_dict[key] = value
+        
+    return CustomTypes(_swap_dict)
+
+def CheckMetalFP(tenet, custom_types):
+    '''
+    Apple Metal GPUs do not provide FP64. Always downcast to FP32
+    when the active tenet is Metal.
+    '''
+    if idpy_langs_sys[METAL_T] and isinstance(tenet, idpy_tenet_types[METAL_T]):
+        print("\nThe Metal device",
+              tenet.GetDeviceName(),
+              "does not support 64 bits floating-point variables")
+        return SwitchToFP32(custom_types)
+    return custom_types
+
+'''
+Method GetParamsClean
+'''
+def GetParamsClean(kwargs, _a_params_dict, needed_params = None):
+    '''
+    GetParamsClean:
+    it looks general enough to be further abstracted
+    '''
+    for var in needed_params:
+        if var in kwargs:
+            _a_params_dict[0][var] = kwargs[var]
+            del kwargs[var]
+
+    return kwargs
+
+from idpy.core import CUDA_T, OCL_T, CTYPES_T, METAL_T, IDPY_T
+from idpy.core import idpy_langs_sys, idpy_langs_list
+
+'''
+Methods: IdpyHardware
+'''
+
+def IdpyHardware():
+    if idpy_langs_sys[CUDA_T]:
+        from idpy.core.backends.cuda.backend import CUDA
+        print("CUDA Found!")
+        cuda = CUDA()
+        gpus_list = cuda.DiscoverGPUs()
+        for gpu_i in gpus_list:
+            print("\nCUDA GPU[" + str(gpu_i) + "]")
+            for key in gpus_list[gpu_i]:
+                print(key, ": ", gpus_list[gpu_i][key])
+            print()
+        del cuda
+        print("=" * 80)
+        print()
+
+    if idpy_langs_sys[OCL_T]:
+        from idpy.core.backends.opencl.backend import OpenCL
+        print("OpenCL Found!")
+        ocl = OpenCL()
+        gpus_list = ocl.DiscoverGPUs()
+        cpus_list = ocl.DiscoverCPUs()
+        print("\nListing GPUs:")
+        for gpu_i in gpus_list:
+            print("OpenCL GPU[" + str(gpu_i) + "]")
+            for key in gpus_list[gpu_i]:
+                print(key, ": ", gpus_list[gpu_i][key])
+            print()
+        print("\nListing CPUs:")
+        for cpu_i in cpus_list:
+            print("OpenCL CPU[" + str(cpu_i) + "]")
+            for key in cpus_list[cpu_i]:
+                print(key, ": ", cpus_list[cpu_i][key])
+            print()
+        del ocl
+        print("=" * 80)
+        print()
+
+    if idpy_langs_sys[CTYPES_T]:
+        from idpy.core.backends.ctypes_backend.backend import CTypes
+        print("CTypes Found!")
+        c_types = CTypes()
+        print("\nListing CPUs:")
+        print(c_types.GetDeviceName())
+        del c_types
+        print()
+        print("=" * 80)
+        print()
+
+
+    if idpy_langs_sys[METAL_T]:
+        from idpy.core.backends.metal.backend import Metal
+        print("Metal Found!")
+        metal = Metal()
+        gpus_list = metal.DiscoverGPUs()
+        print("\nListing GPUs:")
+        for gpu_i in gpus_list:
+            print("Metal GPU[" + str(gpu_i) + "]")
+            for key in gpus_list[gpu_i]:
+                print(key, ": ", gpus_list[gpu_i][key])
+            print()
+        del metal
+        print()
+        print("=" * 80)
+        print()
+
+'''
+Methods: GridAndBlocks
+'''
+def GridAndBlocks1D(_n_threads_min, _block_size = 128):
+    _grid = ((_n_threads_min + _block_size - 1)//_block_size, 1, 1)
+    _block = (_block_size, 1, 1)
+
+    return _grid, _block
+
+'''
+Copyright string
+'''
+try:
+    # See the .idpy-env read above for why TypeError is caught: no repository
+    # root means _idea_dot_deploy_path is None.
+    _license_path = _idea_dot_deploy_path + "/" + "LICENSE"
+    with open(_license_path, "r") as _file_swap:
+        idpy_copyright = _file_swap.read()
+except (OSError, TypeError):
+    # Installed rather than checked out: the full text ships with the
+    # distribution metadata, so a pointer is enough here.
+    idpy_copyright = (
+        "idea.deploy (idpy) -- Copyright (c) 2020-2026 Matteo Lulli. "
+        "MIT-style licence; see the LICENSE file in the distribution."
+    )
