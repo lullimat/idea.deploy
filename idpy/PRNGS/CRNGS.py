@@ -1321,9 +1321,14 @@ class K_OutputFunction(IdpyKernel):
 class K_OutputGaussian(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None):
+        # headers_files: the ctypes backend emits a bare translation unit with NO math.h,
+        # so the sqrt()/log()/cos() of the Box-Muller transform in F_GaussianCos/Sin are
+        # implicit declarations and clang rejects them under C99. Metal and CUDA provide
+        # them intrinsically, which is why this only ever failed on ctypes.
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag,
+                            headers_files = ('math.h',))
 
         self.SetCodeFlags('g_tid')
 
@@ -1346,9 +1351,11 @@ class K_OutputGaussian(IdpyKernel):
 class K_OutputGaussianSingle(IdpyKernel):
     def __init__(self, custom_types = {}, constants = {}, f_classes = [],
                  optimizer_flag = None):
+        # See K_OutputGaussian: Box-Muller needs math.h on the ctypes backend.
         IdpyKernel.__init__(self, custom_types = custom_types,
                             constants = constants, f_classes = f_classes,
-                            optimizer_flag = optimizer_flag)
+                            optimizer_flag = optimizer_flag,
+                            headers_files = ('math.h',))
 
         self.SetCodeFlags('g_tid')
 

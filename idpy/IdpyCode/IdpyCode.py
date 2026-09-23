@@ -269,7 +269,8 @@ class IdpyKernel:
                  float_literals = None, f_classes = [],
                  gthread_id_code = 'g_tid', lthread_id_code = 'l_tid',
                  lthread_id_coords_code = 'l_tid_c', block_coords_code = 'bid_c',
-                 optimizer_flag = None, declare_types = None, declare_macros = None,
+                 optimizer_flag = None, fast_math = None,
+                 declare_types = None, declare_macros = None,
                  headers_files = None, include_dirs = None,
                  definitions_files = None, objects_files = None):
 
@@ -332,6 +333,16 @@ class IdpyKernel:
         Need to check the type of optimizer_flag
         '''
         self.optimizer_flag = True if optimizer_flag is None else optimizer_flag
+        '''
+        fast_math is Metal-only and INDEPENDENT of optimizer_flag, which is overloaded:
+        False means --device-debug on CUDA, -cl-opt-disable on OpenCL, and dropping -O3 on
+        CTypes (where it also hits the `self.macros == ''` -> None path below and fails to
+        compile at all).  A kernel that must not have its arithmetic reassociated -- Kahan
+        compensation, where (t - x) - y folds to 0 under fast math -- therefore cannot say
+        so through optimizer_flag without paying for lost optimization everywhere else.
+        None keeps the historical behaviour, fast_math = bool(optimizer_flag).
+        '''
+        self.fast_math = fast_math
         self.declare_types = 'typedef' if declare_types is None else declare_types
         if self.declare_types not in ['typedef', 'macro']:
             raise Exception("declare_types must be either 'typedef' or 'macro'")
@@ -1293,8 +1304,10 @@ class IdpyKernel:
 
         if idpy_langs_sys[METAL_T] and isinstance(tenet, MTTenet):
             _source = self.Code(METAL_T)
+            _fast_math = (bool(self.optimizer_flag) if self.fast_math is None
+                          else bool(self.fast_math))
             _library = pymetallic.Library(
-                tenet.device, _source, fast_math=bool(self.optimizer_flag),
+                tenet.device, _source, fast_math=_fast_math,
             )
             _function = _library.make_function(self.name)
             _pipeline = tenet.device.compute_pipeline_state(_function) \
