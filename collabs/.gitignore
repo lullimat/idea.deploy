@@ -1,2 +1,10 @@
 *
 !.gitignore
+!Rayleigh/
+Rayleigh/*
+!Rayleigh/DESIGN-D2D.md
+!Rayleigh/multitenet/
+!Rayleigh/multitenet/**
+Rayleigh/multitenet/__pycache__/
+Rayleigh/multitenet/**/__pycache__/
+Rayleigh/multitenet/**/*.pyc
