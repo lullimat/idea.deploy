@@ -30,7 +30,7 @@ stock CUDA smoke needs Ctx push (PR #20).
 - Call-site order: **plant → collide → `exchange_faces` → stream**
 - Populations only; C0 = two sequential sync `D2DSub` with per-leg streams
 
-## Phase D — NumPy D0 merged (PR #21); CUDA D1 in PR #23
+## Phase D — NumPy D0 merged (PR #21); CUDA D1 merged (PR #23)
 
 Dual-tenet LBM step wire: plant → collide(owned) → `exchange_faces` → stream
 **write-owned / read-halo**.
@@ -41,24 +41,35 @@ Dual-tenet LBM step wire: plant → collide(owned) → `exchange_faces` → stre
 - Native `(nz,nx,Q)` path A; never Gate1 `[:,1:-1,:]` on multitenet
 - NumPy D0 1-step owned-gather bit-identical (PR #21) — CUDA D1 gate cleared
 
-### CUDA D1 (PR #23 — Loom PASS-WITH-NITS; Matteo merge gate)
+### CUDA D1 (PR #23 — merged)
 
 - Design: [`docs/planning/D2D-phase-d1-cuda-dual-tenet.md`](../../docs/planning/D2D-phase-d1-cuda-dual-tenet.md)
 - Driver: `step_two_way_cuda_cold` — D2H → plant+collide → H2D → exchange → D2H → stream → H2D
 - Host plant/collide/stream; device exchange only; Ctx push (PR #20); no IdpyMemory edits
 - idHome CUDA cold 1-step + N=2 soft owned-gather bit-identical (FYI log on idHome)
-- propose ≠ merge; Matteo gates
 
-## Phase E — dual-tenet science gate (in PR; propose ≠ merge)
+## Phase E — dual-tenet science gate (**merged** PR #24)
 
-Tiny buoyant NSF vs monolith on cold dual-tenet path (post-D1 @ `fc97779`).
+Tiny buoyant NSF vs monolith on cold dual-tenet path.
 
 - Design: [`docs/planning/D2D-phase-e-science-gate.md`](../../docs/planning/D2D-phase-e-science-gate.md)
-  (Loom PASS-WITH-NITS must-fixes folded)
 - Harness: `multitenet/test_science_two_way.py`
 - Hard OVERALL_GATE: N=100 owned-gather bit-identical + NSF INTERIOR probe
   (`plant_sample_walls` → `hydro_from_lattice` → `slice(3,-3)`) match-monolith
   ≤1e-12 + buoyant `run_smoke` residual match-monolith
-- Soft N=200 informational (does not fail gate); CUDA `<2` devices → SKIP
+- Soft N=200 informational; CUDA `<2` → SKIP
 - Frozen E0: nx=32 nz=64 z_cut=32 depth=3 seed=42 nu=0.10 g=1.2e-3
-- Not Half-A / Fig.4 campaign; no warm; no IdpyMemory
+- idHome post-merge CUDA smoke: prior session log; re-verify on next idHome touch
+
+## Half-A / Fig.4 multi-GPU (Loom PASS-WITH-NITS folded)
+
+Cold D1 is not a Half-A campaign vehicle (~**12.12 GB** host traffic/step =
+2×D2H+2×H2D of full `f` × ~226k steps). Staged ladder:
+
+- Design: [`docs/planning/D2D-half-a-mgpu-fig4.md`](../../docs/planning/D2D-half-a-mgpu-fig4.md)
+  (Loom defaults folded into §7)
+- **F0** mid-size cold science ramp **256×512** — **applying / in PR**
+  (`multitenet/test_science_mid_two_way.py`; propose ≠ merge)
+- **F1-short** host NumPy dual-tenet Half-A bit-id → **F1-campaign** banded NSF (Table I-A)
+- **F2** device-warm multi-GPU after Forge lands collide/stream kernels; warm ≠ OVERALL_GATE default
+- No Full-A; no Guo dual-tenet fork; no IdpyMemory
