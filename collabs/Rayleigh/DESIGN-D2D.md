@@ -14,14 +14,13 @@ Phase B face-strip design (plumbing only):
 [`docs/planning/D2D-phase-b-halo.md`](../../docs/planning/D2D-phase-b-halo.md)  
 Grok Build brief: [`docs/planning/D2D-phase-b-grok-build.md`](../../docs/planning/D2D-phase-b-grok-build.md)
 
-## Phase C — applied (PR pending merge)
+## Phase C — merged (PR #19 @ `573b3fb`; Ctx harness PR #20 @ `c946b0a`)
 
 Multi-tenet `exchange_faces` (Rayleigh / LBM Option A): Loom **PASS-WITH-NITS**
-RECEIVED (2026-11-05 Asia/Hong_Kong); **Matteo apply greenlight used** — applied
-via Grok Build on Gödel; **propose ≠ merge**.
+RECEIVED; applied and **merged**. idHome 2-GPU product OVERALL_GATE=PASS;
+stock CUDA smoke needs Ctx push (PR #20).
 
 - Design: [`docs/planning/D2D-phase-c-exchange-faces.md`](../../docs/planning/D2D-phase-c-exchange-faces.md)
-- Grok Build brief: [`docs/planning/D2D-phase-c-grok-build.md`](../../docs/planning/D2D-phase-c-grok-build.md)
 - Code: [`multitenet/`](./multitenet/) — `face_elem_range` (local copy),
   `bind_two_way_z_split`, `exchange_faces` (two sync `D2DSub`), tests
 - `IdpyMemory` contracts **untouched** (ranges-only); no B2 / MemcpyPeer /
@@ -29,5 +28,16 @@ via Grok Build on Gödel; **propose ≠ merge**.
 - **Cut-halos are not collided** — only interiors collide; exchange fills
   neighbor cut-halos for pull
 - Call-site order: **plant → collide → `exchange_faces` → stream**
-- Populations only (no silent macro face ship); C0 = two sequential sync
-  `D2DSub` with per-leg `stream_src`/`stream_dst`
+- Populations only; C0 = two sequential sync `D2DSub` with per-leg streams
+
+## Phase D — design (Loom PASS-WITH-NITS folded; await apply)
+
+Dual-tenet LBM step wire (NumPy D0 first): plant → collide(owned) →
+`exchange_faces` → stream **write-owned / read-halo**.
+
+- Design: [`docs/planning/D2D-phase-d-dual-tenet-step.md`](../../docs/planning/D2D-phase-d-dual-tenet-step.md)
+- Stream writes owned rows only (GPU0 z∈`[0,n0)`; GPU1 z∈`[depth,nz1)`); cut-halos
+  are not stream destinations
+- Native `(nz,nx,Q)` path A for D0; never Gate1 `[:,1:-1,:]` on multitenet
+- CUDA D1 / IdpyMemory / Spin blocked until NumPy 1-step owned-gather bit-identical
+- propose ≠ apply; Matteo gates
