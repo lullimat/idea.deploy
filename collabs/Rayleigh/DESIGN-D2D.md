@@ -68,8 +68,10 @@ Cold D1 is not a Half-A campaign vehicle (~**12.12 GB** host traffic/step =
 
 - Design: [`docs/planning/D2D-half-a-mgpu-fig4.md`](../../docs/planning/D2D-half-a-mgpu-fig4.md)
   (Loom defaults folded into §7)
-- **F0** mid-size cold science ramp **256×512** — **applying / in PR**
+- **F0** mid-size cold science ramp **256×512** — **in PR #25** @ `72f384d`
   (`multitenet/test_science_mid_two_way.py`; propose ≠ merge)
+  Frozen: z_cut=256 depth=3 seed=42 nu=0.10 g=1.2e-3 tu/td=0.95/1.05
+  **width=8.0 amp=2.0 k=[1,4]** (E0/SMOKE mid; not Table I-A)
 - **F1-short** host NumPy dual-tenet Half-A bit-id → **F1-campaign** banded NSF (Table I-A)
 - **F2** device-warm multi-GPU after Forge lands collide/stream kernels; warm ≠ OVERALL_GATE default
 - No Full-A; no Guo dual-tenet fork; no IdpyMemory
