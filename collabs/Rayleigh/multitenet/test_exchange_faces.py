@@ -261,62 +261,112 @@ def test_cuda_two_gpu_smoke():
         )
         return
 
+    import pycuda.driver as cuda
     from idpy.IdpyCode import CUDA_T, GetTenet, IdpyMemory
+
+    class _Ctx:
+        """Push owning tenet context for multi-GPU Zeros/H2D/D2H/PinnedHost.
+
+        Same pattern as ID-home Phase B D2DSub smoke: GetTenet leaves each
+        device context current only briefly; cross-device alloc without push
+        hits cuMemcpyHtoD illegal memory access.
+        """
+
+        def __init__(self, tenet):
+            self.tenet = tenet
+
+        def __enter__(self):
+            self.tenet.cuda_context.push()
+            return self
+
+        def __exit__(self, *a):
+            cuda.Context.pop()
+            return False
+
+    def _zeros(n, dtype, tenet):
+        with _Ctx(tenet):
+            return IdpyMemory.Zeros(shape=(n,), dtype=dtype, tenet=tenet)
+
+    def _h2d(ary, host):
+        with _Ctx(ary.tenet):
+            ary.H2D(host)
+
+    def _d2h(ary):
+        with _Ctx(ary.tenet):
+            return np.asarray(ary.D2H())
+
+    def _pinned(n, dtype, tenet):
+        with _Ctx(tenet):
+            return IdpyMemory.PinnedHost(shape=(n,), dtype=dtype, tenet=tenet)
+
+    def _end_tenet(t):
+        if t is None:
+            return
+        try:
+            with _Ctx(t):
+                t.mem_pool.free_held()
+                t.mem_pool.stop_holding()
+            t.cuda_context.detach()
+        except Exception as e:
+            print("[WARN] end_tenet: %s" % e)
 
     bind = bind_two_way_z_split(Nz=24, nx=8, Q=37, depth=3)
     f_global = _make_global(bind.Nz, bind.nx, bind.Q, seed=11)
     f0_h, f1_h = split_global_to_subdomains(f_global, bind)
     f0_ref, f1_ref = monolith_face_halo_reference(f_global, bind)
 
-    tenet0 = GetTenet({"lang": CUDA_T, "device": 0})
-    tenet1 = GetTenet({"lang": CUDA_T, "device": 1})
-    n0 = int(np.prod(bind.shape0))
-    n1 = int(np.prod(bind.shape1))
-    f0 = IdpyMemory.Zeros(shape=(n0,), dtype=np.float64, tenet=tenet0)
-    f1 = IdpyMemory.Zeros(shape=(n1,), dtype=np.float64, tenet=tenet1)
-    f0.H2D(f0_h.reshape(-1))
-    f1.H2D(f1_h.reshape(-1))
-    staging_a = IdpyMemory.PinnedHost(
-        shape=(bind.n_face,), dtype=np.float64, tenet=tenet0
-    )
-    staging_b = IdpyMemory.PinnedHost(
-        shape=(bind.n_face,), dtype=np.float64, tenet=tenet1
-    )
-
-    t0 = time.perf_counter()
-    exchange_faces_from_bind(
-        f0, f1, bind, mode="auto", staging_a=staging_a, staging_b=staging_b
-    )
-    dt = time.perf_counter() - t0
-    bytes_moved = 2 * bind.n_face * 8  # both legs, f64
-    gbps = (bytes_moved / dt) / 1e9 if dt > 0 else float("inf")
-    print(
-        "[INFO] CUDA exchange soft BW: %.2f GB/s for 2×%.2f KiB faces (informational)"
-        % (gbps, bind.n_face * 8 / 1024.0)
-    )
-
-    # Peer refuse honesty on one leg
+    tenet0 = tenet1 = None
     try:
-        from idpy.IdpyCode import IdpyMemory as IM
+        tenet0 = GetTenet({"lang": CUDA_T, "device": 0})
+        tenet1 = GetTenet({"lang": CUDA_T, "device": 1})
+        n0 = int(np.prod(bind.shape0))
+        n1 = int(np.prod(bind.shape1))
+        f0 = _zeros(n0, np.float64, tenet0)
+        f1 = _zeros(n1, np.float64, tenet1)
+        _h2d(f0, f0_h.reshape(-1))
+        _h2d(f1, f1_h.reshape(-1))
+        staging_a = _pinned(bind.n_face, np.float64, tenet0)
+        staging_b = _pinned(bind.n_face, np.float64, tenet1)
 
-        IM.D2DSub(
-            f0,
-            f1,
-            src_start=bind.src_range_0to1[0],
-            src_stop=bind.src_range_0to1[1],
-            dst_start=bind.dst_range_0to1[0],
-            mode="peer",
+        t0 = time.perf_counter()
+        exchange_faces_from_bind(
+            f0, f1, bind, mode="auto", staging_a=staging_a, staging_b=staging_b
         )
-        # If peer somehow works, OK; else must have raised
-    except Exception as e:
-        assert "peer" in str(e).lower() or "Peer" in str(e) or "access" in str(e).lower(), str(e)
-        print("[INFO] peer refuse OK: %s" % e)
+        dt = time.perf_counter() - t0
+        bytes_moved = 2 * bind.n_face * 8  # both legs, f64
+        gbps = (bytes_moved / dt) / 1e9 if dt > 0 else float("inf")
+        print(
+            "[INFO] CUDA exchange soft BW: %.2f GB/s for 2×%.2f KiB faces (informational)"
+            % (gbps, bind.n_face * 8 / 1024.0)
+        )
 
-    got0 = np.asarray(f0.D2H()).reshape(bind.shape0)
-    got1 = np.asarray(f1.D2H()).reshape(bind.shape1)
-    assert np.array_equal(got0, f0_ref)
-    assert np.array_equal(got1, f1_ref)
-    print("[PASS] CUDA 2-GPU exchange_faces smoke")
+        # Peer refuse honesty on one leg
+        try:
+            IdpyMemory.D2DSub(
+                f0,
+                f1,
+                src_start=bind.src_range_0to1[0],
+                src_stop=bind.src_range_0to1[1],
+                dst_start=bind.dst_range_0to1[0],
+                mode="peer",
+            )
+            # If peer somehow works, OK; else must have raised
+        except Exception as e:
+            assert (
+                "peer" in str(e).lower()
+                or "Peer" in str(e)
+                or "access" in str(e).lower()
+            ), str(e)
+            print("[INFO] peer refuse OK: %s" % e)
+
+        got0 = _d2h(f0).reshape(bind.shape0)
+        got1 = _d2h(f1).reshape(bind.shape1)
+        assert np.array_equal(got0, f0_ref)
+        assert np.array_equal(got1, f1_ref)
+        print("[PASS] CUDA 2-GPU exchange_faces smoke")
+    finally:
+        _end_tenet(tenet0)
+        _end_tenet(tenet1)
 
 
 def test_no_aggregate_stream_api():
