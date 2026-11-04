@@ -302,6 +302,339 @@ def test_multi_gpu_skip_note():
     print("[SKIP] multi-GPU peer / distinct CUDA context: no multi-GPU on this Mac")
 
 
+# ---------------------------------------------------------------------------
+# Phase B — D2DSub (Loom PASS-WITH-NITS)
+# ---------------------------------------------------------------------------
+
+def face_elem_range(shape, *, axis, face_index, depth, order="C"):
+    """
+    Test util (not hot public API): if shape[axis] slab
+    [face_index : face_index+depth] is one contiguous flat range in the given
+    order, return (start, stop) in flat dtype elements. Else raise.
+    """
+    shape = tuple(int(s) for s in shape)
+    axis = int(axis)
+    face_index = int(face_index)
+    depth = int(depth)
+    if order not in ("C", "F"):
+        raise ValueError("face_elem_range: order must be 'C' or 'F'")
+    if axis < 0 or axis >= len(shape):
+        raise ValueError("face_elem_range: axis out of range")
+    if depth <= 0:
+        raise ValueError("face_elem_range: depth must be > 0")
+    if face_index < 0 or face_index + depth > shape[axis]:
+        raise ValueError(
+            "face_elem_range: face [%d, %d) out of bounds for axis size %d"
+            % (face_index, face_index + depth, shape[axis])
+        )
+
+    # Contiguous slab iff the split axis is the slowest-varying spatial axis
+    # for that order (axis 0 for C, last for F) — then a face is one [start,stop).
+    if order == "C":
+        contiguous_axis = 0
+    else:
+        contiguous_axis = len(shape) - 1
+    if axis != contiguous_axis:
+        raise ValueError(
+            "face_elem_range: slab along axis %d is non-contiguous in %s-order "
+            "shape %s; use layout with split axis slowest among spatial "
+            "(e.g. C-order (nz_local, nx, Q)) or a Phase-C pack — B0 has no "
+            "silent gather" % (axis, order, shape)
+        )
+
+    strides = [1] * len(shape)
+    if order == "C":
+        for i in range(len(shape) - 2, -1, -1):
+            strides[i] = strides[i + 1] * shape[i + 1]
+    else:
+        for i in range(1, len(shape)):
+            strides[i] = strides[i - 1] * shape[i - 1]
+
+    start = face_index * strides[axis]
+    stop = (face_index + depth) * strides[axis]
+    return start, stop
+
+
+def _fill_pattern(n, dtype=np.float32):
+    return (np.arange(n, dtype=dtype) + 0.25).astype(dtype)
+
+
+def _assert_strip_equal(expected, got, msg):
+    expected = np.asarray(expected).ravel()
+    got = np.asarray(got).ravel()
+    if expected.shape != got.shape or not np.array_equal(expected, got):
+        raise AssertionError(
+            "%s: expected %s... got %s..." % (msg, expected[:4], got[:4])
+        )
+
+
+def test_d2dsub_same_device_strip_both_ways(lang):
+    """Bit-identical strip both ways with explicit non-zero dst_start."""
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub strip both ways: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub strip both ways + nonzero dst_start (%s)"
+          % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    n = 128
+    dtype = np.float32
+    host = _fill_pattern(n, dtype)
+    src = _zeros(n, dtype, tenet)
+    dst = _zeros(n, dtype, tenet)
+    src.H2D(host)
+
+    src_start, src_stop = 16, 48
+    dst_start = 64
+    n_strip = src_stop - src_start
+    ret = IdpyMemory.D2DSub(
+        src, dst, src_start=src_start, src_stop=src_stop, dst_start=dst_start,
+        mode="auto",
+    )
+    assert ret is None
+    got = np.asarray(dst.D2H())
+    _assert_strip_equal(
+        host[src_start:src_stop], got[dst_start:dst_start + n_strip],
+        "0-way strip auto",
+    )
+    # untouched outside dst strip
+    assert np.all(got[:dst_start] == 0), "prefix must stay zero"
+    assert np.all(got[dst_start + n_strip:] == 0), "suffix must stay zero"
+
+    # reverse direction into a fresh dst with different nonzero dst_start
+    dst2 = _zeros(n, dtype, tenet)
+    src2 = _zeros(n, dtype, tenet)
+    src2.H2D(host)
+    src_start2, src_stop2 = 8, 40
+    dst_start2 = 20
+    IdpyMemory.D2DSub(
+        src2, dst2, src_start=src_start2, src_stop=src_stop2,
+        dst_start=dst_start2, mode="host",
+    )
+    got2 = np.asarray(dst2.D2H())
+    _assert_strip_equal(
+        host[src_start2:src_stop2],
+        got2[dst_start2:dst_start2 + (src_stop2 - src_start2)],
+        "1-way strip host",
+    )
+    print("[PASS] D2DSub strip both ways + nonzero dst_start (%s)"
+          % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_device_mode_strip(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub device strip: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub device strip (%s)" % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    n, dtype = 96, np.float32
+    host = _fill_pattern(n, dtype)
+    src = _zeros(n, dtype, tenet)
+    dst = _zeros(n, dtype, tenet)
+    src.H2D(host)
+    IdpyMemory.D2DSub(
+        src, dst, src_start=10, src_stop=50, dst_start=30, mode="device",
+    )
+    got = np.asarray(dst.D2H())
+    _assert_strip_equal(host[10:50], got[30:70], "device strip")
+    print("[PASS] D2DSub device strip (%s)" % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_peer_refuse(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub peer refuse: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub peer refuse (%s)" % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    host, src, dst = _alloc_pair(tenet, 64)
+    try:
+        IdpyMemory.D2DSub(
+            src, dst, src_start=0, src_stop=32, dst_start=0, mode="peer",
+        )
+        raise AssertionError("peer mode must refuse here")
+    except (RuntimeError, ValueError) as e:
+        msg = str(e).lower()
+        assert ("peer" in msg or "cuda" in msg or "same" in msg
+                or "canaccesspeer" in msg), msg
+    print("[PASS] D2DSub peer refuse (%s)" % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_async_requires_staging(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub async staging: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub async_=True requires staging= (%s)"
+          % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    host, src, dst = _alloc_pair(tenet, 64)
+    try:
+        IdpyMemory.D2DSub(
+            src, dst, src_start=0, src_stop=32, dst_start=0,
+            mode="host", async_=True,
+        )
+        raise AssertionError("async without staging must raise")
+    except (ValueError, RuntimeError, TypeError) as e:
+        assert "staging" in str(e).lower(), str(e)
+    print("[PASS] D2DSub async_=True requires staging= (%s)"
+          % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_async_host_loom(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub async host loom: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    if lang == CTYPES_T:
+        print("[SKIP] D2DSub async host loom: CTypes has no streams")
+        return
+    print("[RUN ] D2DSub async host loom (%s)" % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    n, dtype = 128, np.float32
+    host = _fill_pattern(n, dtype)
+    src = _zeros(n, dtype, tenet)
+    dst = _zeros(n, dtype, tenet)
+    src.H2D(host)
+    src_start, src_stop, dst_start = 16, 80, 8
+    n_strip = src_stop - src_start
+    staging = IdpyMemory.PinnedHost(shape=(n_strip,), dtype=dtype, tenet=tenet)
+    stream_src = IdpyMemory.SiblingStream(tenet)
+    stream_dst = IdpyMemory.SiblingStream(tenet)
+    streams = IdpyMemory.D2DSub(
+        src, dst, src_start=src_start, src_stop=src_stop, dst_start=dst_start,
+        mode="host", async_=True, staging=staging,
+        stream_src=stream_src, stream_dst=stream_dst,
+    )
+    assert streams is not None and isinstance(streams, dict)
+    assert "stream_dst" in streams and "stream_src" in streams
+    _sync_stream(dst, streams["stream_dst"])
+    got = np.asarray(dst.D2H())
+    _assert_strip_equal(
+        host[src_start:src_stop], got[dst_start:dst_start + n_strip],
+        "async D2DSub loom",
+    )
+    print("[PASS] D2DSub async host loom (%s)" % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_range_validation(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub range validation: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub range validation (%s)" % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    src = _ones(32, np.float32, tenet)
+    dst = _zeros(32, np.float32, tenet)
+    try:
+        IdpyMemory.D2DSub(
+            src, dst, src_start=0, src_stop=40, dst_start=0, mode="host",
+        )
+        raise AssertionError("OOB src must raise")
+    except ValueError as e:
+        assert "range" in str(e).lower() or "bound" in str(e).lower(), str(e)
+    try:
+        IdpyMemory.D2DSub(
+            src, dst, src_start=0, src_stop=16, dst_start=20, mode="host",
+        )
+        raise AssertionError("OOB dst must raise")
+    except ValueError as e:
+        assert "range" in str(e).lower() or "bound" in str(e).lower(), str(e)
+    # unequal full sizes OK for Sub if strip fits
+    dst_small = _zeros(24, np.float32, tenet)
+    IdpyMemory.D2DSub(
+        src, dst_small, src_start=0, src_stop=16, dst_start=4, mode="host",
+    )
+    got = np.asarray(dst_small.D2H())
+    host = np.asarray(src.D2H())
+    _assert_strip_equal(host[0:16], got[4:20], "unequal parent sizes strip")
+    print("[PASS] D2DSub range validation (%s)" % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_overlap_device_refuse(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub overlap refuse: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub overlap device refuse / auto->host (%s)"
+          % idpy_langs_human_dict[lang])
+    tenet = _tenet(lang)
+    n, dtype = 64, np.float32
+    host = _fill_pattern(n, dtype)
+    ary = _zeros(n, dtype, tenet)
+    ary.H2D(host)
+    try:
+        IdpyMemory.D2DSub(
+            ary, ary, src_start=0, src_stop=20, dst_start=10, mode="device",
+        )
+        raise AssertionError("overlapping device memcpy must refuse")
+    except ValueError as e:
+        assert "overlap" in str(e).lower(), str(e)
+    # auto forces host and remains bit-identical
+    IdpyMemory.D2DSub(
+        ary, ary, src_start=0, src_stop=20, dst_start=10, mode="auto",
+    )
+    got = np.asarray(ary.D2H())
+    expect = host.copy()
+    expect[10:30] = host[0:20]
+    _assert_strip_equal(expect, got, "overlap auto->host")
+    print("[PASS] D2DSub overlap device refuse / auto->host (%s)"
+          % idpy_langs_human_dict[lang])
+
+
+def test_d2dsub_soft_bw_log(lang):
+    if not _lang_ok(lang):
+        print("[SKIP] D2DSub soft BW: %s unavailable"
+              % idpy_langs_human_dict[lang])
+        return
+    print("[RUN ] D2DSub soft BW log (%s)" % idpy_langs_human_dict[lang])
+    import time
+    tenet = _tenet(lang)
+    # ~4 MiB strip of float32
+    n = 1 << 20
+    dtype = np.float32
+    host = np.random.RandomState(0).randn(n).astype(dtype)
+    src = _zeros(n, dtype, tenet)
+    dst = _zeros(n, dtype, tenet)
+    src.H2D(host)
+    # warmup
+    IdpyMemory.D2DSub(src, dst, src_start=0, src_stop=n, dst_start=0,
+                      mode="host")
+    t0 = time.perf_counter()
+    IdpyMemory.D2DSub(src, dst, src_start=0, src_stop=n, dst_start=0,
+                      mode="host")
+    dt = max(time.perf_counter() - t0, 1e-9)
+    nbytes = n * int(np.dtype(dtype).itemsize)
+    gbps = (nbytes / dt) / 1e9
+    # Informational only — never hard-fail CI on strip BW.
+    print("[INFO] D2DSub soft BW (%s): %.2f GB/s for %.2f MiB host strip "
+          "(informational; not a CI gate)"
+          % (idpy_langs_human_dict[lang], gbps, nbytes / (1024 * 1024)))
+    _assert_strip_equal(host, np.asarray(dst.D2H()), "soft BW correctness")
+    print("[PASS] D2DSub soft BW log (%s)" % idpy_langs_human_dict[lang])
+
+
+def test_face_elem_range_util():
+    print("[RUN ] face_elem_range test util")
+    # C-order (nz, nx, Q): z-slab contiguous
+    start, stop = face_elem_range((8, 4, 3), axis=0, face_index=2, depth=3,
+                                  order="C")
+    assert (start, stop) == (2 * 4 * 3, 5 * 4 * 3)
+    # C-order (nx, nz, Q): z-slab non-contiguous
+    try:
+        face_elem_range((4, 8, 3), axis=1, face_index=2, depth=3, order="C")
+        raise AssertionError("non-contig z-slab must raise")
+    except ValueError as e:
+        assert "non-contiguous" in str(e).lower(), str(e)
+    print("[PASS] face_elem_range test util")
+
+
+def test_d2dsub_multi_gpu_skip_note():
+    print("[SKIP] D2DSub multi-GPU cross-device strip: no multi-GPU on this Mac")
+
+
+
 def main():
     print("=== IdpyMemory.D2D Phase A acceptance ===")
     for lang in _D2D_LANGS:
@@ -319,6 +652,20 @@ def main():
     test_multi_gpu_skip_note()
     print("=== Phase A acceptance done ===")
 
+    print("=== IdpyMemory.D2DSub Phase B acceptance ===")
+    for lang in _D2D_LANGS:
+        test_d2dsub_same_device_strip_both_ways(lang)
+        test_d2dsub_device_mode_strip(lang)
+        test_d2dsub_peer_refuse(lang)
+        test_d2dsub_async_requires_staging(lang)
+        test_d2dsub_async_host_loom(lang)
+        test_d2dsub_range_validation(lang)
+        test_d2dsub_overlap_device_refuse(lang)
+        test_d2dsub_soft_bw_log(lang)
+    test_face_elem_range_util()
+    test_d2dsub_multi_gpu_skip_note()
+    print("=== Phase B acceptance done ===")
+
 
 if __name__ == "__main__":
     try:
@@ -327,3 +674,5 @@ if __name__ == "__main__":
     except Exception as e:
         print("[FAIL] %s" % e)
         raise
+
+
