@@ -129,11 +129,16 @@ def step_two_way_numpy(
     cfg: RTConfig,
     bounds0: Dict,
     bounds1: Dict,
+    *,
+    debug_assert: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """One dual-tenet step: plant → collide → exchange_faces → stream.
 
     Mutates ``f0``/``f1`` in place; returns ``(f0, f1)`` for chaining.
     Call-site order locked. Populations only; cut-halos not collided.
+
+    ``debug_assert`` (default True for NumPy D0 tests): halo snapshot checks.
+    Hot path / CUDA callers should pass ``debug_assert=False``.
     """
     if f0.shape != bind.shape0 or f1.shape != bind.shape1:
         raise ValueError(
@@ -145,26 +150,24 @@ def step_two_way_numpy(
     plant_local_wall(f0, wall_row=bounds0["wall_bot"], z_index=0)
     plant_local_wall(f1, wall_row=bounds1["wall_top"], z_index=bind.nz1 - 1)
 
-    # Snapshot halos to assert collide does not write them
-    halo0_before = f0[bind.n0 :].copy()
-    halo1_before = f1[: bind.depth].copy()
+    halo0_before = f0[bind.n0 :].copy() if debug_assert else None
+    halo1_before = f1[: bind.depth].copy() if debug_assert else None
 
     # --- collide owned interiors only ---
-    # GPU0: z ∈ [1, n0); GPU1: z ∈ [depth, nz1-1)
     collide_owned_interior(f0, 1, bind.n0, cfg)
     collide_owned_interior(f1, bind.depth, bind.nz1 - 1, cfg)
 
-    if not np.array_equal(f0[bind.n0 :], halo0_before):
-        raise RuntimeError("step_two_way_numpy: collide wrote GPU0 cut-halo")
-    if not np.array_equal(f1[: bind.depth], halo1_before):
-        raise RuntimeError("step_two_way_numpy: collide wrote GPU1 cut-halo")
+    if debug_assert:
+        if not np.array_equal(f0[bind.n0 :], halo0_before):
+            raise RuntimeError("step_two_way_numpy: collide wrote GPU0 cut-halo")
+        if not np.array_equal(f1[: bind.depth], halo1_before):
+            raise RuntimeError("step_two_way_numpy: collide wrote GPU1 cut-halo")
 
     # --- exchange cut faces ---
     exchange_faces_numpy(f0, f1, bind)
 
-    # Snapshot halos: stream must not write them
-    halo0_ex = f0[bind.n0 :].copy()
-    halo1_ex = f1[: bind.depth].copy()
+    halo0_ex = f0[bind.n0 :].copy() if debug_assert else None
+    halo1_ex = f1[: bind.depth].copy() if debug_assert else None
 
     # --- stream write-owned / read-halo ---
     stream_write_owned(
@@ -174,9 +177,105 @@ def step_two_way_numpy(
         f1, bind.depth, bind.nz1, ghost_bot=None, ghost_top=bounds1["ghost_top"]
     )
 
-    if not np.array_equal(f0[bind.n0 :], halo0_ex):
-        raise RuntimeError("step_two_way_numpy: stream wrote GPU0 cut-halo")
-    if not np.array_equal(f1[: bind.depth], halo1_ex):
-        raise RuntimeError("step_two_way_numpy: stream wrote GPU1 cut-halo")
+    if debug_assert:
+        if not np.array_equal(f0[bind.n0 :], halo0_ex):
+            raise RuntimeError("step_two_way_numpy: stream wrote GPU0 cut-halo")
+        if not np.array_equal(f1[: bind.depth], halo1_ex):
+            raise RuntimeError("step_two_way_numpy: stream wrote GPU1 cut-halo")
 
     return f0, f1
+
+
+class CudaTenetCtx:
+    """PR #20 Ctx: push owning tenet context for multi-GPU alloc/H2D/D2H."""
+
+    def __init__(self, tenet):
+        self.tenet = tenet
+
+    def __enter__(self):
+        import pycuda.driver as cuda  # noqa: F401 — used in __exit__
+
+        self.tenet.cuda_context.push()
+        return self
+
+    def __exit__(self, *a):
+        import pycuda.driver as cuda
+
+        cuda.Context.pop()
+        return False
+
+
+def _cuda_h2d(ary, host) -> None:
+    with CudaTenetCtx(ary.tenet):
+        ary.H2D(np.ascontiguousarray(host).reshape(-1))
+
+
+def _cuda_d2h(ary, shape) -> np.ndarray:
+    with CudaTenetCtx(ary.tenet):
+        return np.asarray(ary.D2H()).reshape(shape)
+
+
+def step_two_way_cuda_cold(
+    f0_dev,
+    f1_dev,
+    bind: TwoWayZSplitBind,
+    cfg: RTConfig,
+    bounds0: Dict,
+    bounds1: Dict,
+    staging_a,
+    staging_b,
+    *,
+    mode: str = "auto",
+) -> Tuple[object, object]:
+    """CUDA D1 cold round-trip (OVERALL_GATE default).
+
+    Locked barriers every step (Loom must-fix)::
+
+        D2H → plant+collide (host) → H2D → exchange_faces_from_bind
+            → D2H → stream_write_owned (host) → H2D
+
+    Plant/collide/stream stay host-only; exchange is device-only.
+    """
+    from .exchange import exchange_faces_from_bind
+
+    # 1) D2H full buffers
+    h0 = _cuda_d2h(f0_dev, bind.shape0)
+    h1 = _cuda_d2h(f1_dev, bind.shape1)
+
+    # 2) plant + collide on host (no hot-path halo copies)
+    plant_local_wall(h0, wall_row=bounds0["wall_bot"], z_index=0)
+    plant_local_wall(h1, wall_row=bounds1["wall_top"], z_index=bind.nz1 - 1)
+    collide_owned_interior(h0, 1, bind.n0, cfg)
+    collide_owned_interior(h1, bind.depth, bind.nz1 - 1, cfg)
+
+    # 3) H2D before exchange (barrier)
+    _cuda_h2d(f0_dev, h0)
+    _cuda_h2d(f1_dev, h1)
+
+    # 4) device exchange C0
+    exchange_faces_from_bind(
+        f0_dev,
+        f1_dev,
+        bind,
+        mode=mode,
+        staging_a=staging_a,
+        staging_b=staging_b,
+    )
+
+    # 5) D2H before stream (barrier; full buffers)
+    h0 = _cuda_d2h(f0_dev, bind.shape0)
+    h1 = _cuda_d2h(f1_dev, bind.shape1)
+
+    # 6) stream write-owned on host
+    stream_write_owned(
+        h0, 0, bind.n0, ghost_bot=bounds0["ghost_bot"], ghost_top=None
+    )
+    stream_write_owned(
+        h1, bind.depth, bind.nz1, ghost_bot=None, ghost_top=bounds1["ghost_top"]
+    )
+
+    # 7) H2D post-stream
+    _cuda_h2d(f0_dev, h0)
+    _cuda_h2d(f1_dev, h1)
+
+    return f0_dev, f1_dev

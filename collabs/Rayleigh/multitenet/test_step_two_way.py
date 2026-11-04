@@ -30,8 +30,10 @@ from multitenet.bind import (
     transpose_multitenet_to_gate1,
 )
 from multitenet.step_two_way import (
+    CudaTenetCtx,
     gather_owned,
     split_bounds_for_two_way,
+    step_two_way_cuda_cold,
     step_two_way_numpy,
 )
 
@@ -143,14 +145,180 @@ def test_never_gate1_slice_helper():
     print("[PASS] helpers reject Gate1-style misuse docs")
 
 
+
+def _cuda_device_count() -> int:
+    try:
+        from idpy.IdpyCode import CUDA_T, idpy_langs_sys
+
+        if not idpy_langs_sys.get(CUDA_T):
+            return 0
+        import pycuda.driver as drv
+
+        drv.init()
+        return int(drv.Device.count())
+    except Exception:
+        return 0
+
+
+def test_cuda_cold_1_step_owned_gather():
+    print("[RUN ] CUDA D1 cold 1-step owned gather vs monolith")
+    n_dev = _cuda_device_count()
+    if n_dev < 2:
+        print(
+            "[SKIP] CUDA D1 cold 1-step: need >=2 CUDA devices, found %d"
+            % n_dev
+        )
+        return
+
+    from idpy.IdpyCode import CUDA_T, GetTenet, IdpyMemory
+
+    nz, z_cut, depth, n_steps = 32, 16, MIN_DEPTH, 1
+    cfg = _tiny_cfg(nx=16, nz=nz, seed=21)
+    f_g1, temperature_h, rho, _eta = initial_populations(cfg)
+    bounds = prepare_boundaries(cfg, rho, temperature_h)
+    bounds0, bounds1 = split_bounds_for_two_way(bounds)
+    bind = bind_two_way_z_split(
+        Nz=nz, nx=cfg.nx, Q=f_g1.shape[-1], z_cut=z_cut, depth=depth
+    )
+
+    f_mono = f_g1.copy()
+    for _ in range(n_steps):
+        f_mono = gate1_step(f_mono, cfg, bounds)
+    mono_mt = transpose_gate1_to_multitenet(f_mono)
+
+    f_mt0 = transpose_gate1_to_multitenet(f_g1.copy())
+    h0, h1 = split_global_to_subdomains(f_mt0, bind)
+
+    tenet0 = tenet1 = None
+    try:
+        tenet0 = GetTenet({"lang": CUDA_T, "device": 0})
+        tenet1 = GetTenet({"lang": CUDA_T, "device": 1})
+        n0 = int(np.prod(bind.shape0))
+        n1 = int(np.prod(bind.shape1))
+        with CudaTenetCtx(tenet0):
+            f0 = IdpyMemory.Zeros(shape=(n0,), dtype=np.float64, tenet=tenet0)
+            staging_a = IdpyMemory.PinnedHost(
+                shape=(bind.n_face,), dtype=np.float64, tenet=tenet0
+            )
+        with CudaTenetCtx(tenet1):
+            f1 = IdpyMemory.Zeros(shape=(n1,), dtype=np.float64, tenet=tenet1)
+            staging_b = IdpyMemory.PinnedHost(
+                shape=(bind.n_face,), dtype=np.float64, tenet=tenet1
+            )
+        with CudaTenetCtx(tenet0):
+            f0.H2D(h0.reshape(-1))
+        with CudaTenetCtx(tenet1):
+            f1.H2D(h1.reshape(-1))
+
+        for _ in range(n_steps):
+            step_two_way_cuda_cold(
+                f0, f1, bind, cfg, bounds0, bounds1, staging_a, staging_b
+            )
+
+        with CudaTenetCtx(tenet0):
+            got0 = np.asarray(f0.D2H()).reshape(bind.shape0)
+        with CudaTenetCtx(tenet1):
+            got1 = np.asarray(f1.D2H()).reshape(bind.shape1)
+        owned = gather_owned(got0, got1, bind)
+        if not np.array_equal(owned, mono_mt):
+            diff = np.max(np.abs(owned - mono_mt))
+            raise AssertionError(
+                "CUDA cold owned != monolith (max|diff|=%g)" % diff
+            )
+        print("[PASS] CUDA D1 cold 1-step owned gather vs monolith")
+    finally:
+        for t in (tenet0, tenet1):
+            if t is None:
+                continue
+            try:
+                with CudaTenetCtx(t):
+                    t.mem_pool.free_held()
+                    t.mem_pool.stop_holding()
+                t.cuda_context.detach()
+            except Exception as e:
+                print("[WARN] end_tenet: %s" % e)
+
+
+def test_cuda_cold_n2_soft():
+    print("[RUN ] CUDA D1 cold N=2 owned gather (soft)")
+    n_dev = _cuda_device_count()
+    if n_dev < 2:
+        print("[SKIP] CUDA D1 cold N=2: need >=2 CUDA devices, found %d" % n_dev)
+        return
+
+    from idpy.IdpyCode import CUDA_T, GetTenet, IdpyMemory
+
+    nz, z_cut, depth, n_steps = 32, 16, MIN_DEPTH, 2
+    cfg = _tiny_cfg(nx=16, nz=nz, seed=22)
+    f_g1, temperature_h, rho, _eta = initial_populations(cfg)
+    bounds = prepare_boundaries(cfg, rho, temperature_h)
+    bounds0, bounds1 = split_bounds_for_two_way(bounds)
+    bind = bind_two_way_z_split(
+        Nz=nz, nx=cfg.nx, Q=f_g1.shape[-1], z_cut=z_cut, depth=depth
+    )
+
+    f_mono = f_g1.copy()
+    for _ in range(n_steps):
+        f_mono = gate1_step(f_mono, cfg, bounds)
+    mono_mt = transpose_gate1_to_multitenet(f_mono)
+
+    f_mt0 = transpose_gate1_to_multitenet(f_g1.copy())
+    h0, h1 = split_global_to_subdomains(f_mt0, bind)
+
+    tenet0 = tenet1 = None
+    try:
+        tenet0 = GetTenet({"lang": CUDA_T, "device": 0})
+        tenet1 = GetTenet({"lang": CUDA_T, "device": 1})
+        n0 = int(np.prod(bind.shape0))
+        n1 = int(np.prod(bind.shape1))
+        with CudaTenetCtx(tenet0):
+            f0 = IdpyMemory.Zeros(shape=(n0,), dtype=np.float64, tenet=tenet0)
+            staging_a = IdpyMemory.PinnedHost(
+                shape=(bind.n_face,), dtype=np.float64, tenet=tenet0
+            )
+        with CudaTenetCtx(tenet1):
+            f1 = IdpyMemory.Zeros(shape=(n1,), dtype=np.float64, tenet=tenet1)
+            staging_b = IdpyMemory.PinnedHost(
+                shape=(bind.n_face,), dtype=np.float64, tenet=tenet1
+            )
+        with CudaTenetCtx(tenet0):
+            f0.H2D(h0.reshape(-1))
+        with CudaTenetCtx(tenet1):
+            f1.H2D(h1.reshape(-1))
+        for _ in range(n_steps):
+            step_two_way_cuda_cold(
+                f0, f1, bind, cfg, bounds0, bounds1, staging_a, staging_b
+            )
+        with CudaTenetCtx(tenet0):
+            got0 = np.asarray(f0.D2H()).reshape(bind.shape0)
+        with CudaTenetCtx(tenet1):
+            got1 = np.asarray(f1.D2H()).reshape(bind.shape1)
+        owned = gather_owned(got0, got1, bind)
+        assert np.array_equal(owned, mono_mt), "CUDA N=2 soft bit-identical failed"
+        print("[PASS] CUDA D1 cold N=2 owned gather (soft)")
+    finally:
+        for t in (tenet0, tenet1):
+            if t is None:
+                continue
+            try:
+                with CudaTenetCtx(t):
+                    t.mem_pool.free_held()
+                    t.mem_pool.stop_holding()
+                t.cuda_context.detach()
+            except Exception as e:
+                print("[WARN] end_tenet: %s" % e)
+
+
 def main():
-    print("=== Phase D NumPy D0 dual-tenet step acceptance ===")
+    print("=== Phase D dual-tenet step acceptance (D0 NumPy + D1 CUDA) ===")
     test_call_order_doc()
     test_never_gate1_slice_helper()
     test_numpy_1_step_owned_gather()
     test_numpy_n_step_owned_gather()
     test_depth_eq_z_cut_edge()
-    print("=== Phase D D0 ALL PASS ===")
+    test_cuda_cold_1_step_owned_gather()
+    test_cuda_cold_n2_soft()
+    print("=== Phase D D0/D1 acceptance done (SKIP CUDA if <2 devices) ===")
     return 0
 
 

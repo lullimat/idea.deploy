@@ -30,6 +30,8 @@ from .step_two_way import (
     gather_owned,
     split_bounds_for_two_way,
     step_two_way_numpy,
+    step_two_way_cuda_cold,
+    CudaTenetCtx,
     stream_write_owned,
 )
 
@@ -51,5 +53,7 @@ __all__ = [
     "gather_owned",
     "split_bounds_for_two_way",
     "step_two_way_numpy",
+    "step_two_way_cuda_cold",
+    "CudaTenetCtx",
     "stream_write_owned",
 ]

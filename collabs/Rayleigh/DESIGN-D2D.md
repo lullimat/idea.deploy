@@ -30,7 +30,13 @@ stock CUDA smoke needs Ctx push (PR #20).
 - Call-site order: **plant → collide → `exchange_faces` → stream**
 - Populations only; C0 = two sequential sync `D2DSub` with per-leg streams
 
-## Phase D — NumPy D0 merged (PR #21); CUDA D1 pending
+## Phase D — NumPy D0 merged (PR #21); CUDA D1 in flight
+
+Dual-tenet CUDA cold chain (propose ≠ merge until landed):
+
+- Design: [`docs/planning/D2D-phase-d1-cuda-dual-tenet.md`](../../docs/planning/D2D-phase-d1-cuda-dual-tenet.md)
+- Driver: `step_two_way_cuda_cold` — D2H → plant+collide → H2D → exchange → D2H → stream → H2D
+- Host plant/collide/stream; device exchange only; Ctx push (PR #20); no IdpyMemory edits
 
 Dual-tenet LBM step wire (NumPy D0 first): plant → collide(owned) →
 `exchange_faces` → stream **write-owned / read-halo**.
