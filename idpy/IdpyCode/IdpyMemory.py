@@ -1007,6 +1007,158 @@ def _d2d_validate_pair(ary_src, ary_dst):
         'n_elem': n_src,
         'dtype': dt_src,
         'nbytes': _d2d_nbytes(ary_src),
+        'src_start': 0,
+        'dst_start': 0,
+    }
+
+
+def _d2d_alloc_id(ary):
+    # Stable identity for the underlying device allocation (overlap checks).
+    key = getattr(ary, 'BufferKey', None)
+    if callable(key):
+        return ('bufkey', key())
+    base_data = getattr(ary, 'base_data', None)
+    if base_data is not None:
+        return ('ocl', id(base_data))
+    if hasattr(ary, 'gpudata'):
+        root = ary
+        seen = set()
+        while True:
+            base = getattr(root, 'base', None)
+            if base is None or id(base) in seen:
+                break
+            seen.add(id(root))
+            if hasattr(base, 'gpudata'):
+                root = base
+            else:
+                break
+        return ('cuda', int(root.gpudata))
+    # NumPy / CTypes: use the array-interface data pointer (id(memoryview)
+    # is NOT stable across distinct arrays).
+    iface = getattr(ary, '__array_interface__', None)
+    if isinstance(iface, dict) and 'data' in iface:
+        root = ary
+        seen = set()
+        while True:
+            base = getattr(root, 'base', None)
+            if base is None or id(base) in seen:
+                break
+            seen.add(id(root))
+            if getattr(base, '__array_interface__', None) is not None:
+                root = base
+            else:
+                break
+        iface_r = getattr(root, '__array_interface__', None)
+        if isinstance(iface_r, dict) and 'data' in iface_r:
+            return ('np', int(iface_r['data'][0]))
+        return ('np', int(iface['data'][0]))
+    # Metal buffer wrapper (non-ndarray): identity of the Buffer object.
+    data = getattr(ary, 'data', None)
+    if data is not None:
+        return ('data', id(data))
+    return ('obj', id(ary))
+
+
+def _d2d_abs_elem(ary, elem_start):
+    # Absolute flat dtype-element index within the underlying allocation.
+    off = getattr(ary, 'offset', None)
+    if off is not None:
+        return int(off) + int(elem_start)
+    if hasattr(ary, 'gpudata'):
+        item = int(_d2d_dtype(ary).itemsize)
+        root = ary
+        seen = set()
+        while True:
+            base = getattr(root, 'base', None)
+            if base is None or id(base) in seen:
+                break
+            seen.add(id(root))
+            if hasattr(base, 'gpudata'):
+                root = base
+            else:
+                break
+        rel = (int(ary.gpudata) - int(root.gpudata)) // item
+        return int(rel) + int(elem_start)
+    return int(elem_start)
+
+
+def _d2d_ranges_overlap(ary_src, src_start, n, ary_dst, dst_start):
+    if _d2d_alloc_id(ary_src) != _d2d_alloc_id(ary_dst):
+        return False
+    a0 = _d2d_abs_elem(ary_src, src_start)
+    a1 = a0 + int(n)
+    b0 = _d2d_abs_elem(ary_dst, dst_start)
+    b1 = b0 + int(n)
+    return not (a1 <= b0 or b1 <= a0)
+
+
+def _d2d_validate_pair_sub(ary_src, ary_dst, src_start, src_stop, dst_start):
+    """
+    Strip validate for D2DSub. Unlike _d2d_validate_pair, does NOT require
+    equal full-array sizes — only that [src_start, src_stop) fits src and
+    [dst_start, dst_start+n) fits dst. Indices are flat dtype elements.
+    """
+    tenet_src = _d2d_require_tenet(ary_src, 'src')
+    tenet_dst = _d2d_require_tenet(ary_dst, 'dst')
+    if getattr(ary_src, 'tenet', None) is None:
+        ary_src.tenet = tenet_src
+    if getattr(ary_dst, 'tenet', None) is None:
+        ary_dst.tenet = tenet_dst
+
+    lang_src = _d2d_lang(ary_src)
+    lang_dst = _d2d_lang(ary_dst)
+    if lang_src != lang_dst:
+        raise ValueError(
+            "D2DSub: different langs refused (%s vs %s)" % (lang_src, lang_dst)
+        )
+
+    dt_src, dt_dst = _d2d_dtype(ary_src), _d2d_dtype(ary_dst)
+    if dt_src != dt_dst:
+        raise ValueError(
+            "D2DSub: dtype mismatch (%s vs %s)" % (dt_src, dt_dst)
+        )
+
+    if not _d2d_is_c_contiguous(ary_src) or not _d2d_is_c_contiguous(ary_dst):
+        raise ValueError("D2DSub: arrays must be C-contiguous device storage")
+
+    src_start, src_stop = int(src_start), int(src_stop)
+    dst_start = int(dst_start)
+    n_src = _d2d_element_count(ary_src)
+    n_dst = _d2d_element_count(ary_dst)
+    if src_start < 0 or src_stop > n_src or src_start >= src_stop:
+        raise ValueError(
+            "D2DSub: src range [%d, %d) out of bounds for size %d"
+            % (src_start, src_stop, n_src)
+        )
+    n = src_stop - src_start
+    if dst_start < 0 or dst_start + n > n_dst:
+        raise ValueError(
+            "D2DSub: dst range [%d, %d) out of bounds for size %d"
+            % (dst_start, dst_start + n, n_dst)
+        )
+
+    itemsize = int(dt_src.itemsize)
+    tenet_src = _d2d_require_tenet(ary_src, 'src')
+    tenet_dst = _d2d_require_tenet(ary_dst, 'dst')
+    dev_src = _d2d_device_id(tenet_src)
+    dev_dst = _d2d_device_id(tenet_dst)
+    same_device = (dev_src == dev_dst)
+    same_ctx = _d2d_same_owning_context(ary_src, ary_dst, lang_src)
+    overlap = _d2d_ranges_overlap(ary_src, src_start, n, ary_dst, dst_start)
+    return {
+        'lang': lang_src,
+        'tenet_src': tenet_src,
+        'tenet_dst': tenet_dst,
+        'device_id_src': dev_src,
+        'device_id_dst': dev_dst,
+        'same_device': same_device,
+        'same_ctx': same_ctx,
+        'n_elem': n,
+        'dtype': dt_src,
+        'nbytes': n * itemsize,
+        'src_start': src_start,
+        'dst_start': dst_start,
+        'overlap': overlap,
     }
 
 
@@ -1067,6 +1219,7 @@ def _d2d_sync_stream_or_context(ary, stream, tenet):
         cu_driver.Context.synchronize()
 
 
+
 def _D2DDevice(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
                async_=False):
     if not meta['same_device']:
@@ -1081,15 +1234,22 @@ def _D2DDevice(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
             "D2D mode='device': same device_id but distinct owning contexts; "
             "use mode='host' or mode='auto'"
         )
+    if meta.get('overlap'):
+        raise ValueError(
+            "D2D mode='device': src/dst strips overlap on the same storage; "
+            "refusing device memcpy (use mode='host' or non-overlapping ranges)"
+        )
 
     lang = meta['lang']
     stream = stream_dst if stream_dst is not None else stream_src
+    src_start = int(meta.get('src_start', 0))
+    dst_start = int(meta.get('dst_start', 0))
+    nbytes = int(meta['nbytes'])
 
     if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
         with _CudaContextGuard(meta['tenet_src']):
-            dst_ptr = int(ary_dst.gpudata)
-            src_ptr = int(ary_src.gpudata)
-            nbytes = meta['nbytes']
+            src_ptr = int(ary_src.gpudata) + src_start * int(meta['dtype'].itemsize)
+            dst_ptr = int(ary_dst.gpudata) + dst_start * int(meta['dtype'].itemsize)
             if async_ and stream is not None:
                 cu_driver.memcpy_dtod_async(dst_ptr, src_ptr, nbytes,
                                             stream=stream)
@@ -1110,19 +1270,20 @@ def _D2DDevice(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
         queue = stream if stream is not None else (
             getattr(ary_dst, 'queue', None) or meta['tenet_dst']
         )
-        # Public API: enqueue_copy(queue, dest, src, ...); no is_blocking
-        # for buffer->buffer (wait via queue.finish / returned event).
         src_data = (ary_src.base_data if hasattr(ary_src, 'base_data')
                     else ary_src.data)
         dst_data = (ary_dst.base_data if hasattr(ary_dst, 'base_data')
                     else ary_dst.data)
+        item = int(meta['dtype'].itemsize)
+        src_off = int(getattr(ary_src, 'offset', 0)) + src_start * item
+        dst_off = int(getattr(ary_dst, 'offset', 0)) + dst_start * item
         cl.enqueue_copy(
             queue,
             dst_data,
             src_data,
-            src_offset=int(getattr(ary_src, 'offset', 0)),
-            dst_offset=int(getattr(ary_dst, 'offset', 0)),
-            byte_count=meta['nbytes'],
+            src_offset=src_off,
+            dst_offset=dst_off,
+            byte_count=nbytes,
         )
         if async_ and stream is not None:
             return {'stream_src': stream_src, 'stream_dst': stream_dst}
@@ -1130,9 +1291,13 @@ def _D2DDevice(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
             queue.finish()
         return None
 
-    # Metal / CTypes (unified / host): bit-identical copy via host snapshot.
-    host = np.array(ary_src.D2H(), copy=True)
-    ary_dst.H2D(host)
+    # Metal / CTypes (unified / host): strip via Sub primitives — no whole copy.
+    n = int(meta['n_elem'])
+    host = np.empty((n,), dtype=meta['dtype'])
+    got = ary_src.D2HSub(src_start, src_start + n, ary=host)
+    if got is not None and got is not host:
+        np.copyto(host, np.asarray(got).ravel()[:n])
+    ary_dst.H2DSub(host, start=dst_start)
     if async_:
         return {'stream_src': stream_src, 'stream_dst': stream_dst}
     return None
@@ -1141,7 +1306,7 @@ def _D2DDevice(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
 def _D2DPeer(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
              async_=False):
     # Probed-true CUDA peer only (canAccessPeer==1).
-    # CNS/PHB MemcpyPeer-fallback is OUT of Phase A -- refuse when probe false.
+    # CNS/PHB MemcpyPeer-fallback is OUT of Phase A/B -- refuse when probe false.
     lang = meta['lang']
     if not (idpy_langs_sys[CUDA_T] and lang == CUDA_T):
         raise ValueError("D2D mode='peer': CUDA only")
@@ -1152,8 +1317,13 @@ def _D2DPeer(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
     if not _d2d_cuda_can_access_peer(meta['tenet_src'], meta['tenet_dst']):
         raise RuntimeError(
             "D2D mode='peer': canAccessPeer==0; refusing. "
-            "MemcpyPeer driver fallback is out of Phase A; use mode='host'."
+            "MemcpyPeer driver fallback is out of Phase A/B; use mode='host'."
         )
+
+    src_start = int(meta.get('src_start', 0))
+    dst_start = int(meta.get('dst_start', 0))
+    item = int(meta['dtype'].itemsize)
+    nbytes = int(meta['nbytes'])
 
     with _CudaContextGuard(meta['tenet_dst']):
         try:
@@ -1164,18 +1334,20 @@ def _D2DPeer(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
             pass
 
     stream = stream_dst if stream_dst is not None else stream_src
+    src_ptr = int(ary_src.gpudata) + src_start * item
+    dst_ptr = int(ary_dst.gpudata) + dst_start * item
     with _CudaContextGuard(meta['tenet_src']):
         if async_ and stream is not None:
             cu_driver.memcpy_peer_async(
-                int(ary_dst.gpudata), meta['tenet_dst'].cuda_context,
-                int(ary_src.gpudata), meta['tenet_src'].cuda_context,
-                meta['nbytes'], stream=stream,
+                dst_ptr, meta['tenet_dst'].cuda_context,
+                src_ptr, meta['tenet_src'].cuda_context,
+                nbytes, stream=stream,
             )
         else:
             cu_driver.memcpy_peer(
-                int(ary_dst.gpudata), meta['tenet_dst'].cuda_context,
-                int(ary_src.gpudata), meta['tenet_src'].cuda_context,
-                meta['nbytes'],
+                dst_ptr, meta['tenet_dst'].cuda_context,
+                src_ptr, meta['tenet_src'].cuda_context,
+                nbytes,
             )
             async_ = False
 
@@ -1191,15 +1363,20 @@ def _D2DPeer(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
     return None
 
 
-def _D2DHost(ary_src, ary_dst, meta, staging=None, stream_src=None,
-             stream_dst=None, async_=False):
-    # Host-mediated bounce (pinned preferred; pageable OK for sync).
-    # Loom (A): wait D2H complete before submit H2D.
-    # staging= required when async_=True (Phase A temps policy).
-    # Caller-owned staging should be allocated under src tenet (prefer-src).
+def _host_bounce(ary_src, ary_dst, meta, staging=None, stream_src=None,
+                 stream_dst=None, async_=False):
+    """
+    Shared host-mediated bounce for full D2D and D2DSub.
+    Uses D2HSub/H2DSub with flat element offsets (Loom Phase B nit 5).
+    Loom (A): wait D2HSub complete before submit H2DSub.
+    staging= required when async_=True (temps policy).
+    """
     lang = meta['lang']
-    n_elem = meta['n_elem']
+    n_elem = int(meta['n_elem'])
     dtype = meta['dtype']
+    src_start = int(meta.get('src_start', 0))
+    dst_start = int(meta.get('dst_start', 0))
+    src_stop = src_start + n_elem
 
     if async_ and staging is None:
         raise ValueError(
@@ -1221,14 +1398,14 @@ def _D2DHost(ary_src, ary_dst, meta, staging=None, stream_src=None,
 
     h2d_submitted = False
     try:
-        # --- src D2H into staging ---
+        # --- src D2HSub into staging ---
         if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
             with _CudaContextGuard(meta['tenet_src']):
                 if effective_async and stream_src is not None:
-                    ary_src.D2H(ary=staging_view, async_=True,
-                                idpy_stream=stream_src)
+                    ary_src.D2HSub(src_start, src_stop, ary=staging_view,
+                                   async_=True, idpy_stream=stream_src)
                 else:
-                    ary_src.D2H(ary=staging_view)
+                    ary_src.D2HSub(src_start, src_stop, ary=staging_view)
             # Loom (A): wait src D2H complete BEFORE submit dst H2D.
             if effective_async and stream_src is not None:
                 stream_src.synchronize()
@@ -1237,33 +1414,37 @@ def _D2DHost(ary_src, ary_dst, meta, staging=None, stream_src=None,
                     cu_driver.Context.synchronize()
         else:
             if effective_async and stream_src is not None and lang == OCL_T:
-                ary_src.D2H(ary=staging_view, async_=True,
-                            idpy_stream=stream_src)
+                got = ary_src.D2HSub(src_start, src_stop, ary=staging_view,
+                                     async_=True, idpy_stream=stream_src)
+                if isinstance(got, tuple):
+                    # (ary, event) — still wait before H2D (Loom A)
+                    pass
                 _d2d_sync_stream_or_context(ary_src, stream_src,
                                             meta['tenet_src'])
             else:
-                got = ary_src.D2H(ary=staging_view)
+                got = ary_src.D2HSub(src_start, src_stop, ary=staging_view)
                 if got is not None and got is not staging_view:
                     np.copyto(staging_view, np.asarray(got).ravel()[:n_elem])
             _d2d_sync_stream_or_context(ary_src, stream_src, meta['tenet_src'])
 
-        # --- dst H2D from staging (only after D2H completion) ---
+        # --- dst H2DSub from staging (only after D2H completion) ---
         if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
             with _CudaContextGuard(meta['tenet_dst']):
                 if effective_async and stream_dst is not None:
-                    ary_dst.H2D(staging_view, async_=True,
-                                idpy_stream=stream_dst)
+                    ary_dst.H2DSub(staging_view, start=dst_start, async_=True,
+                                   idpy_stream=stream_dst)
                     h2d_submitted = True
                 else:
-                    ary_dst.H2D(staging_view)
+                    ary_dst.H2DSub(staging_view, start=dst_start)
                     h2d_submitted = True
                     effective_async = False
         else:
             if effective_async and stream_dst is not None and lang == OCL_T:
-                ary_dst.H2D(staging_view, async_=True, idpy_stream=stream_dst)
+                ary_dst.H2DSub(staging_view, start=dst_start, async_=True,
+                               idpy_stream=stream_dst)
                 h2d_submitted = True
             else:
-                ary_dst.H2D(staging_view)
+                ary_dst.H2DSub(staging_view, start=dst_start)
                 h2d_submitted = True
                 effective_async = False
 
@@ -1295,6 +1476,16 @@ def _D2DHost(ary_src, ary_dst, meta, staging=None, stream_src=None,
             del staging_view
 
 
+def _D2DHost(ary_src, ary_dst, meta, staging=None, stream_src=None,
+             stream_dst=None, async_=False):
+    # Thin wrapper: full-array and Sub host paths share _host_bounce.
+    return _host_bounce(
+        ary_src, ary_dst, meta,
+        staging=staging, stream_src=stream_src, stream_dst=stream_dst,
+        async_=async_,
+    )
+
+
 def _d2d_resolve_mode(mode, meta):
     if mode not in _D2D_MODES:
         raise ValueError(
@@ -1302,6 +1493,9 @@ def _d2d_resolve_mode(mode, meta):
         )
 
     if mode == "auto":
+        if meta.get('overlap') and meta['same_device'] and meta['same_ctx']:
+            # Same-storage overlap: device memcpy unsafe → force host.
+            return "host"
         if meta['same_device'] and meta['same_ctx']:
             return "device"
         if meta['same_device'] and not meta['same_ctx']:
@@ -1372,6 +1566,10 @@ def D2D(ary_src, ary_dst, idpy_stream=None, async_src=False, async_dst=False, *,
     Positional ``idpy_stream`` / ``async_src`` / ``async_dst`` still accepted
     for one cycle with ``DeprecationWarning``, mapped onto ``stream_*`` /
     ``async_``. They do not restore the old return echo.
+
+    See also
+    --------
+    ``D2DSub`` — contiguous strip / face-range transfer (Phase B).
     """
     if idpy_stream is not None:
         warnings.warn(
@@ -1414,6 +1612,55 @@ def D2D(ary_src, ary_dst, idpy_stream=None, async_src=False, async_dst=False, *,
         )
     raise ValueError("D2D: unresolved mode %r" % resolved)
 
+
+def D2DSub(ary_src, ary_dst, *,
+           src_start, src_stop,
+           dst_start=0,
+           mode="auto",
+           staging=None,
+           stream_src=None,
+           stream_dst=None,
+           async_=False):
+    """
+    Contiguous strip device-to-device copy (Phase B / Loom PASS-WITH-NITS).
+
+    Copies flat dtype elements ``[src_start, src_stop)`` from ``ary_src`` into
+    ``ary_dst`` starting at ``dst_start``. Does **not** overload full-array
+    ``D2D`` with optional offsets.
+
+    Contracts match Phase A ``D2D`` (modes, Loom (A) wait-D2HSub-before-H2DSub,
+    staging rules, peer honesty). Validation uses ``_d2d_validate_pair_sub``
+    (range fit; not full-array equal-size). Device/peer paths use strip-sized
+    byte offsets — never a whole-parent copy. Same-storage overlapping strips
+    refuse ``mode='device'``; ``mode='auto'`` forces host.
+
+    Return
+    ------
+    - ``async_=False`` -> ``None``
+    - ``async_=True`` -> ``{'stream_src', 'stream_dst'}``
+    """
+    meta = _d2d_validate_pair_sub(
+        ary_src, ary_dst, src_start, src_stop, dst_start,
+    )
+    resolved = _d2d_resolve_mode(mode, meta)
+
+    if resolved == "device":
+        return _D2DDevice(
+            ary_src, ary_dst, meta,
+            stream_src=stream_src, stream_dst=stream_dst, async_=async_,
+        )
+    if resolved == "peer":
+        return _D2DPeer(
+            ary_src, ary_dst, meta,
+            stream_src=stream_src, stream_dst=stream_dst, async_=async_,
+        )
+    if resolved == "host":
+        return _D2DHost(
+            ary_src, ary_dst, meta,
+            staging=staging, stream_src=stream_src, stream_dst=stream_dst,
+            async_=async_,
+        )
+    raise ValueError("D2DSub: unresolved mode %r" % resolved)
 
 def Sum(ary, idpy_stream = None):
     if idpy_langs_sys[CUDA_T] and ary.lang == CUDA_T:
