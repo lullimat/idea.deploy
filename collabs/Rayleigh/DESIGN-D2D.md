@@ -30,20 +30,21 @@ stock CUDA smoke needs Ctx push (PR #20).
 - Call-site order: **plant → collide → `exchange_faces` → stream**
 - Populations only; C0 = two sequential sync `D2DSub` with per-leg streams
 
-## Phase D — NumPy D0 merged (PR #21); CUDA D1 in flight
+## Phase D — NumPy D0 merged (PR #21); CUDA D1 in PR #23
 
-Dual-tenet CUDA cold chain (propose ≠ merge until landed):
+Dual-tenet LBM step wire: plant → collide(owned) → `exchange_faces` → stream
+**write-owned / read-halo**.
+
+- Design (D0): [`docs/planning/D2D-phase-d-dual-tenet-step.md`](../../docs/planning/D2D-phase-d-dual-tenet-step.md)
+- Stream writes owned rows only (GPU0 z∈`[0,n0)`; GPU1 z∈`[depth,nz1)`); cut-halos
+  are not stream destinations
+- Native `(nz,nx,Q)` path A; never Gate1 `[:,1:-1,:]` on multitenet
+- NumPy D0 1-step owned-gather bit-identical (PR #21) — CUDA D1 gate cleared
+
+### CUDA D1 (PR #23 — Loom PASS-WITH-NITS; Matteo merge gate)
 
 - Design: [`docs/planning/D2D-phase-d1-cuda-dual-tenet.md`](../../docs/planning/D2D-phase-d1-cuda-dual-tenet.md)
 - Driver: `step_two_way_cuda_cold` — D2H → plant+collide → H2D → exchange → D2H → stream → H2D
 - Host plant/collide/stream; device exchange only; Ctx push (PR #20); no IdpyMemory edits
-
-Dual-tenet LBM step wire (NumPy D0 first): plant → collide(owned) →
-`exchange_faces` → stream **write-owned / read-halo**.
-
-- Design: [`docs/planning/D2D-phase-d-dual-tenet-step.md`](../../docs/planning/D2D-phase-d-dual-tenet-step.md)
-- Stream writes owned rows only (GPU0 z∈`[0,n0)`; GPU1 z∈`[depth,nz1)`); cut-halos
-  are not stream destinations
-- Native `(nz,nx,Q)` path A for D0; never Gate1 `[:,1:-1,:]` on multitenet
-- CUDA D1 / IdpyMemory / Spin blocked until NumPy 1-step owned-gather bit-identical
-- propose ≠ apply; Matteo gates
+- idHome CUDA cold 1-step + N=2 soft owned-gather bit-identical (FYI log on idHome)
+- propose ≠ merge; Matteo gates

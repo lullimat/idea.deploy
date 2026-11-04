@@ -1,8 +1,14 @@
-"""Phase D NumPy D0 — dual-tenet LBM step (plant → collide → exchange → stream).
+"""Phase D dual-tenet LBM step — NumPy D0 + CUDA D1 cold.
 
-Layout: ``(nz_local, nx, Q)`` C-order (path A). Stream is **write-owned /
-read-halo** (Loom must-fix). Cut-halos are not collided and are not stream
-destinations. Never call Gate1 collide_interior unchanged on multitenet buffers.
+Call order: plant → collide(owned) → exchange → stream (write-owned / read-halo).
+
+Layout: ``(nz_local, nx, Q)`` C-order (path A). Cut-halos are not collided and
+are not stream destinations. Never call Gate1 collide_interior unchanged on
+multitenet buffers.
+
+- ``step_two_way_numpy`` — host-only D0
+- ``step_two_way_cuda_cold`` — D1 cold chain every step: D2H → plant+collide →
+  H2D → ``exchange_faces_from_bind`` → D2H → stream → H2D (Loom locked barriers)
 """
 
 from __future__ import annotations
