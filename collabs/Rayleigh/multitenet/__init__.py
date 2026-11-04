@@ -1,4 +1,4 @@
-"""Rayleigh multi-tenet Phase C orchestration (Option A).
+"""Rayleigh multi-tenet Phase C/D orchestration (Option A).
 
 Composes two Phase B ``IdpyMemory.D2DSub`` calls for 2-way z-split cut-face
 exchange. Does **not** edit IdpyMemory contracts; ``face_elem_range`` is a
@@ -25,6 +25,13 @@ from .exchange import (
     monolith_face_halo_reference,
 )
 from .face_elem_range import face_elem_range
+from .step_two_way import (
+    collide_owned_interior,
+    gather_owned,
+    split_bounds_for_two_way,
+    step_two_way_numpy,
+    stream_write_owned,
+)
 
 __all__ = [
     "MIN_DEPTH",
@@ -40,4 +47,9 @@ __all__ = [
     "split_global_to_subdomains",
     "transpose_gate1_to_multitenet",
     "transpose_multitenet_to_gate1",
+    "collide_owned_interior",
+    "gather_owned",
+    "split_bounds_for_two_way",
+    "step_two_way_numpy",
+    "stream_write_owned",
 ]
