@@ -26,3 +26,8 @@ via Grok Build on Gödel; **propose ≠ merge**.
   `bind_two_way_z_split`, `exchange_faces` (two sync `D2DSub`), tests
 - `IdpyMemory` contracts **untouched** (ranges-only); no B2 / MemcpyPeer /
   aggregate stream API / silent macro face ship
+- **Cut-halos are not collided** — only interiors collide; exchange fills
+  neighbor cut-halos for pull
+- Call-site order: **plant → collide → `exchange_faces` → stream**
+- Populations only (no silent macro face ship); C0 = two sequential sync
+  `D2DSub` with per-leg `stream_src`/`stream_dst`

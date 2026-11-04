@@ -1,13 +1,15 @@
 """Phase C acceptance: Rayleigh ``exchange_faces`` (Option A).
 
-Run from idea.deploy root (idpy on PYTHONPATH) or Rayleigh checkout::
+Canonical invocation (from idea.deploy root)::
 
-    cd /Users/matteo/github/idea.deploy
-    py-env/idpy-env/bin/python -m multitenet.test_exchange_faces
+    cd collabs/Rayleigh
+    PYTHONPATH=../..:../../py-env/idpy-env/lib/python3.11/site-packages \
+      ../../py-env/idpy-env/bin/python -m multitenet.test_exchange_faces
 
-Or::
+If ``idpy`` is already importable in the active env, ``PYTHONPATH=../..`` is enough::
 
-    cd collabs/Rayleigh && ../../py-env/idpy-env/bin/python -m multitenet.test_exchange_faces
+    cd collabs/Rayleigh
+    PYTHONPATH=../.. python -m multitenet.test_exchange_faces
 
 CUDA 2-GPU smoke skips cleanly when <2 CUDA devices (Gödel). No Fig.4 NSF.
 """
