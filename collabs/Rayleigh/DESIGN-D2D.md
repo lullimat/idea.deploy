@@ -48,3 +48,17 @@ Dual-tenet LBM step wire: plant → collide(owned) → `exchange_faces` → stre
 - Host plant/collide/stream; device exchange only; Ctx push (PR #20); no IdpyMemory edits
 - idHome CUDA cold 1-step + N=2 soft owned-gather bit-identical (FYI log on idHome)
 - propose ≠ merge; Matteo gates
+
+## Phase E — dual-tenet science gate (in PR; propose ≠ merge)
+
+Tiny buoyant NSF vs monolith on cold dual-tenet path (post-D1 @ `fc97779`).
+
+- Design: [`docs/planning/D2D-phase-e-science-gate.md`](../../docs/planning/D2D-phase-e-science-gate.md)
+  (Loom PASS-WITH-NITS must-fixes folded)
+- Harness: `multitenet/test_science_two_way.py`
+- Hard OVERALL_GATE: N=100 owned-gather bit-identical + NSF INTERIOR probe
+  (`plant_sample_walls` → `hydro_from_lattice` → `slice(3,-3)`) match-monolith
+  ≤1e-12 + buoyant `run_smoke` residual match-monolith
+- Soft N=200 informational (does not fail gate); CUDA `<2` devices → SKIP
+- Frozen E0: nx=32 nz=64 z_cut=32 depth=3 seed=42 nu=0.10 g=1.2e-3
+- Not Half-A / Fig.4 campaign; no warm; no IdpyMemory
