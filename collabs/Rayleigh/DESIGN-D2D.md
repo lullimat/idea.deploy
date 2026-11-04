@@ -30,7 +30,7 @@ stock CUDA smoke needs Ctx push (PR #20).
 - Call-site order: **plant → collide → `exchange_faces` → stream**
 - Populations only; C0 = two sequential sync `D2DSub` with per-leg streams
 
-## Phase D — design (Loom PASS-WITH-NITS folded; await apply)
+## Phase D — NumPy D0 merged (PR #21); CUDA D1 pending
 
 Dual-tenet LBM step wire (NumPy D0 first): plant → collide(owned) →
 `exchange_faces` → stream **write-owned / read-halo**.
