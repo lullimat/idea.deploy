@@ -32,6 +32,7 @@ pyopencl and pycuda
 '''
 
 import numpy as np
+import warnings
 
 from idpy.IdpyCode import OCL_T, CUDA_T, CTYPES_T, METAL_T, idpy_tenet_types
 from idpy.IdpyCode import idpy_langs_list, idpy_langs_sys
@@ -854,13 +855,565 @@ def Const(*args, **kwargs):
     if idpy_langs_sys[METAL_T] and isinstance(tenet, MTTenet):
         return _const_METAL(*args, **kwargs, tenet=tenet)
 
-'''
-Very basic implementation: need to check the respective tenets
-and possibly use more performant functions
-'''
-def D2D(ary_src, ary_dst, idpy_stream=None, async_src=False, async_dst=False):
-    ary_dst.H2D(ary_src.D2H(async_=async_src), async_=async_dst)
-    return idpy_stream
+
+# --- Phase A D2D (inserted into IdpyMemory.py; not a standalone module) ---
+
+_D2D_MODES = ("auto", "host", "peer", "device")
+
+
+def _d2d_require_tenet(ary, which):
+    tenet = getattr(ary, 'tenet', None)
+    if tenet is None:
+        # OpenCL LBM-style: queue is the tenet
+        tenet = getattr(ary, 'queue', None)
+    if tenet is None:
+        raise ValueError("D2D: %s array has no tenet" % which)
+    return tenet
+
+
+def _d2d_lang(ary):
+    lang = getattr(ary, 'lang', None)
+    if lang is None:
+        raise ValueError("D2D: array has no lang")
+    return lang
+
+
+def _d2d_device_id(tenet):
+    getter = getattr(tenet, 'GetDeviceNumber', None)
+    if callable(getter):
+        return getter()
+    # CTypes Tenet has no GetDeviceNumber; single logical host device.
+    return 0
+
+
+def _d2d_element_count(ary):
+    size = getattr(ary, 'size', None)
+    if size is None:
+        raise ValueError("D2D: array has no size")
+    return int(size)
+
+
+def _d2d_is_c_contiguous(ary):
+    flags = getattr(ary, 'flags', None)
+    if flags is None:
+        # Metal / custom wrappers: constructed C-contiguous by IdpyMemory.
+        return True
+    try:
+        return bool(flags['C_CONTIGUOUS'])
+    except Exception:
+        return bool(getattr(flags, 'c_contiguous', True))
+
+
+def _d2d_dtype(ary):
+    return np.dtype(ary.dtype)
+
+
+def _d2d_nbytes(ary):
+    return int(_d2d_element_count(ary)) * int(_d2d_dtype(ary).itemsize)
+
+
+def _d2d_cuda_context(tenet):
+    return getattr(tenet, 'cuda_context', None)
+
+
+def _d2d_same_owning_context(ary_src, ary_dst, lang):
+    # Same (lang, device_id) is necessary but not sufficient for mode=device.
+    # CUDA: shared owning context. OpenCL: compatible queue-buffer context.
+    if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
+        c_src = _d2d_cuda_context(ary_src.tenet)
+        c_dst = _d2d_cuda_context(ary_dst.tenet)
+        if c_src is None or c_dst is None:
+            return False
+        return c_src == c_dst
+
+    if idpy_langs_sys[OCL_T] and lang == OCL_T:
+        q_src = getattr(ary_src, 'queue', None) or ary_src.tenet
+        q_dst = getattr(ary_dst, 'queue', None) or ary_dst.tenet
+        ctx_src = getattr(q_src, 'context', None)
+        ctx_dst = getattr(q_dst, 'context', None)
+        if ctx_src is None or ctx_dst is None:
+            return False
+        if ctx_src != ctx_dst:
+            return False
+        for ary, ctx in ((ary_src, ctx_src), (ary_dst, ctx_dst)):
+            data = getattr(ary, 'data', None)
+            bctx = getattr(data, 'context', None) if data is not None else None
+            if bctx is not None and bctx != ctx:
+                return False
+        return True
+
+    # Metal / CTypes: single-device unified; same device_id already checked.
+    return True
+
+
+class _CudaContextGuard:
+    # Push a CUDA context and always restore the previous stack entry.
+    def __init__(self, tenet):
+        self._ctx = _d2d_cuda_context(tenet)
+        if self._ctx is None:
+            raise ValueError("D2D: CUDA tenet has no cuda_context")
+
+    def __enter__(self):
+        self._ctx.push()
+        return self._ctx
+
+    def __exit__(self, exc_type, exc, tb):
+        cu_driver.Context.pop()
+        return False
+
+
+def _d2d_validate_pair(ary_src, ary_dst):
+    tenet_src = _d2d_require_tenet(ary_src, 'src')
+    tenet_dst = _d2d_require_tenet(ary_dst, 'dst')
+    if getattr(ary_src, 'tenet', None) is None:
+        ary_src.tenet = tenet_src
+    if getattr(ary_dst, 'tenet', None) is None:
+        ary_dst.tenet = tenet_dst
+
+    lang_src = _d2d_lang(ary_src)
+    lang_dst = _d2d_lang(ary_dst)
+    if lang_src != lang_dst:
+        raise ValueError(
+            "D2D: different langs refused (%s vs %s)" % (lang_src, lang_dst)
+        )
+
+    dt_src, dt_dst = _d2d_dtype(ary_src), _d2d_dtype(ary_dst)
+    if dt_src != dt_dst:
+        raise ValueError(
+            "D2D: dtype mismatch (%s vs %s)" % (dt_src, dt_dst)
+        )
+
+    n_src, n_dst = _d2d_element_count(ary_src), _d2d_element_count(ary_dst)
+    if n_src != n_dst:
+        raise ValueError(
+            "D2D: element-count mismatch (%d vs %d)" % (n_src, n_dst)
+        )
+
+    if not _d2d_is_c_contiguous(ary_src) or not _d2d_is_c_contiguous(ary_dst):
+        raise ValueError("D2D: arrays must be C-contiguous device storage")
+
+    dev_src = _d2d_device_id(tenet_src)
+    dev_dst = _d2d_device_id(tenet_dst)
+    same_device = (dev_src == dev_dst)
+    same_ctx = _d2d_same_owning_context(ary_src, ary_dst, lang_src)
+    return {
+        'lang': lang_src,
+        'tenet_src': tenet_src,
+        'tenet_dst': tenet_dst,
+        'device_id_src': dev_src,
+        'device_id_dst': dev_dst,
+        'same_device': same_device,
+        'same_ctx': same_ctx,
+        'n_elem': n_src,
+        'dtype': dt_src,
+        'nbytes': _d2d_nbytes(ary_src),
+    }
+
+
+def _d2d_validate_staging(staging, dtype, n_elem):
+    if staging is None:
+        raise ValueError("D2D: staging is None")
+    host = np.asarray(staging)
+    if host.dtype != dtype:
+        raise ValueError(
+            "D2D: staging dtype mismatch (%s vs %s)" % (host.dtype, dtype)
+        )
+    if not host.flags.writeable:
+        raise ValueError("D2D: staging must be writable")
+    if not host.flags.c_contiguous:
+        raise ValueError("D2D: staging must be C-contiguous")
+    if int(host.size) < int(n_elem):
+        raise ValueError(
+            "D2D: staging capacity %d < transfer element count %d"
+            % (int(host.size), int(n_elem))
+        )
+    return host.ravel(order='C')[:int(n_elem)]
+
+
+def _d2d_host_is_pinned(ary):
+    # Best-effort detect of CUDA page-locked host memory.
+    cur = ary
+    seen = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        name = type(cur).__name__.lower()
+        if 'hostallocation' in name or 'pagelocked' in name:
+            return True
+        cur = getattr(cur, 'base', None)
+    return False
+
+
+def _d2d_cuda_can_access_peer(tenet_src, tenet_dst):
+    # Live canAccessPeer probe. True only means probed-true UVA peer path.
+    d_src = cu_driver.Device(int(tenet_src.GetDeviceNumber()))
+    d_dst = cu_driver.Device(int(tenet_dst.GetDeviceNumber()))
+    return bool(d_src.can_access_peer(d_dst))
+
+
+def _d2d_sync_stream_or_context(ary, stream, tenet):
+    if stream is not None:
+        sync = getattr(stream, 'synchronize', None)
+        if callable(sync):
+            sync()
+            return
+        finish = getattr(stream, 'finish', None)
+        if callable(finish):
+            finish()
+            return
+    if hasattr(ary, 'Sync'):
+        ary.Sync(idpy_stream=None)
+        return
+    if idpy_langs_sys[CUDA_T] and _d2d_lang(ary) == CUDA_T:
+        cu_driver.Context.synchronize()
+
+
+def _D2DDevice(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
+               async_=False):
+    if not meta['same_device']:
+        raise ValueError(
+            "D2D mode='device': (lang, device_id) differ "
+            "(%s,%s) vs (%s,%s)"
+            % (meta['lang'], meta['device_id_src'],
+               meta['lang'], meta['device_id_dst'])
+        )
+    if not meta['same_ctx']:
+        raise ValueError(
+            "D2D mode='device': same device_id but distinct owning contexts; "
+            "use mode='host' or mode='auto'"
+        )
+
+    lang = meta['lang']
+    stream = stream_dst if stream_dst is not None else stream_src
+
+    if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
+        with _CudaContextGuard(meta['tenet_src']):
+            dst_ptr = int(ary_dst.gpudata)
+            src_ptr = int(ary_src.gpudata)
+            nbytes = meta['nbytes']
+            if async_ and stream is not None:
+                cu_driver.memcpy_dtod_async(dst_ptr, src_ptr, nbytes,
+                                            stream=stream)
+            else:
+                cu_driver.memcpy_dtod(dst_ptr, src_ptr, nbytes)
+                async_ = False
+        if async_:
+            return {'stream_src': stream_src, 'stream_dst': stream_dst}
+        if stream is not None:
+            _d2d_sync_stream_or_context(ary_dst, stream, meta['tenet_dst'])
+        else:
+            with _CudaContextGuard(meta['tenet_dst']):
+                cu_driver.Context.synchronize()
+        return None
+
+    if idpy_langs_sys[OCL_T] and lang == OCL_T:
+        import pyopencl as cl
+        queue = stream if stream is not None else (
+            getattr(ary_dst, 'queue', None) or meta['tenet_dst']
+        )
+        # Public API: enqueue_copy(queue, dest, src, ...); no is_blocking
+        # for buffer->buffer (wait via queue.finish / returned event).
+        src_data = (ary_src.base_data if hasattr(ary_src, 'base_data')
+                    else ary_src.data)
+        dst_data = (ary_dst.base_data if hasattr(ary_dst, 'base_data')
+                    else ary_dst.data)
+        cl.enqueue_copy(
+            queue,
+            dst_data,
+            src_data,
+            src_offset=int(getattr(ary_src, 'offset', 0)),
+            dst_offset=int(getattr(ary_dst, 'offset', 0)),
+            byte_count=meta['nbytes'],
+        )
+        if async_ and stream is not None:
+            return {'stream_src': stream_src, 'stream_dst': stream_dst}
+        if hasattr(queue, 'finish'):
+            queue.finish()
+        return None
+
+    # Metal / CTypes (unified / host): bit-identical copy via host snapshot.
+    host = np.array(ary_src.D2H(), copy=True)
+    ary_dst.H2D(host)
+    if async_:
+        return {'stream_src': stream_src, 'stream_dst': stream_dst}
+    return None
+
+
+def _D2DPeer(ary_src, ary_dst, meta, stream_src=None, stream_dst=None,
+             async_=False):
+    # Probed-true CUDA peer only (canAccessPeer==1).
+    # CNS/PHB MemcpyPeer-fallback is OUT of Phase A -- refuse when probe false.
+    lang = meta['lang']
+    if not (idpy_langs_sys[CUDA_T] and lang == CUDA_T):
+        raise ValueError("D2D mode='peer': CUDA only")
+    if meta['same_device'] and meta['same_ctx']:
+        raise ValueError(
+            "D2D mode='peer': arrays share a device context; use mode='device'"
+        )
+    if not _d2d_cuda_can_access_peer(meta['tenet_src'], meta['tenet_dst']):
+        raise RuntimeError(
+            "D2D mode='peer': canAccessPeer==0; refusing. "
+            "MemcpyPeer driver fallback is out of Phase A; use mode='host'."
+        )
+
+    with _CudaContextGuard(meta['tenet_dst']):
+        try:
+            cu_driver.Context.enable_peer_access(
+                meta['tenet_src'].cuda_context
+            )
+        except cu_driver.Error:
+            pass
+
+    stream = stream_dst if stream_dst is not None else stream_src
+    with _CudaContextGuard(meta['tenet_src']):
+        if async_ and stream is not None:
+            cu_driver.memcpy_peer_async(
+                int(ary_dst.gpudata), meta['tenet_dst'].cuda_context,
+                int(ary_src.gpudata), meta['tenet_src'].cuda_context,
+                meta['nbytes'], stream=stream,
+            )
+        else:
+            cu_driver.memcpy_peer(
+                int(ary_dst.gpudata), meta['tenet_dst'].cuda_context,
+                int(ary_src.gpudata), meta['tenet_src'].cuda_context,
+                meta['nbytes'],
+            )
+            async_ = False
+
+    if async_:
+        return {'stream_src': stream_src, 'stream_dst': stream_dst}
+    if stream is not None:
+        _d2d_sync_stream_or_context(ary_dst, stream, meta['tenet_dst'])
+    else:
+        with _CudaContextGuard(meta['tenet_dst']):
+            cu_driver.Context.synchronize()
+        with _CudaContextGuard(meta['tenet_src']):
+            cu_driver.Context.synchronize()
+    return None
+
+
+def _D2DHost(ary_src, ary_dst, meta, staging=None, stream_src=None,
+             stream_dst=None, async_=False):
+    # Host-mediated bounce (pinned preferred; pageable OK for sync).
+    # Loom (A): wait D2H complete before submit H2D.
+    # staging= required when async_=True (Phase A temps policy).
+    # Caller-owned staging should be allocated under src tenet (prefer-src).
+    lang = meta['lang']
+    n_elem = meta['n_elem']
+    dtype = meta['dtype']
+
+    if async_ and staging is None:
+        raise ValueError(
+            "D2D: async_=True requires caller-owned staging= "
+            "(Phase A temps policy -- D2D never owns a temp across return)"
+        )
+
+    owns_temp = False
+    if staging is None:
+        staging_view = np.empty((n_elem,), dtype=dtype)
+        owns_temp = True
+    else:
+        staging_view = _d2d_validate_staging(staging, dtype, n_elem)
+
+    effective_async = bool(async_)
+    if effective_async and idpy_langs_sys[CUDA_T] and lang == CUDA_T:
+        if not _d2d_host_is_pinned(staging_view):
+            effective_async = False
+
+    h2d_submitted = False
+    try:
+        # --- src D2H into staging ---
+        if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
+            with _CudaContextGuard(meta['tenet_src']):
+                if effective_async and stream_src is not None:
+                    ary_src.D2H(ary=staging_view, async_=True,
+                                idpy_stream=stream_src)
+                else:
+                    ary_src.D2H(ary=staging_view)
+            # Loom (A): wait src D2H complete BEFORE submit dst H2D.
+            if effective_async and stream_src is not None:
+                stream_src.synchronize()
+            else:
+                with _CudaContextGuard(meta['tenet_src']):
+                    cu_driver.Context.synchronize()
+        else:
+            if effective_async and stream_src is not None and lang == OCL_T:
+                ary_src.D2H(ary=staging_view, async_=True,
+                            idpy_stream=stream_src)
+                _d2d_sync_stream_or_context(ary_src, stream_src,
+                                            meta['tenet_src'])
+            else:
+                got = ary_src.D2H(ary=staging_view)
+                if got is not None and got is not staging_view:
+                    np.copyto(staging_view, np.asarray(got).ravel()[:n_elem])
+            _d2d_sync_stream_or_context(ary_src, stream_src, meta['tenet_src'])
+
+        # --- dst H2D from staging (only after D2H completion) ---
+        if idpy_langs_sys[CUDA_T] and lang == CUDA_T:
+            with _CudaContextGuard(meta['tenet_dst']):
+                if effective_async and stream_dst is not None:
+                    ary_dst.H2D(staging_view, async_=True,
+                                idpy_stream=stream_dst)
+                    h2d_submitted = True
+                else:
+                    ary_dst.H2D(staging_view)
+                    h2d_submitted = True
+                    effective_async = False
+        else:
+            if effective_async and stream_dst is not None and lang == OCL_T:
+                ary_dst.H2D(staging_view, async_=True, idpy_stream=stream_dst)
+                h2d_submitted = True
+            else:
+                ary_dst.H2D(staging_view)
+                h2d_submitted = True
+                effective_async = False
+
+        if not async_:
+            _d2d_sync_stream_or_context(ary_dst, stream_dst, meta['tenet_dst'])
+            return None
+
+        if not effective_async:
+            _d2d_sync_stream_or_context(ary_dst, stream_dst, meta['tenet_dst'])
+            return {'stream_src': stream_src, 'stream_dst': stream_dst}
+
+        # async_=True: may return with only stream_dst still pending.
+        return {'stream_src': stream_src, 'stream_dst': stream_dst}
+
+    except Exception:
+        try:
+            _d2d_sync_stream_or_context(ary_src, stream_src, meta['tenet_src'])
+        except Exception:
+            pass
+        if h2d_submitted:
+            try:
+                _d2d_sync_stream_or_context(ary_dst, stream_dst,
+                                            meta['tenet_dst'])
+            except Exception:
+                pass
+        raise
+    finally:
+        if owns_temp:
+            del staging_view
+
+
+def _d2d_resolve_mode(mode, meta):
+    if mode not in _D2D_MODES:
+        raise ValueError(
+            "D2D: unknown mode %r (expected %s)" % (mode, _D2D_MODES)
+        )
+
+    if mode == "auto":
+        if meta['same_device'] and meta['same_ctx']:
+            return "device"
+        if meta['same_device'] and not meta['same_ctx']:
+            # section 4.2b: same device_id, distinct contexts -> host
+            return "host"
+        if (idpy_langs_sys[CUDA_T] and meta['lang'] == CUDA_T
+                and _d2d_cuda_can_access_peer(meta['tenet_src'],
+                                             meta['tenet_dst'])):
+            return "peer"
+        return "host"
+    return mode
+
+
+def D2D(ary_src, ary_dst, idpy_stream=None, async_src=False, async_dst=False, *,
+        mode="auto", staging=None, stream_src=None, stream_dst=None,
+        async_=False):
+    """
+    Device-to-device copy with explicit cross-device policy (Phase A).
+
+    Signature::
+
+        D2D(ary_src, ary_dst, *, mode="auto", staging=None,
+            stream_src=None, stream_dst=None, async_=False)
+
+    Modes
+    -----
+    - ``"device"``: same ``(lang, device_id)`` **and** shared owning context
+      (CUDA) / compatible queue-buffer context (OpenCL). Else error.
+    - ``"host"``: **host-mediated** bounce (D2H -> staging -> H2D). Pinned
+      preferred for bandwidth/async; pageable OK for sync correctness.
+      Never called "peer". Portable cross-device path when ``canAccessPeer==0``.
+    - ``"peer"``: CUDA only, and **only** when a live ``canAccessPeer`` probe
+      is true. If the probe is false -> refuse (no silent host fallback; no
+      CNS/PHB MemcpyPeer-fallback). A successful ``cudaMemcpyPeer`` alone does
+      **not** prove UVA peer access.
+    - ``"auto"``: same-device+shared-context -> device; cross CUDA -> peer iff
+      ``canAccessPeer==1`` else host; else host. Never selects MemcpyPeer-
+      fallback when the probe is 0. Same device_id with distinct contexts ->
+      host (design section 4.2b).
+
+    Staging
+    -------
+    Caller-owned ``PinnedHost(..., tenet=src_tenet)`` via ``staging=`` is the
+    overlap / async path. **Prefer allocating staging under the src tenet/**
+    context. Pinned under src remains valid host memory for dst H2D even when
+    ``canAccessPeer==0``. ``async_=True`` **requires** ``staging=`` (Phase A
+    temps policy -- D2D never owns a temp across return). Do not mutate/reuse
+    staging after return while ``stream_dst`` is still live; lifetime runs
+    until destination H2D completion.
+
+    Async host handoff (Loom (A) / design section 4.4b)
+    --------------------------------------------------
+    D2D owns the D2H->H2D happens-before: it **waits for src D2H completion
+    before submitting dst H2D**. Do not treat "SiblingStream twice + Sync both"
+    as a substitute. ``async_=True`` may return with only ``stream_dst`` still
+    pending; caller ``Sync(stream_dst)`` (or context sync on dst) before
+    reading ``ary_dst`` or touching staging.
+
+    Return value
+    ------------
+    - ``async_=False`` -> wait both legs; return ``None``
+    - ``async_=True`` -> ``{'stream_src', 'stream_dst'}`` (``stream_src`` idle
+      w.r.t. this transfer; ``stream_dst`` may still be live). The old
+      ``return idpy_stream`` echo is **dropped**.
+
+    Migration
+    ---------
+    Positional ``idpy_stream`` / ``async_src`` / ``async_dst`` still accepted
+    for one cycle with ``DeprecationWarning``, mapped onto ``stream_*`` /
+    ``async_``. They do not restore the old return echo.
+    """
+    if idpy_stream is not None:
+        warnings.warn(
+            "D2D: positional idpy_stream is deprecated; pass stream_src= / "
+            "stream_dst= instead. The old return idpy_stream echo is dropped.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if stream_src is None:
+            stream_src = idpy_stream
+        if stream_dst is None:
+            stream_dst = idpy_stream
+    if async_src or async_dst:
+        warnings.warn(
+            "D2D: async_src/async_dst are deprecated; pass async_=True "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        async_ = True
+
+    meta = _d2d_validate_pair(ary_src, ary_dst)
+    resolved = _d2d_resolve_mode(mode, meta)
+
+    if resolved == "device":
+        return _D2DDevice(
+            ary_src, ary_dst, meta,
+            stream_src=stream_src, stream_dst=stream_dst, async_=async_,
+        )
+    if resolved == "peer":
+        return _D2DPeer(
+            ary_src, ary_dst, meta,
+            stream_src=stream_src, stream_dst=stream_dst, async_=async_,
+        )
+    if resolved == "host":
+        return _D2DHost(
+            ary_src, ary_dst, meta,
+            staging=staging, stream_src=stream_src, stream_dst=stream_dst,
+            async_=async_,
+        )
+    raise ValueError("D2D: unresolved mode %r" % resolved)
+
 
 def Sum(ary, idpy_stream = None):
     if idpy_langs_sys[CUDA_T] and ary.lang == CUDA_T:
