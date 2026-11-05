@@ -1,5 +1,3 @@
 # collabs/ is local collaboration checkouts. Track nothing except this file.
-# Rayleigh lives only in the private repo (git@id:/raid5/git-data/Rayleigh.git);
-# do not force-include it on the public idea.deploy GitHub tree.
 *
 !.gitignore
